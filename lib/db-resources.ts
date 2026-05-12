@@ -348,6 +348,81 @@ export async function listResource(resource: string) {
   return queryRows<Record<string, unknown>>(config.listSql);
 }
 
+export async function getResourceRow(resource: string, id: string) {
+  if (resource === "sale/listings") {
+    return getSaleListingDetail(id);
+  }
+
+  const config = configs[resource];
+  if (!config) return null;
+  const idColumn = config.idColumn ?? "id";
+  const rows = await queryRows<Record<string, unknown>>(
+    `SELECT * FROM ${config.table} WHERE \`${idColumn}\` = ? LIMIT 1`,
+    [id]
+  );
+  return rows[0] ?? null;
+}
+
+export async function getResourceRelated(resource: string, id: string) {
+  if (resource === "buy/orders" || resource === "orders/payments") {
+    return {
+      order_items: await queryRows<Record<string, unknown>>(
+        `
+          SELECT oi.*, p.sku, p.name_en AS product_name
+          FROM order_items oi
+          JOIN products p ON p.id = oi.product_id
+          WHERE oi.order_id = ?
+        `,
+        [id]
+      )
+    };
+  }
+
+  if (resource === "partners/applications") {
+    return {
+      project_ledgers: await queryRows<Record<string, unknown>>(
+        "SELECT * FROM project_ledgers WHERE partner_application_id = ? ORDER BY entry_date DESC",
+        [id]
+      )
+    };
+  }
+
+  if (resource === "community/posts" || resource === "community/reports") {
+    return {
+      comments: await queryRows<Record<string, unknown>>(
+        "SELECT * FROM community_comments WHERE community_post_id = ? ORDER BY created_at DESC",
+        [id]
+      )
+    };
+  }
+
+  if (resource === "learning/modules") {
+    return {
+      contents: await queryRows<Record<string, unknown>>(
+        "SELECT * FROM learning_contents WHERE learning_module_id = ? ORDER BY sort_order, id",
+        [id]
+      )
+    };
+  }
+
+  if (resource === "sale/listings") {
+    return {
+      pricing_rules: await queryRows<Record<string, unknown>>(
+        `
+          SELECT r.*
+          FROM sale_pricing_rules r
+          JOIN sale_listings l ON l.sale_item_id = r.sale_item_id
+          WHERE l.id = ?
+          ORDER BY r.effective_from DESC
+        `,
+        [id]
+      )
+    };
+  }
+
+  return {};
+}
+
 export async function createResource(resource: string, payload: Record<string, unknown>) {
   const config = configs[resource];
   if (!config) return null;

@@ -491,3 +491,14 @@ export const nestedPages: Record<string, ManagementPageProps> = {
     ]
   }
 };
+
+export const allManagementPages: Record<string, ManagementPageProps> = {
+  ...pages,
+  ...nestedPages,
+  "sale/listings": pages.sale,
+  "buy/orders": pages.orders,
+  "learning/modules": pages.learning,
+  "partners/projects": pages.partners,
+  "partners/applications": pages.kyc,
+  "community/posts": pages.community
+};

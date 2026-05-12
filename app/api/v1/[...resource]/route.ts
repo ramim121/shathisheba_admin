@@ -16,6 +16,8 @@ import {
 import {
   createResource,
   deleteResource,
+  getResourceRelated,
+  getResourceRow,
   hasDbResource,
   listResource,
   updateResource
@@ -92,6 +94,12 @@ export async function GET(request: NextRequest, { params }: Params) {
 
   if (hasDbResource(resource)) {
     try {
+      const id = searchParams.get("id");
+      if (id) {
+        const row = await getResourceRow(resource, id);
+        const related = await getResourceRelated(resource, id);
+        return envelope({ row, related }, { source: "mysql", resource, id });
+      }
       const rows = await listResource(resource);
       return envelope(rows ?? [], { source: "mysql", resource });
     } catch (error) {

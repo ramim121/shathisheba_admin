@@ -51,7 +51,7 @@ npm run build
 Using a process manager like `pm2` is highly recommended to keep the app alive:
 ```bash
 npm install -g pm2
-pm2 start npm --name "shathisheba-admin" -- start
+pm2 start npm --name "shathisheba-admin" -- start --max-memory-restart 500M
 
 ```
 

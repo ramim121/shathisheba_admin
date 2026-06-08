@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Download, Edit3, Eye, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
+import { Edit3, Eye, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
 import { AdminShell } from "@/components/AdminShell";
 import { Status } from "@/components/Status";
 import { getListRoute } from "@/lib/resource-routes";
@@ -40,14 +40,26 @@ export function ManagementPage({
   const [rows, setRows] = useState<ManagementRow[]>(initialRows);
   const [message, setMessage] = useState<string>("");
   const [loading, setLoading] = useState(false);
+  const [query, setQuery] = useState("");
   const resource = useMemo(() => endpoint.replace(/^\/api\/v1\//, ""), [endpoint]);
   const createHref = `/manage/form?resource=${encodeURIComponent(resource)}`;
+
+  const visibleRows = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter((row) =>
+      Object.values(row).some((value) => value !== undefined && String(value).toLowerCase().includes(q))
+    );
+  }, [rows, query]);
 
   async function loadRows() {
     setLoading(true);
     setMessage("");
     try {
-      const response = await fetch(endpoint, { cache: "no-store" });
+      // surface=admin makes the API return admin-column-shaped rows (the app
+      // surface reshapes these same paths to mobile field names).
+      const url = `${endpoint}${endpoint.includes("?") ? "&" : "?"}surface=admin`;
+      const response = await fetch(url, { cache: "no-store" });
       const json = await response.json();
       if (!response.ok || !json.ok) {
         throw new Error(json.message ?? "Could not fetch records.");
@@ -104,8 +116,16 @@ export function ManagementPage({
           <p className="subtitle">{description}</p>
         </div>
         <div className="toolbar">
-          <button className="btn ghost" type="button"><Search size={18} /> Search</button>
-          <button className="btn ghost" type="button"><Download size={18} /> Export</button>
+          <div className="search-box">
+            <Search size={16} />
+            <input
+              aria-label="Search records"
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder={`Search ${entityName.toLowerCase()}…`}
+              type="search"
+              value={query}
+            />
+          </div>
           <button className="btn ghost" onClick={loadRows} type="button"><RefreshCw size={18} /> Refresh</button>
           <Link className="btn primary" href={createHref}><Plus size={18} /> Create {entityName}</Link>
         </div>
@@ -118,7 +138,7 @@ export function ManagementPage({
               <h2>{entityName} Records</h2>
               <p>View, edit, delete, publish, and control what the mobile app receives from <code>{endpoint}</code>.</p>
             </div>
-            <Status label={loading ? "Loading" : `${rows.length} records`} />
+            <Status label={loading ? "Loading" : query ? `${visibleRows.length} of ${rows.length}` : `${rows.length} records`} />
           </div>
           {message ? <div className="notice">{message}</div> : null}
           <div className="table-wrap">
@@ -131,7 +151,7 @@ export function ManagementPage({
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row) => (
+                {visibleRows.map((row) => (
                   <tr key={row.id}>
                     {columns.map((column) => (
                       <td key={column.key}>
@@ -148,6 +168,13 @@ export function ManagementPage({
                     </td>
                   </tr>
                 ))}
+                {!loading && visibleRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={columns.length + 2} style={{ color: "#9ca3af", padding: "20px 12px" }}>
+                      {query ? `No records match “${query}”.` : "No records yet. Use Create to add the first one."}
+                    </td>
+                  </tr>
+                ) : null}
               </tbody>
             </table>
           </div>

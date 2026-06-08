@@ -24,8 +24,20 @@ import {
   updateResource
 } from "@/lib/db-resources";
 import {
+  aiFlagCommunityPost,
+  aiScanCommunityPosts,
   cattleAnalyzeStub,
   createSaleConfirmation,
+  getCommunityModeration,
+  moderateCommunityPost,
+  getAppLearningOverview,
+  getAppLearningCategoryModules,
+  getAppLearningModuleContents,
+  getAppLearningContent,
+  markLearningProgress,
+  submitLearningQuiz,
+  getUserLearningProgress,
+  getLearningProgressOverview,
   getAppBreeds,
   getAppBuyCategories,
   getAppCommunityPosts,
@@ -90,7 +102,14 @@ const appReadHandlers: Record<string, AppReadHandler> = {
   "app/farm": (q) => getUserFarm(q.get("user_id")),
   "app/kyc-documents": (q) => getUserKycDocuments(q.get("user_id")),
   "app/users-with-roles": () => getUsersWithRoles(),
-  "app/admin/notifications": () => getAdminNotifications()
+  "app/admin/notifications": () => getAdminNotifications(),
+  "app/community/moderation": (q) => getCommunityModeration(q.get("filter")),
+  "app/learning/overview": (q) => getAppLearningOverview(q.get("user_id")),
+  "app/learning/modules": (q) => getAppLearningCategoryModules(q.get("category_id"), q.get("user_id")),
+  "app/learning/contents": (q) => getAppLearningModuleContents(q.get("module_id"), q.get("user_id")),
+  "app/learning/content": (q) => getAppLearningContent(q.get("content_id"), q.get("user_id")),
+  "app/learning/user-progress": (q) => getUserLearningProgress(q.get("user_id")),
+  "app/learning/progress-overview": () => getLearningProgressOverview()
 };
 
 type Params = {
@@ -191,7 +210,10 @@ export async function GET(request: NextRequest, { params }: Params) {
 
   // App-shaped list reads take priority over the admin-shaped generic CRUD
   // (collection requests only; detail `?id=` still uses getResourceRow).
-  if (!id && appReadHandlers[resource]) {
+  // The admin panel passes ?surface=admin to opt out and receive the
+  // admin-column-shaped rows from listResource() instead (otherwise its tables
+  // would render blank cells against app field names).
+  if (!id && appReadHandlers[resource] && searchParams.get("surface") !== "admin") {
     try {
       const data = await appReadHandlers[resource](searchParams);
       return envelope(data ?? [], { source: "mysql", surface: "app", resource });
@@ -328,6 +350,21 @@ export async function POST(request: NextRequest, { params }: Params) {
     }
     if (exact === "app/user-roles/set") {
       return NextResponse.json({ ok: true, source: "mysql", action: "roles_updated", result: await setUserRoles(payload) }, { status: 200 });
+    }
+    if (exact === "app/community/moderate") {
+      return NextResponse.json({ ok: true, source: "mysql", action: "post_moderated", result: await moderateCommunityPost(payload) }, { status: 200 });
+    }
+    if (exact === "app/community/ai-flag") {
+      return NextResponse.json({ ok: true, source: "gemini", action: "post_ai_flagged", result: await aiFlagCommunityPost(payload) }, { status: 200 });
+    }
+    if (exact === "app/community/ai-scan") {
+      return NextResponse.json({ ok: true, source: "gemini", action: "posts_ai_scanned", result: await aiScanCommunityPosts(payload) }, { status: 200 });
+    }
+    if (exact === "app/learning/progress") {
+      return NextResponse.json({ ok: true, source: "mysql", action: "learning_progress", result: await markLearningProgress(payload) }, { status: 200 });
+    }
+    if (exact === "app/learning/submit-quiz") {
+      return NextResponse.json({ ok: true, source: "mysql", action: "quiz_graded", result: await submitLearningQuiz(payload) }, { status: 200 });
     }
     if (exact === "app/orders") {
       return NextResponse.json({ ok: true, source: "mysql", action: "order_placed", result: await placeOrder(payload) }, { status: 201 });

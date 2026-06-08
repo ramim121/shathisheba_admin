@@ -253,7 +253,7 @@ const configs: Record<string, ResourceConfig> = {
   },
   "learning/categories": simpleConfig(
     "learning_categories",
-    ["slug", "name_en", "name_bn", "sort_order", "is_active"],
+    ["slug", "name_en", "name_bn", "emoji", "description_en", "description_bn", "interest_slug", "sort_order", "is_active"],
     { slug: `learning-${Date.now()}`, name_en: "New learning category", sort_order: 0, is_active: 1 }
   ),
   "learning/modules": {
@@ -272,14 +272,14 @@ const configs: Record<string, ResourceConfig> = {
       GROUP BY m.id
       ORDER BY m.sort_order, m.id
     `,
-    allowedInsert: ["learning_category_id", "title_en", "title_bn", "subtitle_en", "subtitle_bn", "thumbnail_asset_id", "sort_order", "status"],
-    allowedUpdate: ["learning_category_id", "title_en", "title_bn", "subtitle_en", "subtitle_bn", "thumbnail_asset_id", "sort_order", "status"],
-    defaults: { title_en: "New learning module", status: "draft" }
+    allowedInsert: ["learning_category_id", "title_en", "title_bn", "subtitle_en", "subtitle_bn", "level", "emoji", "thumbnail_asset_id", "sort_order", "status"],
+    allowedUpdate: ["learning_category_id", "title_en", "title_bn", "subtitle_en", "subtitle_bn", "level", "emoji", "thumbnail_asset_id", "sort_order", "status"],
+    defaults: { title_en: "New learning module", level: 1, status: "draft" }
   },
   "learning/contents": simpleConfig(
     "learning_contents",
-    ["learning_module_id", "content_type", "title_en", "title_bn", "body_en", "body_bn", "video_url", "duration_seconds", "quiz_json", "sort_order", "status"],
-    { content_type: "article", title_en: "New learning content", sort_order: 0, status: "draft" }
+    ["learning_module_id", "content_type", "title_en", "title_bn", "body_en", "body_bn", "video_url", "duration_seconds", "points", "image_url", "summary_en", "summary_bn", "quiz_json", "sort_order", "status"],
+    { content_type: "article", title_en: "New learning content", points: 10, sort_order: 0, status: "draft" }
   ),
   "learning/progress": {
     table: "user_learning_progress",

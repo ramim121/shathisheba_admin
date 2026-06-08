@@ -266,6 +266,22 @@ export const apiCatalog = [
   { method: "POST", path: "/api/v1/app/user-roles", desc: "Add a single user role row" },
   { method: "POST", path: "/api/v1/app/user-roles/set", desc: "Replace a user's roles with a multi-select set { user_id, roles[] }" },
 
+  // --- Community moderation + Gemini AI flagging ---
+  { method: "GET", path: "/api/v1/app/community/moderation?filter=all", desc: "Admin post list (all|flagged|official|hidden) with Gemini ai_flag/ai_reason" },
+  { method: "POST", path: "/api/v1/app/community/moderate", desc: "Manual moderation { id, status?, is_official? }: hide/show/remove or toggle official" },
+  { method: "POST", path: "/api/v1/app/community/ai-flag", desc: "Run Gemini moderation on one post { id }: stores verdict, auto-holds on remove" },
+  { method: "POST", path: "/api/v1/app/community/ai-scan", desc: "Batch Gemini moderation { limit?, rescan? }: scans unscanned posts, returns counts" },
+
+  // --- Learning / Training module (levels, points, quiz, progress) ---
+  { method: "GET", path: "/api/v1/app/learning/overview?user_id=1", desc: "Training home: points, level, next content, preference-first categories with completion" },
+  { method: "GET", path: "/api/v1/app/learning/modules?category_id=1&user_id=1", desc: "Subcategories (modules) with level + per-user completion" },
+  { method: "GET", path: "/api/v1/app/learning/contents?module_id=1&user_id=1", desc: "Article/video cards in a subcategory with progress" },
+  { method: "GET", path: "/api/v1/app/learning/content?content_id=1&user_id=1", desc: "Full content (markdown body / youtube id / quiz without answers) + progress" },
+  { method: "POST", path: "/api/v1/app/learning/progress", desc: "Video watch tracking { user_id, content_id, progress_pct }: completes + awards points at >=90%" },
+  { method: "POST", path: "/api/v1/app/learning/submit-quiz", desc: "Grade quiz { user_id, content_id, answers[] }: >=80% completes article + awards points" },
+  { method: "GET", path: "/api/v1/app/learning/user-progress?user_id=1", desc: "One user's read/complete/quiz history (admin + app)" },
+  { method: "GET", path: "/api/v1/app/learning/progress-overview", desc: "All users' learning points, completion and average quiz score (admin)" },
+
   // --- Market updates (blog detail + image + location-first) ---
   { method: "GET", path: "/api/v1/app/market-updates?district=Mymensingh", desc: "Market updates list, location-first, with image + has_detail flag" },
   { method: "GET", path: "/api/v1/app/market-updates?id=1", desc: "Single market update blog detail (image + long-form content)" },

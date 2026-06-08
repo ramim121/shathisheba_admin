@@ -1,22 +1,25 @@
+"use client";
+
+import { useState } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { NotificationBell } from "@/components/NotificationBell";
 import {
   BellRing,
   BookOpen,
   Boxes,
+  ChevronDown,
   CloudSun,
   CreditCard,
-  FileText,
   GraduationCap,
   HandCoins,
   Headset,
   HelpCircle,
-  KeyRound,
   LayoutDashboard,
   ListChecks,
   MessageSquareText,
   PackageCheck,
-  PanelLeft,
+  Pencil,
   ReceiptText,
   ScrollText,
   Settings2,
@@ -25,80 +28,150 @@ import {
   Sparkles,
   Store,
   Tags,
+  Trophy,
   UsersRound
 } from "lucide-react";
 
-const sections = [
+type NavLink = { label: string; href: string; icon: typeof LayoutDashboard };
+type NavSection = { title: string; icon: typeof LayoutDashboard; items: NavLink[] };
+
+// Flat quick-access items pinned at the top of the sidebar.
+const pinned: NavLink[] = [
+  { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+  { label: "Notifications", href: "/notifications", icon: BellRing },
+  { label: "API Viewer", href: "/api-viewer", icon: ScrollText }
+];
+
+// Grouped, collapsible (cascading) navigation. Trimmed of the redundant
+// "Product Catalogue" (duplicate of Products) and the static "Reports" stub.
+const sections: NavSection[] = [
   {
-    title: "Command",
+    title: "Content & CMS",
+    icon: GraduationCap,
     items: [
-      { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-      { label: "Notifications", href: "/notifications", icon: BellRing },
-      { label: "Reports", href: "/reports", icon: FileText },
-      { label: "API Viewer", href: "/api-viewer", icon: ScrollText }
-    ]
-  },
-  {
-    title: "Setups",
-    items: [
-      { label: "App Interests", href: "/interests", icon: Boxes },
-      { label: "Weather Alerts", href: "/weather", icon: CloudSun },
       { label: "Market Updates", href: "/market-updates", icon: BellRing },
+      { label: "Weather Alerts", href: "/weather", icon: CloudSun },
       { label: "Learning CMS", href: "/learning", icon: GraduationCap },
+      { label: "Learning Studio", href: "/learning/studio", icon: Pencil },
+      { label: "Learning Progress", href: "/learning/progress", icon: Trophy },
       { label: "Ask Shathi Apa", href: "/assistant", icon: Sparkles },
       { label: "FAQ & Help", href: "/faq", icon: HelpCircle },
-      { label: "Users", href: "/users", icon: UsersRound },
-      { label: "User Roles", href: "/users/roles", icon: ShieldCheck },
-      { label: "User Banking", href: "/users/banking", icon: CreditCard },
-      { label: "User Farm Info", href: "/users/farm", icon: Boxes },
-      { label: "User KYC Docs", href: "/users/kyc", icon: ScrollText },
-      { label: "Settings", href: "/settings", icon: Settings2 }
+      { label: "App Interests", href: "/interests", icon: Boxes }
     ]
   },
   {
-    title: "Sale Listings",
+    title: "Marketplace",
+    icon: Store,
     items: [
       { label: "All Listings", href: "/sale", icon: Store },
       { label: "Sale Categories", href: "/sale/categories", icon: Tags },
       { label: "Sale Items", href: "/sale/items", icon: ListChecks },
-      { label: "Animal Breeds", href: "/sale/breeds", icon: PanelLeft },
+      { label: "Animal Breeds", href: "/sale/breeds", icon: Boxes },
       { label: "Pricing Rules", href: "/sale/pricing", icon: ReceiptText },
-      { label: "Payment Confirmations", href: "/sale/confirmations", icon: KeyRound }
+      { label: "Payment Confirmations", href: "/sale/confirmations", icon: ShieldCheck }
     ]
   },
   {
-    title: "Buy Listings",
+    title: "Buy & Orders",
+    icon: ShoppingCart,
     items: [
-      { label: "Product Catalogue", href: "/buy", icon: ShoppingCart },
+      { label: "Products", href: "/buy/products", icon: PackageCheck },
       { label: "Buy Categories", href: "/buy/categories", icon: Tags },
-      { label: "Products", href: "/buy/products", icon: PackageCheck }
-    ]
-  },
-  {
-    title: "Orders",
-    items: [
-      { label: "Placed Orders", href: "/orders", icon: PackageCheck },
+      { label: "Placed Orders", href: "/orders", icon: ShoppingCart },
       { label: "Payments", href: "/orders/payments", icon: CreditCard }
     ]
   },
   {
-    title: "Partner Registration",
+    title: "Partners & KYC",
+    icon: HandCoins,
     items: [
       { label: "Projects", href: "/partners", icon: HandCoins },
-      { label: "KYC Approvals", href: "/kyc", icon: ShieldCheck },
-      { label: "Community", href: "/community", icon: MessageSquareText },
-      { label: "Zone Officers", href: "/community/officers", icon: Headset },
-      { label: "Community Reports", href: "/community/reports", icon: BookOpen }
+      { label: "KYC Approvals", href: "/kyc", icon: ShieldCheck }
     ]
+  },
+  {
+    title: "Community",
+    icon: MessageSquareText,
+    items: [
+      { label: "Posts & Moderation", href: "/community", icon: MessageSquareText },
+      { label: "Zone Officers", href: "/community/officers", icon: Headset },
+      { label: "Reported Posts", href: "/community/reports", icon: BookOpen }
+    ]
+  },
+  {
+    title: "Users",
+    icon: UsersRound,
+    items: [
+      { label: "All Users", href: "/users", icon: UsersRound },
+      { label: "User Roles", href: "/users/roles", icon: ShieldCheck },
+      { label: "Banking", href: "/users/banking", icon: CreditCard },
+      { label: "Farm Info", href: "/users/farm", icon: Boxes },
+      { label: "KYC Documents", href: "/users/kyc", icon: ScrollText }
+    ]
+  },
+  {
+    title: "System",
+    icon: Settings2,
+    items: [{ label: "Settings", href: "/settings", icon: Settings2 }]
   }
 ];
 
-const mobileItems = [
-  { label: "Home", href: "/dashboard", icon: LayoutDashboard },
-  { label: "Sale", href: "/sale", icon: Store },
-  { label: "KYC", href: "/kyc", icon: ShieldCheck },
-  { label: "API", href: "/api-viewer", icon: ScrollText }
-];
+function isActive(pathname: string, href: string) {
+  return pathname === href;
+}
+
+function sectionHasActive(pathname: string, section: NavSection) {
+  return section.items.some((item) => isActive(pathname, item.href));
+}
+
+function SidebarNav() {
+  const pathname = usePathname() ?? "";
+  // Open the group that contains the active route; collapse the rest. The user
+  // can toggle any group, with the open set tracked in state.
+  const [open, setOpen] = useState<Record<string, boolean>>(() => {
+    const initial: Record<string, boolean> = {};
+    for (const section of sections) initial[section.title] = sectionHasActive(pathname, section);
+    return initial;
+  });
+
+  function toggle(title: string) {
+    setOpen((prev) => ({ ...prev, [title]: !prev[title] }));
+  }
+
+  return (
+    <>
+      <nav className="nav-pinned">
+        {pinned.map((item) => (
+          <Link className={`nav-item${isActive(pathname, item.href) ? " active" : ""}`} href={item.href} key={item.href}>
+            <item.icon />
+            {item.label}
+          </Link>
+        ))}
+      </nav>
+
+      {sections.map((section) => {
+        const expanded = open[section.title] || sectionHasActive(pathname, section);
+        return (
+          <div className={`nav-accordion${expanded ? " open" : ""}`} key={section.title}>
+            <button className="nav-accordion-head" onClick={() => toggle(section.title)} type="button">
+              <section.icon className="nav-accordion-icon" />
+              <span>{section.title}</span>
+              <ChevronDown className="nav-chevron" />
+            </button>
+            <div className="nav-accordion-body">
+              {section.items.map((item) => (
+                <Link className={`nav-item${isActive(pathname, item.href) ? " active" : ""}`} href={item.href} key={item.href}>
+                  <item.icon />
+                  {item.label}
+                </Link>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </>
+  );
+}
 
 export function AdminShell({ children }: { children: React.ReactNode }) {
   return (
@@ -119,28 +192,16 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
 
         <NotificationBell />
 
-        {sections.map((section) => (
-          <nav className="nav-group" key={section.title}>
-            <p className="nav-group-title">{section.title}</p>
-            {section.items.map((item) => (
-              <Link className="nav-item" href={item.href} key={item.href}>
-                <item.icon />
-                {item.label}
-              </Link>
-            ))}
-          </nav>
-        ))}
+        <SidebarNav />
       </aside>
 
       <main className="main">{children}</main>
 
       <nav className="mobile-nav">
-        {mobileItems.map((item) => (
-          <Link href={item.href} key={item.href}>
-            <item.icon size={18} />
-            {item.label}
-          </Link>
-        ))}
+        <Link href="/dashboard"><LayoutDashboard size={18} />Home</Link>
+        <Link href="/sale"><Store size={18} />Sale</Link>
+        <Link href="/community"><MessageSquareText size={18} />Community</Link>
+        <Link href="/api-viewer"><ScrollText size={18} />API</Link>
       </nav>
     </div>
   );

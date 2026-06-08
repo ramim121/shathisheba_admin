@@ -216,17 +216,62 @@ export const communityPosts = [
 ];
 
 export const apiCatalog = [
+  { method: "GET", path: "/api/v1/app/home?user_id=1&district=Mymensingh", desc: "Home feed: greeting, weather, quick stats, service tiles, market updates, Ask Shathi Apa card" },
+  { method: "GET", path: "/api/v1/app/onboarding", desc: "Onboarding interest tree: roots with children grouped by step_group" },
+  { method: "POST", path: "/api/v1/user/interests", desc: "Save a user's selected onboarding interest" },
   { method: "GET", path: "/api/v1/interests", desc: "Splash onboarding categories and nested items" },
   { method: "GET", path: "/api/v1/weather?district=Mymensingh", desc: "Weather server summary plus local critical alerts" },
   { method: "GET", path: "/api/v1/sale/categories", desc: "Sellable categories, active flags, animal types, breeds" },
+  { method: "GET", path: "/api/v1/sale/breeds", desc: "Animal breeds for the cattle listing form dropdown" },
+  { method: "GET", path: "/api/v1/sale/pricing", desc: "Per-kg B2B/farmer rate and fee breakdown for the price screen" },
   { method: "GET", path: "/api/v1/sale/listings", desc: "Active sale listings and verification statuses" },
   { method: "POST", path: "/api/v1/sale/listings", desc: "Create listing from mobile app photo/form payload" },
-  { method: "GET", path: "/api/v1/buy/products", desc: "Buy from Shathi categories, products, stock, prices" },
-  { method: "POST", path: "/api/v1/buy/orders", desc: "Place product order with payment and delivery data" },
+  { method: "POST", path: "/api/v1/app/ai/cattle-analyze", desc: "AI estimate (breed/type/condition/weight) to prefill the cattle form" },
+  { method: "POST", path: "/api/v1/app/sale/confirm", desc: "Record actual weight + final amount and issue a 10-min OTP" },
+  { method: "POST", path: "/api/v1/app/sale/verify-otp", desc: "Verify the OTP and confirm field payment (marks listing sold)" },
+  { method: "GET", path: "/api/v1/buy/categories", desc: "Buy from Shathi category cards" },
+  { method: "GET", path: "/api/v1/buy/products?category=seeds", desc: "Buy from Shathi products, stock, prices" },
+  { method: "POST", path: "/api/v1/app/orders", desc: "Place an order (orders + order_items) from the Place Order screen" },
   { method: "GET", path: "/api/v1/learning/modules", desc: "Learning categories, lessons, article/video metadata" },
+  { method: "POST", path: "/api/v1/learning/progress", desc: "Track content completion / quiz score for impact data" },
   { method: "GET", path: "/api/v1/partners/projects", desc: "Partner projects, registration steps, capacity" },
+  { method: "POST", path: "/api/v1/partners/applications", desc: "Submit a Shathi Partner KYC application" },
   { method: "PATCH", path: "/api/v1/partners/applications", desc: "KYC approval, due diligence, officer verification" },
-  { method: "GET", path: "/api/v1/community/posts", desc: "Community feed with scope, tags, moderation status" }
+  { method: "GET", path: "/api/v1/community/posts?scope=upazila", desc: "Community feed with scope, tags, moderation status" },
+  { method: "POST", path: "/api/v1/community/posts", desc: "Create a community post" },
+  { method: "POST", path: "/api/v1/community/posts/1/like", desc: "Like a community post (atomic like_count increment)" },
+  { method: "POST", path: "/api/v1/community/comments", desc: "Add a comment to a community post" },
+  { method: "GET", path: "/api/v1/community/officers?district=Mymensingh", desc: "Zone Field Officer + HO Query Officer cards" },
+  { method: "GET", path: "/api/v1/faq", desc: "Help & FAQ entries (Bangla/English)" },
+  { method: "GET", path: "/api/v1/assistant/prompts", desc: "Ask Shathi Apa card config and quick-prompt chips" },
+
+  // --- Authentication (phone + OTP via BulkSMSBD) ---
+  { method: "POST", path: "/api/v1/app/auth/request-otp", desc: "Send a one-time login code to a phone (dev mode returns the code)" },
+  { method: "POST", path: "/api/v1/app/auth/verify-otp", desc: "Verify OTP, auto-register on first login (default Buyer role), return session token + user" },
+  { method: "GET", path: "/api/v1/app/me?user_id=1", desc: "Current app user with roles + onboarding gates (needs_personal_info / needs_preferences)" },
+  { method: "POST", path: "/api/v1/app/profile", desc: "Save Personal Information (name, gender, dob, profile image); marks personal_info_completed" },
+  { method: "POST", path: "/api/v1/app/preferences", desc: "Save onboarding category preferences (user_interests + profile_json snapshot)" },
+
+  // --- Menu modules (app + admin) ---
+  { method: "GET", path: "/api/v1/app/banking?user_id=1", desc: "Get a user's banking / mobile-money details" },
+  { method: "POST", path: "/api/v1/app/banking", desc: "Upsert a user's banking details (Menu > Banking)" },
+  { method: "GET", path: "/api/v1/app/farm?user_id=1", desc: "Get a user's farm/production info" },
+  { method: "POST", path: "/api/v1/app/farm", desc: "Upsert a user's farm info (Menu > Farm Info)" },
+  { method: "GET", path: "/api/v1/app/kyc-documents?user_id=1", desc: "List a user's uploaded KYC documents + status" },
+  { method: "POST", path: "/api/v1/app/kyc-documents", desc: "Add a KYC document (image URL from /api/upload)" },
+
+  // --- Roles ---
+  { method: "GET", path: "/api/v1/app/users-with-roles", desc: "All registered app users with their role arrays (admin role editor)" },
+  { method: "GET", path: "/api/v1/app/user-roles", desc: "Flat user-role rows (admin CRUD)" },
+  { method: "POST", path: "/api/v1/app/user-roles", desc: "Add a single user role row" },
+  { method: "POST", path: "/api/v1/app/user-roles/set", desc: "Replace a user's roles with a multi-select set { user_id, roles[] }" },
+
+  // --- Market updates (blog detail + image + location-first) ---
+  { method: "GET", path: "/api/v1/app/market-updates?district=Mymensingh", desc: "Market updates list, location-first, with image + has_detail flag" },
+  { method: "GET", path: "/api/v1/app/market-updates?id=1", desc: "Single market update blog detail (image + long-form content)" },
+
+  // --- Media ---
+  { method: "POST", path: "/api/upload", desc: "Multipart image upload (profile, KYC, community, market) -> returns served URL" }
 ];
 
 export const reportData = [

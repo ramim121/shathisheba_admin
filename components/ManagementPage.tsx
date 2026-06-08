@@ -52,7 +52,20 @@ export function ManagementPage({
       if (!response.ok || !json.ok) {
         throw new Error(json.message ?? "Could not fetch records.");
       }
-      setRows(json.data ?? []);
+      if (Array.isArray(json.data)) {
+        setRows(json.data);
+      } else if (json.data && typeof json.data === "object") {
+        setRows(Object.entries(json.data).map(([key, value]) => ({
+          id: key,
+          name: key.replace(/_/g, " "),
+          scope: "API summary",
+          frequency: "Live",
+          owner: typeof value === "object" && value !== null ? JSON.stringify(value) : String(value),
+          status: "Active"
+        })));
+      } else {
+        setRows([]);
+      }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not fetch records.");
     } finally {

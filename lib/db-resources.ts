@@ -10,7 +10,27 @@ type ResourceConfig = {
   defaults?: Record<string, unknown>;
 };
 
+function simpleConfig(table: string, allowedFields: string[], defaults: Record<string, unknown> = {}): ResourceConfig {
+  return {
+    table,
+    listSql: `SELECT CAST(id AS CHAR) AS id, ${allowedFields.map((field) => `\`${field}\``).join(", ")} FROM ${table} ORDER BY id DESC`,
+    allowedInsert: allowedFields,
+    allowedUpdate: allowedFields,
+    defaults
+  };
+}
+
 const configs: Record<string, ResourceConfig> = {
+  "admin/users": simpleConfig(
+    "admin_users",
+    ["name", "email", "phone", "password_hash", "role", "district", "upazila", "is_active", "last_login_at"],
+    { name: "New admin", email: `admin-${Date.now()}@shathisheba.local`, password_hash: "change-me", role: "hq_admin", is_active: 1 }
+  ),
+  "media/assets": simpleConfig(
+    "media_assets",
+    ["owner_type", "owner_id", "asset_type", "title", "alt_text", "url", "mime_type", "size_bytes", "metadata", "uploaded_by"],
+    { owner_type: "system", asset_type: "image", url: "https://example.com/asset.jpg" }
+  ),
   interests: {
     table: "interest_categories",
     listSql: `
@@ -30,6 +50,25 @@ const configs: Record<string, ResourceConfig> = {
     allowedInsert: ["parent_id", "slug", "name_en", "name_bn", "description_en", "description_bn", "emoji", "sort_order", "step_group", "is_selectable", "is_active"],
     allowedUpdate: ["parent_id", "slug", "name_en", "name_bn", "description_en", "description_bn", "emoji", "sort_order", "step_group", "is_selectable", "is_active"],
     defaults: { slug: "new-interest", name_en: "New interest", is_active: 1 }
+  },
+  "user/interests": {
+    table: "user_interests",
+    idColumn: "user_id",
+    listSql: `
+      SELECT
+        CONCAT(ui.user_id, ':', ui.interest_category_id) AS id,
+        CAST(ui.user_id AS CHAR) AS user_id,
+        u.full_name AS user_name,
+        CAST(ui.interest_category_id AS CHAR) AS interest_category_id,
+        c.name_en AS interest_name,
+        ui.created_at
+      FROM user_interests ui
+      JOIN app_users u ON u.id = ui.user_id
+      JOIN interest_categories c ON c.id = ui.interest_category_id
+      ORDER BY ui.created_at DESC
+    `,
+    allowedInsert: ["user_id", "interest_category_id"],
+    allowedUpdate: ["interest_category_id"]
   },
   weather: {
     table: "weather_alerts",
@@ -60,8 +99,8 @@ const configs: Record<string, ResourceConfig> = {
       FROM market_updates
       ORDER BY sort_order, created_at DESC
     `,
-    allowedInsert: ["title_en", "title_bn", "body_en", "body_bn", "update_type", "district", "upazila", "status", "starts_at", "ends_at", "sort_order"],
-    allowedUpdate: ["title_en", "title_bn", "body_en", "body_bn", "update_type", "district", "upazila", "status", "starts_at", "ends_at", "sort_order"],
+    allowedInsert: ["title_en", "title_bn", "body_en", "body_bn", "image_url", "detail_en", "detail_bn", "category", "update_type", "district", "upazila", "status", "starts_at", "ends_at", "sort_order"],
+    allowedUpdate: ["title_en", "title_bn", "body_en", "body_bn", "image_url", "detail_en", "detail_bn", "category", "update_type", "district", "upazila", "status", "starts_at", "ends_at", "sort_order"],
     defaults: { title_en: "New market update", update_type: "notice", status: "draft" }
   },
   "sale/categories": {
@@ -189,6 +228,11 @@ const configs: Record<string, ResourceConfig> = {
     allowedUpdate: ["total_amount", "delivery_fee", "payable_amount", "payment_method", "payment_status", "fulfillment_status", "delivery_address", "district", "upazila", "notes"],
     defaults: { order_code: `ORD-${Date.now()}`, total_amount: 0, delivery_fee: 0, payable_amount: 0, payment_method: "cash", payment_status: "pending", fulfillment_status: "placed", delivery_address: "Address" }
   },
+  "orders/items": simpleConfig(
+    "order_items",
+    ["order_id", "product_id", "quantity", "unit_price", "line_total"],
+    { quantity: 1, unit_price: 0, line_total: 0 }
+  ),
   "orders/payments": {
     table: "orders",
     listSql: `
@@ -207,6 +251,11 @@ const configs: Record<string, ResourceConfig> = {
     allowedUpdate: ["payment_method", "payment_status", "notes"],
     defaults: { order_code: `PAY-${Date.now()}`, total_amount: 0, delivery_fee: 0, payable_amount: 0, payment_method: "cash", payment_status: "pending", fulfillment_status: "placed", delivery_address: "Address" }
   },
+  "learning/categories": simpleConfig(
+    "learning_categories",
+    ["slug", "name_en", "name_bn", "sort_order", "is_active"],
+    { slug: `learning-${Date.now()}`, name_en: "New learning category", sort_order: 0, is_active: 1 }
+  ),
   "learning/modules": {
     table: "learning_modules",
     listSql: `
@@ -226,6 +275,32 @@ const configs: Record<string, ResourceConfig> = {
     allowedInsert: ["learning_category_id", "title_en", "title_bn", "subtitle_en", "subtitle_bn", "thumbnail_asset_id", "sort_order", "status"],
     allowedUpdate: ["learning_category_id", "title_en", "title_bn", "subtitle_en", "subtitle_bn", "thumbnail_asset_id", "sort_order", "status"],
     defaults: { title_en: "New learning module", status: "draft" }
+  },
+  "learning/contents": simpleConfig(
+    "learning_contents",
+    ["learning_module_id", "content_type", "title_en", "title_bn", "body_en", "body_bn", "video_url", "duration_seconds", "quiz_json", "sort_order", "status"],
+    { content_type: "article", title_en: "New learning content", sort_order: 0, status: "draft" }
+  ),
+  "learning/progress": {
+    table: "user_learning_progress",
+    idColumn: "user_id",
+    listSql: `
+      SELECT
+        CONCAT(ulp.user_id, ':', ulp.learning_content_id) AS id,
+        CAST(ulp.user_id AS CHAR) AS user_id,
+        u.full_name AS user_name,
+        CAST(ulp.learning_content_id AS CHAR) AS learning_content_id,
+        lc.title_en AS content_title,
+        ulp.status,
+        ulp.completed_at,
+        ulp.score
+      FROM user_learning_progress ulp
+      JOIN app_users u ON u.id = ulp.user_id
+      JOIN learning_contents lc ON lc.id = ulp.learning_content_id
+      ORDER BY ulp.completed_at DESC, ulp.user_id DESC
+    `,
+    allowedInsert: ["user_id", "learning_content_id", "status", "completed_at", "score"],
+    allowedUpdate: ["status", "completed_at", "score"]
   },
   "partners/projects": {
     table: "partner_projects",
@@ -265,6 +340,11 @@ const configs: Record<string, ResourceConfig> = {
     allowedUpdate: ["current_step", "full_name_per_nid", "nid_number", "total_land_decimals", "livestock_count", "primary_income_source", "annual_household_income", "mobile_banking_provider", "banking_json", "farm_assessment_json", "verification_notes", "status", "assigned_officer_id", "approved_by", "approved_at"],
     defaults: { application_code: `KYC-${Date.now()}`, current_step: "project_selection", status: "draft" }
   },
+  "partners/ledgers": simpleConfig(
+    "project_ledgers",
+    ["partner_application_id", "entry_type", "title_en", "title_bn", "amount", "entry_date", "metadata"],
+    { entry_type: "adjustment", title_en: "New ledger entry", amount: 0, entry_date: new Date() }
+  ),
   "community/posts": {
     table: "community_posts",
     listSql: `
@@ -279,10 +359,15 @@ const configs: Record<string, ResourceConfig> = {
       JOIN app_users u ON u.id = p.user_id
       ORDER BY p.created_at DESC
     `,
-    allowedInsert: ["user_id", "scope", "post_type", "body", "district", "upazila", "status"],
-    allowedUpdate: ["scope", "post_type", "body", "district", "upazila", "status", "like_count", "comment_count", "report_count", "moderated_by", "moderated_at"],
+    allowedInsert: ["user_id", "scope", "post_type", "body", "image_url", "is_official", "district", "upazila", "status"],
+    allowedUpdate: ["scope", "post_type", "body", "image_url", "is_official", "district", "upazila", "status", "like_count", "comment_count", "report_count", "moderated_by", "moderated_at"],
     defaults: { scope: "upazila", post_type: "general", body: "New community post", status: "visible" }
   },
+  "community/comments": simpleConfig(
+    "community_comments",
+    ["community_post_id", "user_id", "body", "status"],
+    { body: "New comment", status: "visible" }
+  ),
   "community/reports": {
     table: "community_posts",
     listSql: `
@@ -302,22 +387,154 @@ const configs: Record<string, ResourceConfig> = {
     allowedUpdate: ["status", "moderated_by", "moderated_at", "report_count"],
     defaults: { scope: "upazila", post_type: "general", body: "Reported community post", status: "moderation" }
   },
+  "notifications/campaigns": simpleConfig(
+    "notification_campaigns",
+    ["title_en", "title_bn", "body_en", "body_bn", "target_json", "campaign_type", "status", "scheduled_at", "sent_at", "created_by"],
+    { title_en: "New notification", body_en: "Notification body", target_json: "{}", campaign_type: "custom", status: "draft" }
+  ),
+  "audit/logs": simpleConfig(
+    "audit_logs",
+    ["actor_admin_id", "action", "entity_type", "entity_id", "before_json", "after_json", "ip_address", "user_agent"],
+    { action: "manual", entity_type: "system" }
+  ),
   users: {
     table: "app_users",
     listSql: `
       SELECT
-        CAST(id AS CHAR) AS id,
-        full_name AS name,
-        phone,
-        CONCAT(COALESCE(district, ''), ' / ', COALESCE(upazila, '')) AS location,
-        'App user' AS activity,
-        status
-      FROM app_users
-      ORDER BY created_at DESC
+        CAST(u.id AS CHAR) AS id,
+        u.full_name AS name,
+        u.phone,
+        CONCAT(COALESCE(u.district, ''), ' / ', COALESCE(u.upazila, '')) AS location,
+        COALESCE(GROUP_CONCAT(r.role ORDER BY r.role SEPARATOR ', '), 'shathisheba_buyer') AS roles,
+        u.status
+      FROM app_users u
+      LEFT JOIN app_user_roles r ON r.user_id = u.id
+      GROUP BY u.id
+      ORDER BY u.created_at DESC
     `,
     allowedInsert: ["full_name", "display_name", "phone", "email", "gender", "date_of_birth", "district", "upazila", "union_name", "village", "latitude", "longitude", "status", "profile_json"],
     allowedUpdate: ["full_name", "display_name", "phone", "email", "gender", "date_of_birth", "district", "upazila", "union_name", "village", "latitude", "longitude", "status", "profile_json"],
     defaults: { full_name: "New user", phone: `01${Date.now().toString().slice(-9)}`, status: "active" }
+  },
+  "app/user-roles": {
+    table: "app_user_roles",
+    listSql: `
+      SELECT
+        CAST(r.id AS CHAR) AS id,
+        CAST(r.user_id AS CHAR) AS user_id,
+        u.full_name AS user,
+        u.phone,
+        r.role,
+        r.created_at
+      FROM app_user_roles r
+      JOIN app_users u ON u.id = r.user_id
+      ORDER BY r.created_at DESC, r.id DESC
+    `,
+    allowedInsert: ["user_id", "role", "assigned_by"],
+    allowedUpdate: ["role"],
+    defaults: { role: "shathisheba_buyer" }
+  },
+  "app/user-banking": {
+    table: "app_user_banking",
+    listSql: `
+      SELECT CAST(b.id AS CHAR) AS id, CAST(b.user_id AS CHAR) AS user_id,
+             u.full_name AS user, b.bank_name, b.account_number,
+             b.mobile_provider, b.mobile_account
+      FROM app_user_banking b JOIN app_users u ON u.id = b.user_id
+      ORDER BY b.updated_at DESC, b.id DESC
+    `,
+    allowedInsert: ["user_id", "bank_name", "branch_name", "account_name", "account_number", "mobile_provider", "mobile_account", "notes"],
+    allowedUpdate: ["bank_name", "branch_name", "account_name", "account_number", "mobile_provider", "mobile_account", "notes"]
+  },
+  "app/user-farm": {
+    table: "app_user_farm",
+    listSql: `
+      SELECT CAST(f.id AS CHAR) AS id, CAST(f.user_id AS CHAR) AS user_id,
+             u.full_name AS user, f.total_land_decimals, f.primary_focus,
+             f.livestock_count, f.pond_count
+      FROM app_user_farm f JOIN app_users u ON u.id = f.user_id
+      ORDER BY f.updated_at DESC, f.id DESC
+    `,
+    allowedInsert: ["user_id", "total_land_decimals", "primary_focus", "crop_types", "livestock_count", "pond_count", "farm_address", "notes"],
+    allowedUpdate: ["total_land_decimals", "primary_focus", "crop_types", "livestock_count", "pond_count", "farm_address", "notes"]
+  },
+  "app/user-kyc": {
+    table: "app_user_kyc_documents",
+    listSql: `
+      SELECT CAST(k.id AS CHAR) AS id, CAST(k.user_id AS CHAR) AS user_id,
+             u.full_name AS user, k.doc_type, k.document_url, k.status, k.created_at
+      FROM app_user_kyc_documents k JOIN app_users u ON u.id = k.user_id
+      ORDER BY k.created_at DESC, k.id DESC
+    `,
+    allowedInsert: ["user_id", "doc_type", "document_url", "status", "note"],
+    allowedUpdate: ["doc_type", "document_url", "status", "note"],
+    defaults: { doc_type: "other", status: "pending" }
+  },
+  faq: {
+    table: "faq_items",
+    listSql: `
+      SELECT
+        CAST(id AS CHAR) AS id,
+        category,
+        question_en AS question,
+        COALESCE(question_bn, '') AS bangla,
+        IF(is_active = 1, 'Active', 'Inactive') AS status
+      FROM faq_items
+      ORDER BY sort_order, id
+    `,
+    allowedInsert: ["category", "question_en", "question_bn", "answer_en", "answer_bn", "sort_order", "is_active"],
+    allowedUpdate: ["category", "question_en", "question_bn", "answer_en", "answer_bn", "sort_order", "is_active"],
+    defaults: { category: "general", question_en: "New question", answer_en: "Answer", sort_order: 0, is_active: 1 }
+  },
+  "community/officers": {
+    table: "zone_officers",
+    listSql: `
+      SELECT
+        CAST(id AS CHAR) AS id,
+        name,
+        officer_role AS role,
+        CONCAT(COALESCE(district, ''), ' / ', COALESCE(upazila, '')) AS zone,
+        COALESCE(phone, '') AS phone,
+        IF(is_active = 1, 'Active', 'Inactive') AS status
+      FROM zone_officers
+      ORDER BY district, upazila, officer_role
+    `,
+    allowedInsert: ["officer_role", "name", "phone", "district", "upazila", "photo_asset_id", "admin_user_id", "is_active"],
+    allowedUpdate: ["officer_role", "name", "phone", "district", "upazila", "photo_asset_id", "admin_user_id", "is_active"],
+    defaults: { officer_role: "field_officer", name: "New officer", is_active: 1 }
+  },
+  "assistant/prompts": {
+    table: "ai_assistant_prompts",
+    listSql: `
+      SELECT
+        CAST(id AS CHAR) AS id,
+        prompt_type AS type,
+        title_en AS title,
+        COALESCE(title_bn, '') AS bangla,
+        IF(is_active = 1, 'Active', 'Inactive') AS status
+      FROM ai_assistant_prompts
+      ORDER BY prompt_type, sort_order, id
+    `,
+    allowedInsert: ["prompt_type", "title_en", "title_bn", "body_en", "body_bn", "sort_order", "is_active"],
+    allowedUpdate: ["prompt_type", "title_en", "title_bn", "body_en", "body_bn", "sort_order", "is_active"],
+    defaults: { prompt_type: "quick_prompt", title_en: "New prompt", sort_order: 0, is_active: 1 }
+  },
+  "sale/confirmations": {
+    table: "payment_confirmations",
+    listSql: `
+      SELECT
+        CAST(pc.id AS CHAR) AS id,
+        l.listing_code AS listing,
+        CONCAT(COALESCE(pc.actual_weight_kg, 0), ' kg') AS weight,
+        CONCAT('৳', COALESCE(pc.final_amount, 0)) AS amount,
+        pc.status
+      FROM payment_confirmations pc
+      JOIN sale_listings l ON l.id = pc.sale_listing_id
+      ORDER BY pc.created_at DESC
+    `,
+    allowedInsert: ["sale_listing_id", "actual_weight_kg", "final_amount", "otp_code", "otp_expires_at", "status"],
+    allowedUpdate: ["actual_weight_kg", "final_amount", "otp_code", "otp_expires_at", "status", "confirmed_at"],
+    defaults: { status: "pending" }
   }
 };
 
@@ -325,20 +542,46 @@ export function hasDbResource(resource: string) {
   return Boolean(configs[resource]);
 }
 
+export function getDbResourceKeys() {
+  return Object.keys(configs).sort();
+}
+
 function normalizePayload(payload: Record<string, unknown>, config: ResourceConfig, mode: "insert" | "update") {
   const allowed = mode === "insert" ? config.allowedInsert : config.allowedUpdate;
   const aliased = { ...payload };
 
+  if (!aliased.full_name && aliased.name && allowed.includes("full_name")) aliased.full_name = aliased.name;
+  if (!aliased.name && aliased.full_name && allowed.includes("name")) aliased.name = aliased.full_name;
   if (!aliased.name_en && aliased.title_en && allowed.includes("name_en")) aliased.name_en = aliased.title_en;
+  if (!aliased.name_en && aliased.name && allowed.includes("name_en")) aliased.name_en = aliased.name;
   if (!aliased.name_bn && aliased.title_bn && allowed.includes("name_bn")) aliased.name_bn = aliased.title_bn;
+  if (!aliased.title_en && aliased.name_en && allowed.includes("title_en")) aliased.title_en = aliased.name_en;
+  if (!aliased.title_en && aliased.title && allowed.includes("title_en")) aliased.title_en = aliased.title;
+  if (!aliased.body && aliased.body_en && allowed.includes("body")) aliased.body = aliased.body_en;
+  if (!aliased.body_en && aliased.body && allowed.includes("body_en")) aliased.body_en = aliased.body;
   if (!aliased.description_en && aliased.description && allowed.includes("description_en")) aliased.description_en = aliased.description;
   if (!aliased.body_en && aliased.description && allowed.includes("body_en")) aliased.body_en = aliased.description;
+  if (!aliased.delivery_address && aliased.address && allowed.includes("delivery_address")) aliased.delivery_address = aliased.address;
+  if (!aliased.address_text && aliased.address && allowed.includes("address_text")) aliased.address_text = aliased.address;
+  if (!aliased.payment_status && aliased.payment && allowed.includes("payment_status")) aliased.payment_status = aliased.payment;
+  if (!aliased.fulfillment_status && aliased.fulfillment && allowed.includes("fulfillment_status")) aliased.fulfillment_status = aliased.fulfillment;
+  if (!aliased.verification_notes && aliased.notes && allowed.includes("verification_notes")) aliased.verification_notes = aliased.notes;
+  if (!aliased.assigned_officer_id && aliased.officer && allowed.includes("assigned_officer_id")) aliased.assigned_officer_id = aliased.officer;
+  if (!aliased.moderated_by && aliased.admin_id && allowed.includes("moderated_by")) aliased.moderated_by = aliased.admin_id;
   if (typeof aliased.status === "string" && allowed.includes("is_active")) {
     aliased.is_active = aliased.status.toLowerCase() === "inactive" ? 0 : 1;
   }
 
   const source = mode === "insert" ? { ...config.defaults, ...aliased } : aliased;
-  const entries = Object.entries(source).filter(([key, value]) => allowed.includes(key) && value !== undefined && value !== "");
+  const entries = Object.entries(source)
+    .filter(([key, value]) => allowed.includes(key) && value !== undefined && value !== "")
+    .map(([key, value]) => {
+      if (typeof value === "boolean") return [key, value ? 1 : 0];
+      if (value && typeof value === "object" && !(value instanceof Date)) {
+        return [key, JSON.stringify(value)];
+      }
+      return [key, value];
+    });
   return Object.fromEntries(entries);
 }
 

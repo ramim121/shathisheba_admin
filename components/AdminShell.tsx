@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { NotificationBell } from "@/components/NotificationBell";
 import {
   BellRing,
   BookOpen,
@@ -8,6 +9,9 @@ import {
   FileText,
   GraduationCap,
   HandCoins,
+  Headset,
+  HelpCircle,
+  KeyRound,
   LayoutDashboard,
   ListChecks,
   MessageSquareText,
@@ -18,6 +22,7 @@ import {
   Settings2,
   ShieldCheck,
   ShoppingCart,
+  Sparkles,
   Store,
   Tags,
   UsersRound
@@ -28,6 +33,7 @@ const sections = [
     title: "Command",
     items: [
       { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+      { label: "Notifications", href: "/notifications", icon: BellRing },
       { label: "Reports", href: "/reports", icon: FileText },
       { label: "API Viewer", href: "/api-viewer", icon: ScrollText }
     ]
@@ -39,7 +45,13 @@ const sections = [
       { label: "Weather Alerts", href: "/weather", icon: CloudSun },
       { label: "Market Updates", href: "/market-updates", icon: BellRing },
       { label: "Learning CMS", href: "/learning", icon: GraduationCap },
+      { label: "Ask Shathi Apa", href: "/assistant", icon: Sparkles },
+      { label: "FAQ & Help", href: "/faq", icon: HelpCircle },
       { label: "Users", href: "/users", icon: UsersRound },
+      { label: "User Roles", href: "/users/roles", icon: ShieldCheck },
+      { label: "User Banking", href: "/users/banking", icon: CreditCard },
+      { label: "User Farm Info", href: "/users/farm", icon: Boxes },
+      { label: "User KYC Docs", href: "/users/kyc", icon: ScrollText },
       { label: "Settings", href: "/settings", icon: Settings2 }
     ]
   },
@@ -50,7 +62,8 @@ const sections = [
       { label: "Sale Categories", href: "/sale/categories", icon: Tags },
       { label: "Sale Items", href: "/sale/items", icon: ListChecks },
       { label: "Animal Breeds", href: "/sale/breeds", icon: PanelLeft },
-      { label: "Pricing Rules", href: "/sale/pricing", icon: ReceiptText }
+      { label: "Pricing Rules", href: "/sale/pricing", icon: ReceiptText },
+      { label: "Payment Confirmations", href: "/sale/confirmations", icon: KeyRound }
     ]
   },
   {
@@ -74,6 +87,7 @@ const sections = [
       { label: "Projects", href: "/partners", icon: HandCoins },
       { label: "KYC Approvals", href: "/kyc", icon: ShieldCheck },
       { label: "Community", href: "/community", icon: MessageSquareText },
+      { label: "Zone Officers", href: "/community/officers", icon: Headset },
       { label: "Community Reports", href: "/community/reports", icon: BookOpen }
     ]
   }
@@ -102,6 +116,8 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
           <span>Live MySQL</span>
           <strong>Admin Console</strong>
         </div>
+
+        <NotificationBell />
 
         {sections.map((section) => (
           <nav className="nav-group" key={section.title}>

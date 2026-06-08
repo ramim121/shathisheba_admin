@@ -4,3 +4,14 @@ node_modules
 .env.local
 .env.*.local
 *.log
+
+# build cache / generated
+tsconfig.tsbuildinfo
+graphify-out/
+
+# uploaded user content (served at runtime, not source)
+public/uploads/
+
+# agent tooling
+.agents/
+.codex/

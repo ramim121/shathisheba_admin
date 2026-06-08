@@ -24,10 +24,35 @@ type DetailResponse = {
 
 export function ResourceFormPage({ config, resource, id }: Props) {
   const [record, setRecord] = useState<Record<string, unknown>>({});
+  const [formValues, setFormValues] = useState<Record<string, string>>({});
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
   const isEdit = Boolean(id);
   const listHref = useMemo(() => getListRoute(resource), [resource]);
+  const requiredFields = useMemo(
+    () => new Set(["full_name", "phone", "slug", "name_en", "title_en", "body_en", "district", "starts_at", "update_type", "sale_category_id", "buy_category_id", "sku", "unit", "price", "stock_qty", "order_code", "user_id", "total_amount", "payable_amount", "delivery_address", "learning_category_id", "learning_module_id", "content_type", "project_code", "application_code", "partner_project_id", "current_step", "scope", "post_type", "body", "status"]),
+    []
+  );
+
+  function getBlankValues() {
+    return Object.fromEntries(config.formFields.map((field) => [field.name, ""]));
+  }
+
+  function getRecordValue(row: Record<string, unknown>, fieldName: string) {
+    return row[fieldName] ?? row[fieldName.toUpperCase()] ?? row[fieldName.toLowerCase()];
+  }
+
+  function getPlaceholder(label: string, value: string) {
+    if (!isEdit) return `Example: ${value || label}`;
+    const existingValue = value ? `: ${value.slice(0, 80)}` : "";
+    return `Editing ID ${id}${existingValue}`;
+  }
+
+  useEffect(() => {
+    setRecord({});
+    setMessage("");
+    setFormValues(getBlankValues());
+  }, [config.formFields, resource, id]);
 
   useEffect(() => {
     if (!id) return;
@@ -40,7 +65,12 @@ export function ResourceFormPage({ config, resource, id }: Props) {
         const response = await fetch(`${config.endpoint}?id=${encodeURIComponent(id)}`, { cache: "no-store" });
         const json = (await response.json()) as DetailResponse;
         if (!response.ok || !json.ok) throw new Error(json.message ?? "Could not load record.");
-        setRecord(json.data?.row ?? {});
+        const row = json.data?.row ?? {};
+        setRecord(row);
+        setFormValues(Object.fromEntries(config.formFields.map((field) => {
+          const rawValue = getRecordValue(row, field.name);
+          return [field.name, rawValue === null || rawValue === undefined ? "" : String(rawValue)];
+        })));
       } catch (error) {
         setMessage(error instanceof Error ? error.message : "Could not load record.");
       } finally {
@@ -49,7 +79,19 @@ export function ResourceFormPage({ config, resource, id }: Props) {
     }
 
     void loadRecord();
-  }, [config.endpoint, id]);
+  }, [config.endpoint, config.formFields, id]);
+
+  function resetForm() {
+    if (!isEdit) {
+      setFormValues(getBlankValues());
+      return;
+    }
+
+    setFormValues(Object.fromEntries(config.formFields.map((field) => {
+      const rawValue = getRecordValue(record, field.name);
+      return [field.name, rawValue === null || rawValue === undefined ? "" : String(rawValue)];
+    })));
+  }
 
   async function submitForm(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -103,22 +145,23 @@ export function ResourceFormPage({ config, resource, id }: Props) {
           {message ? <div className="notice">{message}</div> : null}
           <div className="form-grid">
             {config.formFields.map((field, index) => {
-              const rawValue = record[field.name];
-              const value = rawValue === null || rawValue === undefined ? field.value ?? "" : String(rawValue);
+              const value = formValues[field.name] ?? "";
+              const required = requiredFields.has(field.name);
               return (
                 <div className={`field ${field.type === "textarea" ? "field-wide" : ""}`} key={field.name}>
                   <label>
-                    <span>{field.label}</span>
+                    <span>{field.label}{required ? <b aria-label="required">*</b> : null}</span>
                     <small>{index + 1}</small>
                   </label>
                   {field.type === "textarea" ? (
-                    <textarea defaultValue={value} name={field.name} placeholder={`Enter ${field.label.toLowerCase()}`} />
+                    <textarea name={field.name} onChange={(event) => setFormValues((current) => ({ ...current, [field.name]: event.target.value }))} placeholder={getPlaceholder(field.label, field.value ?? "")} required={required} value={value} />
                   ) : field.type === "select" ? (
-                    <select defaultValue={value || field.options?.[0]} name={field.name}>
+                    <select name={field.name} onChange={(event) => setFormValues((current) => ({ ...current, [field.name]: event.target.value }))} required={required} value={value}>
+                      <option value="">Select {field.label.toLowerCase()}</option>
                       {field.options?.map((option) => <option key={option}>{option}</option>)}
                     </select>
                   ) : (
-                    <input defaultValue={value} name={field.name} placeholder={`Enter ${field.label.toLowerCase()}`} />
+                    <input name={field.name} onChange={(event) => setFormValues((current) => ({ ...current, [field.name]: event.target.value }))} placeholder={getPlaceholder(field.label, field.value ?? "")} required={required} value={value} />
                   )}
                 </div>
               );
@@ -146,7 +189,7 @@ export function ResourceFormPage({ config, resource, id }: Props) {
           </div>
           <div className="form-actions">
             <button className="btn primary" disabled={loading} type="submit"><Save size={18} /> Save</button>
-            <button className="btn ghost" type="reset"><RotateCcw size={18} /> Reset</button>
+            <button className="btn ghost" onClick={resetForm} type="button"><RotateCcw size={18} /> Reset</button>
             <Link className="btn ghost" href={listHref}>Cancel</Link>
           </div>
         </div>

@@ -105,10 +105,38 @@ const configs: Record<string, ResourceConfig> = {
   },
   "sale/categories": {
     table: "sale_categories",
-    listSql: "SELECT CAST(id AS CHAR) AS id, slug, name_en, name_bn, IF(is_active = 1, 'Active', 'Inactive') AS status FROM sale_categories ORDER BY sort_order, id",
-    allowedInsert: ["slug", "name_en", "name_bn", "description_en", "description_bn", "is_active", "sort_order"],
-    allowedUpdate: ["slug", "name_en", "name_bn", "description_en", "description_bn", "is_active", "sort_order"],
-    defaults: { slug: "new-sale-category", name_en: "New sale category", is_active: 1 }
+    listSql: "SELECT CAST(id AS CHAR) AS id, CONCAT(COALESCE(emoji,''), ' ', name_en) AS name_en, slug, name_bn, IF(pref_selectable = 1, 'Yes', 'No') AS preference, IF(is_active = 1, 'Active', 'Inactive') AS status FROM sale_categories ORDER BY sort_order, id",
+    allowedInsert: ["slug", "name_en", "name_bn", "emoji", "interest_slug", "pref_selectable", "description_en", "description_bn", "is_active", "sort_order"],
+    allowedUpdate: ["slug", "name_en", "name_bn", "emoji", "interest_slug", "pref_selectable", "description_en", "description_bn", "is_active", "sort_order"],
+    defaults: { slug: "new-sale-category", name_en: "New sale category", pref_selectable: 1, is_active: 1 }
+  },
+  "sale/animals": {
+    table: "animals",
+    listSql: "SELECT CAST(id AS CHAR) AS id, CONCAT(COALESCE(emoji,''), ' ', name_en) AS name, slug, name_bn AS bangla, species, IF(is_active = 1, 'Active', 'Inactive') AS status FROM animals ORDER BY sort_order, id",
+    allowedInsert: ["slug", "name_en", "name_bn", "species", "emoji", "sale_category_id", "sort_order", "is_active"],
+    allowedUpdate: ["slug", "name_en", "name_bn", "species", "emoji", "sale_category_id", "sort_order", "is_active"],
+    defaults: { slug: "new-animal", name_en: "New animal", species: "cattle", sale_category_id: 2, is_active: 1 }
+  },
+  "geo/divisions": {
+    table: "geo_divisions",
+    listSql: "SELECT CAST(id AS CHAR) AS id, name_en AS name, name_bn AS bangla, sort_order FROM geo_divisions ORDER BY sort_order, name_en",
+    allowedInsert: ["id", "name_en", "name_bn", "sort_order"],
+    allowedUpdate: ["name_en", "name_bn", "sort_order"],
+    defaults: { name_en: "New division" }
+  },
+  "geo/districts": {
+    table: "geo_districts",
+    listSql: "SELECT CAST(d.id AS CHAR) AS id, d.name_en AS name, d.name_bn AS bangla, v.name_en AS division FROM geo_districts d JOIN geo_divisions v ON v.id = d.division_id ORDER BY v.name_en, d.name_en",
+    allowedInsert: ["id", "division_id", "name_en", "name_bn"],
+    allowedUpdate: ["division_id", "name_en", "name_bn"],
+    defaults: { name_en: "New district", division_id: 1 }
+  },
+  "geo/upazilas": {
+    table: "geo_upazilas",
+    listSql: "SELECT CAST(u.id AS CHAR) AS id, u.name_en AS name, u.name_bn AS bangla, d.name_en AS district FROM geo_upazilas u JOIN geo_districts d ON d.id = u.district_id ORDER BY d.name_en, u.name_en",
+    allowedInsert: ["id", "district_id", "name_en", "name_bn"],
+    allowedUpdate: ["district_id", "name_en", "name_bn"],
+    defaults: { name_en: "New upazila", district_id: 1 }
   },
   "sale/listings": {
     table: "sale_listings",
@@ -127,8 +155,8 @@ const configs: Record<string, ResourceConfig> = {
       LEFT JOIN animal_breeds b ON b.id = l.breed_id
       ORDER BY l.created_at DESC
     `,
-    allowedInsert: ["listing_code", "user_id", "sale_item_id", "breed_id", "title_en", "title_bn", "age_months", "weight_kg", "quantity", "unit", "farmer_expected_price", "estimated_earning", "contact_phone", "address_text", "ai_analysis_json", "status"],
-    allowedUpdate: ["sale_item_id", "breed_id", "title_en", "title_bn", "age_months", "weight_kg", "quantity", "unit", "farmer_expected_price", "estimated_earning", "contact_phone", "address_text", "ai_analysis_json", "status", "approved_by", "approved_at"],
+    allowedInsert: ["listing_code", "user_id", "sale_item_id", "animal_id", "breed_id", "title_en", "title_bn", "age_months", "weight_kg", "quantity", "unit", "farmer_expected_price", "estimated_earning", "contact_phone", "address_text", "division", "district", "upazila", "ai_analysis_json", "media_json", "status"],
+    allowedUpdate: ["sale_item_id", "animal_id", "breed_id", "title_en", "title_bn", "age_months", "weight_kg", "quantity", "unit", "farmer_expected_price", "estimated_earning", "contact_phone", "address_text", "division", "district", "upazila", "ai_analysis_json", "media_json", "status", "approved_by", "approved_at"],
     defaults: { listing_code: `SAL-${Date.now()}`, quantity: 1, unit: "piece", status: "submitted" }
   },
   "sale/items": {
@@ -161,8 +189,8 @@ const configs: Record<string, ResourceConfig> = {
       FROM animal_breeds
       ORDER BY animal_type, id
     `,
-    allowedInsert: ["animal_type", "name_en", "name_bn", "is_active"],
-    allowedUpdate: ["animal_type", "name_en", "name_bn", "is_active"],
+    allowedInsert: ["animal_type", "name_en", "name_bn", "sort_order", "is_active"],
+    allowedUpdate: ["animal_type", "name_en", "name_bn", "sort_order", "is_active"],
     defaults: { animal_type: "cattle", name_en: "New breed", is_active: 1 }
   },
   "sale/pricing": {
@@ -179,8 +207,8 @@ const configs: Record<string, ResourceConfig> = {
       JOIN sale_items si ON si.id = r.sale_item_id
       ORDER BY r.effective_from DESC, r.id DESC
     `,
-    allowedInsert: ["sale_item_id", "district", "effective_from", "effective_to", "b2b_market_rate", "farmer_rate", "platform_fee", "logistics_fee", "warehouse_vet_fee", "unit", "is_active"],
-    allowedUpdate: ["sale_item_id", "district", "effective_from", "effective_to", "b2b_market_rate", "farmer_rate", "platform_fee", "logistics_fee", "warehouse_vet_fee", "unit", "is_active"],
+    allowedInsert: ["sale_item_id", "partner_project_id", "animal_id", "breed_id", "district", "division", "effective_from", "effective_to", "b2b_market_rate", "farmer_rate", "platform_fee", "logistics_fee", "warehouse_vet_fee", "unit", "is_active"],
+    allowedUpdate: ["sale_item_id", "partner_project_id", "animal_id", "breed_id", "district", "division", "effective_from", "effective_to", "b2b_market_rate", "farmer_rate", "platform_fee", "logistics_fee", "warehouse_vet_fee", "unit", "is_active"],
     defaults: { effective_from: new Date(), b2b_market_rate: 0, farmer_rate: 0, platform_fee: 0, logistics_fee: 0, warehouse_vet_fee: 0, unit: "kg", is_active: 1 }
   },
   "buy/categories": {
@@ -253,7 +281,7 @@ const configs: Record<string, ResourceConfig> = {
   },
   "learning/categories": simpleConfig(
     "learning_categories",
-    ["slug", "name_en", "name_bn", "emoji", "description_en", "description_bn", "interest_slug", "sort_order", "is_active"],
+    ["slug", "name_en", "name_bn", "emoji", "description_en", "description_bn", "interest_slug", "section", "sort_order", "is_active"],
     { slug: `learning-${Date.now()}`, name_en: "New learning category", sort_order: 0, is_active: 1 }
   ),
   "learning/modules": {
@@ -317,9 +345,9 @@ const configs: Record<string, ResourceConfig> = {
       GROUP BY p.id
       ORDER BY p.created_at DESC
     `,
-    allowedInsert: ["project_code", "name_en", "name_bn", "lender_name", "district", "upazila", "start_date", "end_date", "capacity", "max_credit_amount", "status", "steps_json"],
-    allowedUpdate: ["name_en", "name_bn", "lender_name", "district", "upazila", "start_date", "end_date", "capacity", "max_credit_amount", "status", "steps_json"],
-    defaults: { project_code: `PRJ-${Date.now()}`, name_en: "New partner project", capacity: 0, status: "draft" }
+    allowedInsert: ["project_code", "name_en", "name_bn", "interest_slug", "lender_name", "division", "district", "upazila", "image_url", "summary_en", "summary_bn", "market_overview_en", "market_overview_bn", "investment_amount", "duration_label", "region_based", "is_active", "platform_fee", "logistics_fee", "warehouse_vet_fee", "start_date", "end_date", "capacity", "max_credit_amount", "status", "steps_json"],
+    allowedUpdate: ["name_en", "name_bn", "interest_slug", "lender_name", "division", "district", "upazila", "image_url", "summary_en", "summary_bn", "market_overview_en", "market_overview_bn", "investment_amount", "duration_label", "region_based", "is_active", "platform_fee", "logistics_fee", "warehouse_vet_fee", "start_date", "end_date", "capacity", "max_credit_amount", "status", "steps_json"],
+    defaults: { project_code: `PRJ-${Date.now()}`, name_en: "New partner project", capacity: 0, region_based: 1, is_active: 1, status: "draft" }
   },
   "partners/applications": {
     table: "partner_applications",
@@ -722,11 +750,13 @@ export async function getSaleListingDetail(id: string) {
         si.name_en AS item_name,
         si.name_bn AS item_name_bn,
         sc.name_en AS category_name,
+        a.name_en AS animal_name,
         b.name_en AS breed_name
       FROM sale_listings l
       JOIN app_users u ON u.id = l.user_id
       JOIN sale_items si ON si.id = l.sale_item_id
       JOIN sale_categories sc ON sc.id = si.sale_category_id
+      LEFT JOIN animals a ON a.id = l.animal_id
       LEFT JOIN animal_breeds b ON b.id = l.breed_id
       WHERE l.id = ?
       LIMIT 1

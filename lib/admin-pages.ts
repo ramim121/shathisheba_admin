@@ -259,15 +259,29 @@ export const pages: Record<string, ManagementPageProps> = {
       { label: "Project code", name: "project_code", value: "PRJ-1001" },
       { label: "English name", name: "name_en", value: "Cattle Fattening - Eid Batch 2024" },
       { label: "Bangla name", name: "name_bn", value: "গরু মোটাতাজাকরণ প্রকল্প" },
+      { label: "Category (interest slug)", name: "interest_slug", type: "select", options: ["livestock-poultry", "crops", "fishery", "vegetables", "fruits", "inputs", "machinery"] },
       { label: "Lender", name: "lender_name", value: "BRAC Bank" },
+      { label: "Region based (1) or open to all (0)", name: "region_based", type: "select", options: ["1", "0"] },
+      { label: "Division", name: "division", value: "Mymensingh" },
       { label: "District", name: "district", value: "Mymensingh" },
-      { label: "Upazila", name: "upazila", value: "Mymensingh Sadar" },
-      { label: "Start date", name: "start_date", value: "2026-05-01" },
-      { label: "End date", name: "end_date", value: "2026-12-31" },
+      { label: "Upazila / Thana", name: "upazila", value: "Mymensingh Sadar" },
+      { label: "Cover image URL", name: "image_url", value: "" },
+      { label: "Short summary (English)", name: "summary_en", type: "textarea", value: "One-line project summary." },
+      { label: "Short summary (Bangla)", name: "summary_bn", type: "textarea", value: "প্রকল্পের সংক্ষিপ্ত বিবরণ।" },
+      { label: "Market overview (English)", name: "market_overview_en", type: "textarea", value: "Market demand, rate trend, buyer linkage." },
+      { label: "Market overview (Bangla)", name: "market_overview_bn", type: "textarea", value: "বাজার চাহিদা, দরের প্রবণতা।" },
+      { label: "Investment amount", name: "investment_amount", value: "150000" },
+      { label: "Duration / timeframe label", name: "duration_label", value: "6 months" },
+      { label: "Start date", name: "start_date", value: "2026-06-01" },
+      { label: "End date (auto-inactive after)", name: "end_date", value: "2026-12-31" },
       { label: "Capacity", name: "capacity", value: "50" },
       { label: "Maximum credit amount", name: "max_credit_amount", value: "100000" },
+      { label: "Opex — platform fee /kg", name: "platform_fee", value: "50" },
+      { label: "Opex — logistics fee /kg", name: "logistics_fee", value: "15" },
+      { label: "Opex — warehouse & vet fee /kg", name: "warehouse_vet_fee", value: "15" },
+      { label: "Active", name: "is_active", type: "select", options: ["1", "0"] },
       { label: "Status", name: "status", type: "select", options: ["draft", "open", "opening_soon", "closed", "completed"] },
-      { label: "Registration steps JSON", name: "steps_json", type: "textarea", value: "{\"steps\":[\"Project selection\",\"KYC\",\"Banking info\"]}" }
+      { label: "Registration steps JSON", name: "steps_json", type: "textarea", value: "{\"steps\":[\"Project selection\",\"KYC\",\"Banking info\",\"Field verification\",\"Approval\"]}" }
     ]
   },
   kyc: {
@@ -450,17 +464,96 @@ export const nestedPages: Record<string, ManagementPageProps> = {
     entityName: "Sale Category",
     endpoint: "/api/v1/sale/categories",
     columns: [
+      { key: "name_en", label: "Category" },
       { key: "slug", label: "Slug" },
-      { key: "name_en", label: "Name" },
-      { key: "name_bn", label: "Bangla" }
+      { key: "name_bn", label: "Bangla" },
+      { key: "preference", label: "In preferences?" }
     ],
     rows: [],
     formFields: [
       { label: "Slug", name: "slug", value: "livestock" },
-      { label: "English name", name: "name_en", value: "Livestock" },
-      { label: "Bangla name", name: "name_bn", value: "গবাদি পশু" },
-      { label: "Description", name: "description_en", type: "textarea", value: "Cattle, goat, poultry and fish" },
+      { label: "English name", name: "name_en", value: "Cattle & Poultry" },
+      { label: "Bangla name", name: "name_bn", value: "গবাদি পশু ও পোল্ট্রি" },
+      { label: "Emoji / icon", name: "emoji", value: "🐄" },
+      { label: "Interest slug (links to login preference root)", name: "interest_slug", value: "livestock-poultry" },
+      { label: "Show in login preference selection", name: "pref_selectable", type: "select", options: ["1", "0"] },
+      { label: "Description", name: "description_en", type: "textarea", value: "Cattle, buffalo, goat, sheep and poultry" },
+      { label: "Sort order", name: "sort_order", value: "1" },
       { label: "Status", name: "is_active", type: "select", options: ["1", "0"] }
+    ]
+  },
+  "sale/animals": {
+    title: "Animal Master",
+    description: "Manage the Animal Type dropdown for the livestock listing form (Cow, Bull, Buffalo, Poultry, Goat, Sheep). Species links each animal to its breed set.",
+    entityName: "Animal",
+    endpoint: "/api/v1/sale/animals",
+    columns: [
+      { key: "name", label: "Animal" },
+      { key: "slug", label: "Slug" },
+      { key: "species", label: "Species (breed group)" },
+      { key: "bangla", label: "Bangla" }
+    ],
+    rows: [],
+    formFields: [
+      { label: "Slug", name: "slug", value: "cow" },
+      { label: "English name", name: "name_en", value: "Cow" },
+      { label: "Bangla name", name: "name_bn", value: "গাভী" },
+      { label: "Species (matches breed animal_type)", name: "species", type: "select", options: ["cattle", "buffalo", "goat", "sheep", "poultry"] },
+      { label: "Emoji", name: "emoji", value: "🐄" },
+      { label: "Sale category id", name: "sale_category_id", value: "2" },
+      { label: "Sort order", name: "sort_order", value: "1" },
+      { label: "Active", name: "is_active", type: "select", options: ["1", "0"] }
+    ]
+  },
+  "geo/divisions": {
+    title: "Geo — Divisions",
+    description: "Official Bangladesh divisions used by the address Division dropdown and project/pricing region targeting.",
+    entityName: "Division",
+    endpoint: "/api/v1/geo/divisions",
+    columns: [
+      { key: "name", label: "Division" },
+      { key: "bangla", label: "Bangla" },
+      { key: "sort_order", label: "Order" }
+    ],
+    rows: [],
+    formFields: [
+      { label: "English name", name: "name_en", value: "Mymensingh" },
+      { label: "Bangla name", name: "name_bn", value: "ময়মনসিংহ" },
+      { label: "Sort order", name: "sort_order", value: "0" }
+    ]
+  },
+  "geo/districts": {
+    title: "Geo — Districts",
+    description: "Official Bangladesh districts used by the address District dropdown and region targeting.",
+    entityName: "District",
+    endpoint: "/api/v1/geo/districts",
+    columns: [
+      { key: "name", label: "District" },
+      { key: "bangla", label: "Bangla" },
+      { key: "division", label: "Division" }
+    ],
+    rows: [],
+    formFields: [
+      { label: "Division id", name: "division_id", value: "1" },
+      { label: "English name", name: "name_en", value: "Mymensingh" },
+      { label: "Bangla name", name: "name_bn", value: "ময়মনসিংহ" }
+    ]
+  },
+  "geo/upazilas": {
+    title: "Geo — Upazilas / Thanas",
+    description: "Official Bangladesh upazilas (thanas) used by the address Thana dropdown and region targeting.",
+    entityName: "Upazila",
+    endpoint: "/api/v1/geo/upazilas",
+    columns: [
+      { key: "name", label: "Upazila / Thana" },
+      { key: "bangla", label: "Bangla" },
+      { key: "district", label: "District" }
+    ],
+    rows: [],
+    formFields: [
+      { label: "District id", name: "district_id", value: "1" },
+      { label: "English name", name: "name_en", value: "Mymensingh Sadar" },
+      { label: "Bangla name", name: "name_bn", value: "ময়মনসিংহ সদর" }
     ]
   },
   "sale/items": {
@@ -495,15 +588,15 @@ export const nestedPages: Record<string, ManagementPageProps> = {
     ],
     rows: [],
     formFields: [
-      { label: "Animal type", name: "animal_type", type: "select", options: ["cattle", "goat", "poultry", "fish"] },
+      { label: "Animal type (species)", name: "animal_type", type: "select", options: ["cattle", "buffalo", "goat", "sheep", "poultry"] },
       { label: "English name", name: "name_en", value: "Cross Friesian" },
       { label: "Bangla name", name: "name_bn", value: "ক্রস ফ্রিজিয়ান" },
       { label: "Active", name: "is_active", type: "select", options: ["1", "0"] }
     ]
   },
   "sale/pricing": {
-    title: "Sale Pricing Rules",
-    description: "Manage B2B rate, farmer rate, platform fee, logistics, warehouse, and vet-care breakdowns.",
+    title: "Sale Pricing Rules (B2B presets)",
+    description: "Manage the forward-linkage B2B preset by animal, breed and region: B2B rate, farmer rate, platform fee, logistics, and warehouse/vet care (DigiGram Opex & Margin).",
     entityName: "Pricing Rule",
     endpoint: "/api/v1/sale/pricing",
     columns: [
@@ -515,7 +608,12 @@ export const nestedPages: Record<string, ManagementPageProps> = {
     rows: [],
     formFields: [
       { label: "Sale item id", name: "sale_item_id", value: "1" },
-      { label: "District", name: "district", value: "Mymensingh" },
+      { label: "Partner project id (optional)", name: "partner_project_id", value: "" },
+      { label: "Animal id (blank = any)", name: "animal_id", value: "1" },
+      { label: "Breed id (blank = any)", name: "breed_id", value: "" },
+      { label: "Division (blank = any)", name: "division", value: "Mymensingh" },
+      { label: "District (blank = any)", name: "district", value: "Mymensingh" },
+      { label: "Effective from", name: "effective_from", value: "2026-06-01" },
       { label: "B2B market rate", name: "b2b_market_rate", value: "750" },
       { label: "Farmer rate", name: "farmer_rate", value: "670" },
       { label: "Platform fee", name: "platform_fee", value: "50" },

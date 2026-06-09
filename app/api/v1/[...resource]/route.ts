@@ -2,16 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   apiCatalog,
   buyOrders,
-  buyProducts,
   communityPosts,
-  interestCategories,
   learningModules,
-  marketUpdates,
   partnerApplications,
-  partnerProjects,
-  priceBreakdown,
-  saleListings,
-  weatherAlerts
+  saleListings
 } from "@/lib/data";
 import {
   createResource,
@@ -26,7 +20,7 @@ import {
 import {
   aiFlagCommunityPost,
   aiScanCommunityPosts,
-  cattleAnalyzeStub,
+  submitKycApplication,
   createSaleConfirmation,
   getCommunityModeration,
   moderateCommunityPost,
@@ -39,6 +33,11 @@ import {
   getUserLearningProgress,
   getLearningProgressOverview,
   getAppBreeds,
+  getAppAnimals,
+  getAppGeoDivisions,
+  getAppGeoDistricts,
+  getAppGeoUpazilas,
+  getSalePriceQuote,
   getAppBuyCategories,
   getAppCommunityPosts,
   getAppLearningContents,
@@ -49,6 +48,10 @@ import {
   getAppOfficers,
   getAppPartnerLedgers,
   getAppPartnerProjects,
+  getAppActiveProjects,
+  getAppMyProjects,
+  getSaleCategoryAvailability,
+  getProjectPrevRates,
   getAppPricing,
   getAppProducts,
   getAppProfileUsers,
@@ -85,14 +88,22 @@ const appReadHandlers: Record<string, AppReadHandler> = {
   weather: (q) => getAppWeatherAlerts(q.get("district")),
   "sale/categories": () => getAppSaleCategories(),
   "sale/items": () => getAppSaleItems(),
-  "sale/breeds": () => getAppBreeds(),
+  "sale/breeds": (q) => getAppBreeds(q.get("species")),
+  "sale/animals": (q) => getAppAnimals(q.get("species")),
   "sale/pricing": () => getAppPricing(),
+  "geo/divisions": () => getAppGeoDivisions(),
+  "geo/districts": (q) => getAppGeoDistricts(q.get("division_id")),
+  "geo/upazilas": (q) => getAppGeoUpazilas(q.get("district_id")),
   "buy/categories": () => getAppBuyCategories(),
   "buy/products": (q) => getAppProducts(q.get("category")),
   "learning/modules": () => getAppLearningModules(),
   "learning/contents": () => getAppLearningContents(),
   "partners/projects": () => getAppPartnerProjects(),
   "partners/ledgers": () => getAppPartnerLedgers(),
+  "app/projects/active": (q) => getAppActiveProjects(q.get("user_id"), q.get("division"), q.get("district")),
+  "app/projects/mine": (q) => getAppMyProjects(q.get("user_id")),
+  "app/projects/prev-rates": (q) => getProjectPrevRates(q.get("animal_id"), q.get("breed_id"), q.get("district")),
+  "app/sale/category-availability": (q) => getSaleCategoryAvailability(q.get("user_id"), q.get("division"), q.get("district")),
   "community/posts": (q) => getAppCommunityPosts(q.get("scope")),
   "community/officers": (q) => getAppOfficers(q.get("district")),
   users: (q) => getAppProfileUsers(q.get("user_id")),
@@ -117,28 +128,6 @@ type Params = {
     resource: string[];
   }>;
 };
-
-const saleCategories = [
-  { slug: "crops", name_en: "Crops", name_bn: "ফসল", active: true, description: "Grains, vegetables, fruits" },
-  { slug: "livestock", name_en: "Livestock", name_bn: "গবাদি পশু", active: true, description: "Cattle, goat, poultry, fish" },
-  { slug: "inputs", name_en: "Inputs", name_bn: "ইনপুট", active: true, description: "Seeds, feed, fertilizer" },
-  { slug: "machinery", name_en: "Machinery", name_bn: "যন্ত্রপাতি", active: true, description: "Rent and lease" }
-];
-
-const animalTypes = [
-  { category: "cattle", type: "Bull", type_bn: "ষাঁড়", breeds: ["Cross Friesian", "Local", "Sahiwal", "Red Chittagong"] },
-  { category: "goat", type: "Goat", type_bn: "ছাগল", breeds: ["Black Bengal", "Jamnapari", "Local"] },
-  { category: "poultry", type: "Poultry", type_bn: "পোল্ট্রি", breeds: ["Broiler", "Layer", "Native"] }
-];
-
-const buyCategories = [
-  { slug: "shadhin-feed", name_en: "Shadhin Feed", name_bn: "স্বাধীন ফিড", description: "Own brand" },
-  { slug: "seeds", name_en: "Seeds", name_bn: "বীজ", description: "Certified varieties" },
-  { slug: "fertilizer", name_en: "Fertilizer", name_bn: "সার", description: "Urea, DAP, organic" },
-  { slug: "agri-medicine", name_en: "Agri-medicine", name_bn: "কৃষি ঔষধ", description: "Pesticide, vet" },
-  { slug: "tools", name_en: "Tools", name_bn: "যন্ত্র", description: "Hand and electric" },
-  { slug: "machinery-rental", name_en: "Machinery rental", name_bn: "যন্ত্র ভাড়া", description: "Tractor, tiller" }
-];
 
 function envelope(data: unknown, meta: Record<string, unknown> = {}) {
   return NextResponse.json({
@@ -196,6 +185,21 @@ export async function GET(request: NextRequest, { params }: Params) {
   const { resource, id } = await resolveResourceContext(params, request);
   const searchParams = request.nextUrl.searchParams;
 
+  // App sale price quote: resolve the B2B preset for animal + breed + region.
+  if (resource === "app/sale/price-quote") {
+    try {
+      const quote = await getSalePriceQuote({
+        animal_id: searchParams.get("animal_id"),
+        breed_id: searchParams.get("breed_id"),
+        district: searchParams.get("district"),
+        weight: searchParams.get("weight")
+      });
+      return envelope(quote, { source: "mysql", surface: "app", resource });
+    } catch (error) {
+      return dbError(error);
+    }
+  }
+
   // App market updates: list (location-first) or blog detail by id.
   if (resource === "app/market-updates") {
     try {
@@ -252,39 +256,6 @@ export async function GET(request: NextRequest, { params }: Params) {
       } catch (error) {
         return dbError(error);
       }
-    case "interests":
-      return envelope(interestCategories, { purpose: "Splash onboarding category and child item setup" });
-    case "weather":
-      return envelope(weatherAlerts, {
-        district: searchParams.get("district") ?? "all",
-        source: "weather-server-plus-local-critical-alerts"
-      });
-    case "market-updates":
-      return envelope(marketUpdates, { surface: "mobile-homepage" });
-    case "sale/categories":
-      return envelope({ categories: saleCategories, animal_types: animalTypes, price_breakdown: priceBreakdown });
-    case "sale/listings":
-      return envelope(saleListings, { status: searchParams.get("status") ?? "all" });
-    case "buy/categories":
-      return envelope(buyCategories);
-    case "buy/products":
-      return envelope(buyProducts, { category: searchParams.get("category") ?? "all" });
-    case "buy/orders":
-      return envelope(buyOrders, { status: searchParams.get("status") ?? "all" });
-    case "learning/modules":
-      return envelope(learningModules, { include: "categories,contents,completion_rules" });
-    case "partners/projects":
-      return envelope(partnerProjects);
-    case "partners/applications":
-      return envelope(partnerApplications, { queue: "kyc,due-diligence,field-verification,approval" });
-    case "community/posts":
-      return envelope(communityPosts, { scope: searchParams.get("scope") ?? "all" });
-    case "users":
-      return envelope([
-        { id: "USR-1", full_name: "Md. Rahim", phone: "01712-345678", district: "Mymensingh", upazila: "Mymensingh Sadar", status: "active" },
-        { id: "USR-2", full_name: "Fatema Khatun", phone: "01812-222333", district: "Mymensingh", upazila: "Mymensingh Sadar", status: "active" },
-        { id: "USR-3", full_name: "Sadia Khatun", phone: "01933-555888", district: "Dhaka", upazila: "Dhaka", status: "active" }
-      ]);
     case "reports":
       return envelope({
         marketplace: { sale_listings: saleListings.length, buy_orders: buyOrders.length },
@@ -369,14 +340,14 @@ export async function POST(request: NextRequest, { params }: Params) {
     if (exact === "app/orders") {
       return NextResponse.json({ ok: true, source: "mysql", action: "order_placed", result: await placeOrder(payload) }, { status: 201 });
     }
+    if (exact === "app/kyc/submit") {
+      return NextResponse.json({ ok: true, source: "mysql", action: "kyc_submitted", result: await submitKycApplication(payload) }, { status: 201 });
+    }
     if (exact === "app/sale/confirm") {
       return NextResponse.json({ ok: true, source: "mysql", action: "confirmation_created", result: await createSaleConfirmation(payload) }, { status: 201 });
     }
     if (exact === "app/sale/verify-otp") {
       return NextResponse.json({ ok: true, source: "mysql", action: "payment_confirmed", result: await verifyOtp(payload) });
-    }
-    if (exact === "app/ai/cattle-analyze") {
-      return envelope(cattleAnalyzeStub(), { source: "ai-stub", surface: "list-cattle" });
     }
     if (segments.length === 4 && segments[0] === "community" && segments[1] === "posts" && segments[3] === "like") {
       return NextResponse.json({ ok: true, source: "mysql", action: "liked", result: await likePost(segments[2]) });

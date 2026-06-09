@@ -41,6 +41,7 @@ export async function getOnboardingTree() {
       name_bn: root.name_bn,
       emoji: root.emoji,
       step_group: root.step_group,
+      is_selectable: root.is_selectable,
       children: children.map((child) => ({
         id: child.id,
         slug: child.slug,
@@ -197,6 +198,49 @@ function generateOtp() {
   return String(Math.floor(100000 + Math.random() * 900000));
 }
 
+// POST /api/v1/app/kyc/submit
+// Creates a partner KYC application for a project and records the NID on the
+// user profile. Returns the created application.
+export async function submitKycApplication(payload: Row) {
+  const userId = payload.user_id;
+  const projectId = payload.partner_project_id;
+  if (!userId) throw new Error("user_id is required.");
+  if (!projectId) throw new Error("A project is required.");
+  const fullName = (payload.full_name_per_nid ?? "").toString().trim();
+  const nid = (payload.nid_number ?? "").toString().trim();
+  if (!fullName) throw new Error("Full name (per NID) is required.");
+  if (!nid) throw new Error("NID number is required.");
+
+  // Record the NID on the user profile (best-effort; does not overwrite).
+  await executeQuery(
+    "UPDATE app_users SET nid_number = COALESCE(NULLIF(nid_number, ''), ?) WHERE id = ?",
+    [nid, userId]
+  );
+
+  const code = (payload.application_code ?? `KYC-APP-${Date.now()}`).toString();
+  const result = await executeQuery(
+    `
+      INSERT INTO partner_applications
+        (application_code, user_id, partner_project_id, current_step,
+         full_name_per_nid, nid_number, total_land_decimals, livestock_count,
+         primary_income_source, annual_household_income, mobile_banking_provider,
+         verification_notes, status)
+      VALUES (?, ?, ?, 'personal_kyc', ?, ?, ?, ?, ?, ?, ?, ?, 'submitted')
+    `,
+    [
+      code, userId, projectId,
+      fullName, nid,
+      payload.total_land_decimals != null ? Number(payload.total_land_decimals) : null,
+      payload.livestock_count != null ? Number(payload.livestock_count) : null,
+      (payload.primary_income_source ?? null) as string | null,
+      payload.annual_household_income != null ? Number(payload.annual_household_income) : null,
+      (payload.mobile_banking_provider ?? null) as string | null,
+      (payload.verification_notes ?? "Submitted from mobile app.") as string,
+    ]
+  );
+  return { application_id: result.insertId, application_code: code, status: "submitted" };
+}
+
 // POST /api/v1/app/sale/confirm
 // Records actual weight + final amount, creates a payment_confirmation, issues a 10-min OTP.
 export async function createSaleConfirmation(payload: Row) {
@@ -287,21 +331,6 @@ export async function verifyOtp(payload: Row) {
   return { confirmation_id: confirmation.id, sale_listing_id: listingId, status: "confirmed" };
 }
 
-// POST /api/v1/app/ai/cattle-analyze
-// Stub AI estimate so the List Cattle screen's prefill is wired. Swap with a real model later.
-export function cattleAnalyzeStub() {
-  return {
-    breed: "Cross Friesian",
-    animal_type: "Bull",
-    condition: "healthy",
-    estimated_age_months: 26,
-    estimated_weight_kg: 210,
-    confidence: 0.88,
-    field_verification: "pending",
-    note: "AI estimate. Field officer will verify weight with a portable scale."
-  };
-}
-
 // ---------------------------------------------------------------------------
 // App-facing list reads.
 // The /api/v1 route is consumed by the mobile app (the admin panel reads
@@ -359,12 +388,121 @@ export async function getAppSaleCategories() {
   return queryRows<Row>(
     `
       SELECT CAST(id AS CHAR) AS id, slug, name_en, name_bn,
-             description_en, description_bn,
+             description_en, description_bn, emoji, interest_slug,
+             pref_selectable,
              IF(is_active = 1, 'active', 'soon') AS status
       FROM sale_categories
       ORDER BY sort_order, id
     `
   );
+}
+
+// GET /api/v1/sale/animals?species=cattle
+// Animal master for the "Animal Type" dropdown (Cow, Bull, Buffalo, Poultry, Goat, Sheep).
+export async function getAppAnimals(species?: string | null) {
+  return queryRows<Row>(
+    `
+      SELECT CAST(id AS CHAR) AS id, slug, name_en, name_bn, species, emoji,
+             CAST(sale_category_id AS CHAR) AS sale_category_id
+      FROM animals
+      WHERE is_active = 1 AND (? IS NULL OR species = ?)
+      ORDER BY sort_order, id
+    `,
+    [species ?? null, species ?? null]
+  );
+}
+
+// GET /api/v1/geo/divisions
+export async function getAppGeoDivisions() {
+  return queryRows<Row>(
+    "SELECT CAST(id AS CHAR) AS id, name_en, name_bn FROM geo_divisions ORDER BY sort_order, name_en"
+  );
+}
+
+// GET /api/v1/geo/districts?division_id=3
+export async function getAppGeoDistricts(divisionId?: string | null) {
+  return queryRows<Row>(
+    `
+      SELECT CAST(id AS CHAR) AS id, CAST(division_id AS CHAR) AS division_id, name_en, name_bn
+      FROM geo_districts
+      WHERE (? IS NULL OR division_id = ?)
+      ORDER BY name_en
+    `,
+    [divisionId ?? null, divisionId ?? null]
+  );
+}
+
+// GET /api/v1/geo/upazilas?district_id=12  (upazila == thana for listing addresses)
+export async function getAppGeoUpazilas(districtId?: string | null) {
+  return queryRows<Row>(
+    `
+      SELECT CAST(id AS CHAR) AS id, CAST(district_id AS CHAR) AS district_id, name_en, name_bn
+      FROM geo_upazilas
+      WHERE (? IS NULL OR district_id = ?)
+      ORDER BY name_en
+    `,
+    [districtId ?? null, districtId ?? null]
+  );
+}
+
+// GET /api/v1/app/sale/price-quote?animal_id=&breed_id=&district=&weight=
+// Resolves the approved forward-linkage B2B preset for an animal + breed + region
+// (most-specific match wins) and returns the per-kg breakdown + net farmer rate.
+export async function getSalePriceQuote(params: {
+  animal_id?: string | null;
+  breed_id?: string | null;
+  district?: string | null;
+  weight?: string | null;
+}) {
+  const animalId = params.animal_id ?? null;
+  const breedId = params.breed_id ?? null;
+  const district = params.district ?? null;
+  const rows = await queryRows<Row>(
+    `
+      SELECT CAST(r.id AS CHAR) AS id, CAST(r.sale_item_id AS CHAR) AS sale_item_id,
+             CAST(r.animal_id AS CHAR) AS animal_id, CAST(r.breed_id AS CHAR) AS breed_id,
+             r.district, r.division, r.unit,
+             r.b2b_market_rate, r.farmer_rate,
+             r.platform_fee, r.logistics_fee, r.warehouse_vet_fee,
+             (
+               (r.animal_id IS NOT NULL AND r.animal_id = ?) * 8 +
+               (r.breed_id IS NOT NULL AND r.breed_id = ?) * 4 +
+               (r.district IS NOT NULL AND r.district = ?) * 2
+             ) AS match_score
+      FROM sale_pricing_rules r
+      WHERE r.is_active = 1
+        AND (r.animal_id IS NULL OR r.animal_id = ?)
+        AND (r.breed_id IS NULL OR r.breed_id = ?)
+        AND (r.district IS NULL OR r.district = ?)
+      ORDER BY match_score DESC, r.effective_from DESC, r.id DESC
+      LIMIT 1
+    `,
+    [animalId, breedId, district, animalId, breedId, district]
+  );
+  const rule = rows[0] ?? null;
+  if (!rule) return { rule: null, breakdown: null };
+  const b2b = Number(rule.b2b_market_rate ?? 0);
+  const platform = Number(rule.platform_fee ?? 0);
+  const logistics = Number(rule.logistics_fee ?? 0);
+  const vet = Number(rule.warehouse_vet_fee ?? 0);
+  const deductions = platform + logistics + vet;
+  const netFarmerRate = Number(rule.farmer_rate ?? b2b - deductions);
+  const weight = Number(params.weight ?? 0) || 0;
+  return {
+    rule,
+    breakdown: {
+      unit: rule.unit ?? "kg",
+      district: rule.district ?? null,
+      b2b_market_rate: b2b,
+      platform_fee: platform,
+      logistics_fee: logistics,
+      warehouse_vet_fee: vet,
+      total_deductions: deductions,
+      net_farmer_rate: netFarmerRate,
+      weight_kg: weight,
+      estimated_earning: weight > 0 ? weight * netFarmerRate : null
+    }
+  };
 }
 
 export async function getAppSaleItems() {
@@ -380,14 +518,15 @@ export async function getAppSaleItems() {
   );
 }
 
-export async function getAppBreeds() {
+export async function getAppBreeds(species?: string | null) {
   return queryRows<Row>(
     `
-      SELECT CAST(id AS CHAR) AS id, animal_type, name_en, name_bn, is_active
+      SELECT CAST(id AS CHAR) AS id, animal_type, name_en, name_bn, sort_order, is_active
       FROM animal_breeds
-      WHERE is_active = 1
-      ORDER BY animal_type, id
-    `
+      WHERE is_active = 1 AND (? IS NULL OR animal_type = ?)
+      ORDER BY animal_type, sort_order, id
+    `,
+    [species ?? null, species ?? null]
   );
 }
 
@@ -395,11 +534,15 @@ export async function getAppPricing() {
   return queryRows<Row>(
     `
       SELECT CAST(r.id AS CHAR) AS id, CAST(r.sale_item_id AS CHAR) AS sale_item_id,
+             CAST(r.animal_id AS CHAR) AS animal_id, CAST(r.breed_id AS CHAR) AS breed_id,
              si.slug AS item_slug, si.name_en AS item_name,
-             r.district, r.b2b_market_rate, r.farmer_rate,
+             a.name_en AS animal_name, b.name_en AS breed_name,
+             r.district, r.division, r.b2b_market_rate, r.farmer_rate,
              r.platform_fee, r.logistics_fee, r.warehouse_vet_fee, r.unit
       FROM sale_pricing_rules r
       JOIN sale_items si ON si.id = r.sale_item_id
+      LEFT JOIN animals a ON a.id = r.animal_id
+      LEFT JOIN animal_breeds b ON b.id = r.breed_id
       WHERE r.is_active = 1
       ORDER BY r.effective_from DESC, r.id DESC
     `
@@ -463,11 +606,137 @@ export async function getAppPartnerProjects() {
   return queryRows<Row>(
     `
       SELECT CAST(id AS CHAR) AS id, project_code, name_en, name_bn,
-             district, upazila, status, capacity, lender_name,
-             max_credit_amount, start_date, end_date, steps_json
+             interest_slug, division, district, upazila, image_url,
+             summary_en, summary_bn, market_overview_en, market_overview_bn,
+             investment_amount, duration_label, region_based, is_active,
+             platform_fee, logistics_fee, warehouse_vet_fee,
+             status, capacity, lender_name, max_credit_amount,
+             start_date, end_date, steps_json
       FROM partner_projects
       ORDER BY created_at DESC, id DESC
     `
+  );
+}
+
+// Root interest slugs a user selected (children resolved up to their root).
+async function userRootInterestSlugs(userId?: string | null): Promise<string[]> {
+  if (!userId) return [];
+  const rows = await queryRows<Row>(
+    `
+      SELECT DISTINCT COALESCE(parent.slug, ic.slug) AS root_slug
+      FROM user_interests ui
+      JOIN interest_categories ic ON ic.id = ui.interest_category_id
+      LEFT JOIN interest_categories parent ON parent.id = ic.parent_id
+      WHERE ui.user_id = ?
+    `,
+    [userId]
+  );
+  return rows.map((r) => String(r.root_slug)).filter(Boolean);
+}
+
+async function resolveUserRegion(userId?: string | null, division?: string | null, district?: string | null) {
+  if ((division && district) || !userId) return { division: division ?? null, district: district ?? null };
+  const u = await queryRows<Row>("SELECT district FROM app_users WHERE id = ? LIMIT 1", [userId]);
+  return { division: division ?? null, district: district ?? (u[0]?.district as string | undefined) ?? null };
+}
+
+// GET /api/v1/app/projects/active?user_id=&division=&district=
+// "Projects active in your area": active, non-expired projects that are either
+// open to all (region_based=0) or match the user's division/district. Projects
+// matching the user's interests are flagged (matches_interest) for the tag.
+export async function getAppActiveProjects(userId?: string | null, division?: string | null, district?: string | null) {
+  const region = await resolveUserRegion(userId, division, district);
+  const interests = await userRootInterestSlugs(userId);
+  const interestList = interests.length ? interests : [""];
+  const placeholders = interestList.map(() => "?").join(", ");
+  return queryRows<Row>(
+    `
+      SELECT CAST(p.id AS CHAR) AS id, p.project_code, p.name_en, p.name_bn,
+             p.interest_slug, p.division, p.district, p.upazila, p.image_url,
+             p.summary_en, p.summary_bn, p.market_overview_en, p.market_overview_bn,
+             p.investment_amount, p.duration_label, p.region_based, p.lender_name,
+             p.max_credit_amount, p.capacity, p.status, p.start_date, p.end_date,
+             (p.interest_slug IN (${placeholders})) AS matches_interest,
+             (SELECT COUNT(*) FROM partner_applications a WHERE a.partner_project_id = p.id) AS enrolled
+      FROM partner_projects p
+      WHERE p.is_active = 1
+        AND p.status IN ('open', 'opening_soon')
+        AND (p.end_date IS NULL OR p.end_date >= CURDATE())
+        AND (p.region_based = 0 OR p.division = ? OR p.district = ?)
+      ORDER BY matches_interest DESC, FIELD(p.status,'open','opening_soon'), p.start_date
+    `,
+    [...interestList, region.division, region.district]
+  );
+}
+
+// GET /api/v1/app/projects/mine?user_id=
+// "My Projects": the projects a user has enrolled in (via partner_applications).
+export async function getAppMyProjects(userId?: string | null) {
+  if (!userId) return [];
+  return queryRows<Row>(
+    `
+      SELECT CAST(p.id AS CHAR) AS id, p.project_code, p.name_en, p.name_bn,
+             p.interest_slug, p.division, p.district, p.upazila, p.image_url,
+             p.summary_en, p.summary_bn, p.duration_label, p.investment_amount,
+             p.status AS project_status, p.start_date, p.end_date, p.steps_json,
+             CAST(a.id AS CHAR) AS application_id, a.application_code,
+             a.current_step, a.status AS application_status,
+             (a.status = 'approved') AS is_approved,
+             u.is_kyc_verified AS kyc_verified,
+             (a.nid_number IS NOT NULL AND a.nid_number <> '') AS kyc_submitted,
+             (EXISTS (SELECT 1 FROM app_user_banking b WHERE b.user_id = a.user_id)) AS has_banking,
+             (a.farm_assessment_json IS NOT NULL
+               OR EXISTS (SELECT 1 FROM app_user_farm f WHERE f.user_id = a.user_id)) AS has_farm_assessment,
+             a.created_at AS applied_at
+      FROM partner_applications a
+      JOIN partner_projects p ON p.id = a.partner_project_id
+      JOIN app_users u ON u.id = a.user_id
+      WHERE a.user_id = ?
+      ORDER BY a.updated_at DESC, a.id DESC
+    `,
+    [userId]
+  );
+}
+
+// GET /api/v1/app/sale/category-availability?user_id=&division=&district=
+// Returns the interest_slugs that have at least one active project in the
+// user's region (or open) — used to enable/disable List-for-Sale categories.
+export async function getSaleCategoryAvailability(userId?: string | null, division?: string | null, district?: string | null) {
+  const region = await resolveUserRegion(userId, division, district);
+  const rows = await queryRows<Row>(
+    `
+      SELECT DISTINCT p.interest_slug
+      FROM partner_projects p
+      WHERE p.is_active = 1
+        AND p.status IN ('open', 'opening_soon')
+        AND (p.end_date IS NULL OR p.end_date >= CURDATE())
+        AND p.interest_slug IS NOT NULL
+        AND (p.region_based = 0 OR p.division = ? OR p.district = ?)
+    `,
+    [region.division, region.district]
+  );
+  const available = rows.map((r) => String(r.interest_slug));
+  return { region, available };
+}
+
+// GET /api/v1/app/projects/prev-rates?animal_id=&breed_id=&district=
+// Previous B2B market rates for the same animal/breed/region (for the admin
+// project-pricing section and the app's market context).
+export async function getProjectPrevRates(animalId?: string | null, breedId?: string | null, district?: string | null) {
+  return queryRows<Row>(
+    `
+      SELECT CAST(r.id AS CHAR) AS id, CAST(r.partner_project_id AS CHAR) AS partner_project_id,
+             r.district, r.division, r.b2b_market_rate, r.farmer_rate, r.unit,
+             r.effective_from, p.name_en AS project_name
+      FROM sale_pricing_rules r
+      LEFT JOIN partner_projects p ON p.id = r.partner_project_id
+      WHERE (? IS NULL OR r.animal_id = ?)
+        AND (? IS NULL OR r.breed_id = ?)
+        AND (? IS NULL OR r.district = ?)
+      ORDER BY r.effective_from DESC, r.id DESC
+      LIMIT 20
+    `,
+    [animalId ?? null, animalId ?? null, breedId ?? null, breedId ?? null, district ?? null, district ?? null]
   );
 }
 
@@ -635,11 +904,15 @@ async function buildAppUser(user: Row) {
     phone: user.phone ?? null,
     gender: user.gender ?? null,
     date_of_birth: user.date_of_birth ?? null,
+    division: user.division ?? null,
     district: user.district ?? null,
     upazila: user.upazila ?? null,
     profile_image_url: user.profile_image_url ?? null,
     status: user.status ?? "active",
     roles,
+    preferences: (profile && profile.preferences) ?? null,
+    is_kyc_verified: Number(user.is_kyc_verified ?? 0) === 1,
+    nid_number: user.nid_number ?? null,
     needs_personal_info: Number(user.personal_info_completed ?? 0) === 0,
     needs_preferences: !(profile && profile.preferences)
   };
@@ -707,7 +980,7 @@ export async function verifyOtpLogin(payload: Row) {
   }
 
   const existing = await queryRows<Row>(
-    "SELECT id, full_name, display_name, phone, gender, date_of_birth, district, upazila, profile_image_url, status, personal_info_completed, profile_json FROM app_users WHERE phone = ? LIMIT 1",
+    "SELECT id, full_name, display_name, phone, gender, date_of_birth, division, district, upazila, profile_image_url, status, personal_info_completed, is_kyc_verified, nid_number, profile_json FROM app_users WHERE phone = ? LIMIT 1",
     [phone]
   );
 
@@ -724,7 +997,7 @@ export async function verifyOtpLogin(payload: Row) {
       [result.insertId]
     );
     const rows = await queryRows<Row>(
-      "SELECT id, full_name, display_name, phone, gender, date_of_birth, district, upazila, profile_image_url, status, personal_info_completed, profile_json FROM app_users WHERE id = ? LIMIT 1",
+      "SELECT id, full_name, display_name, phone, gender, date_of_birth, division, district, upazila, profile_image_url, status, personal_info_completed, is_kyc_verified, nid_number, profile_json FROM app_users WHERE id = ? LIMIT 1",
       [result.insertId]
     );
     user = rows[0];
@@ -759,6 +1032,11 @@ export async function savePersonalInfo(payload: Row) {
     `UPDATE app_users
        SET full_name = ?, display_name = COALESCE(NULLIF(?, ''), display_name, ?),
            gender = ?, date_of_birth = ?, profile_image_url = COALESCE(NULLIF(?, ''), profile_image_url),
+           division = COALESCE(NULLIF(?, ''), division),
+           district = COALESCE(NULLIF(?, ''), district),
+           upazila = COALESCE(NULLIF(?, ''), upazila),
+           latitude = COALESCE(?, latitude),
+           longitude = COALESCE(?, longitude),
            personal_info_completed = 1
      WHERE id = ?`,
     [
@@ -768,12 +1046,17 @@ export async function savePersonalInfo(payload: Row) {
       gender,
       (payload.date_of_birth ?? null) as string | null,
       (payload.profile_image_url ?? "").toString(),
+      (payload.division ?? "").toString(),
+      (payload.district ?? "").toString(),
+      (payload.upazila ?? "").toString(),
+      payload.latitude != null ? Number(payload.latitude) : null,
+      payload.longitude != null ? Number(payload.longitude) : null,
       userId
     ]
   );
 
   const rows = await queryRows<Row>(
-    "SELECT id, full_name, display_name, phone, gender, date_of_birth, district, upazila, profile_image_url, status, personal_info_completed, profile_json FROM app_users WHERE id = ? LIMIT 1",
+    "SELECT id, full_name, display_name, phone, gender, date_of_birth, division, district, upazila, profile_image_url, status, personal_info_completed, is_kyc_verified, nid_number, profile_json FROM app_users WHERE id = ? LIMIT 1",
     [userId]
   );
   if (rows.length === 0) throw new Error("User not found.");
@@ -784,7 +1067,7 @@ export async function savePersonalInfo(payload: Row) {
 export async function getAppMe(userId?: string | null) {
   if (!userId) throw new Error("user_id is required.");
   const rows = await queryRows<Row>(
-    "SELECT id, full_name, display_name, phone, gender, date_of_birth, district, upazila, profile_image_url, status, personal_info_completed, profile_json FROM app_users WHERE id = ? LIMIT 1",
+    "SELECT id, full_name, display_name, phone, gender, date_of_birth, division, district, upazila, profile_image_url, status, personal_info_completed, is_kyc_verified, nid_number, profile_json FROM app_users WHERE id = ? LIMIT 1",
     [userId]
   );
   if (rows.length === 0) throw new Error("User not found.");
@@ -1113,7 +1396,7 @@ export async function getAppLearningOverview(userId?: string | null) {
   const cats = await queryRows<Row>(
     `
       SELECT CAST(c.id AS CHAR) AS id, c.slug, c.name_en, c.name_bn, c.emoji,
-             c.description_en, c.description_bn, c.interest_slug,
+             c.description_en, c.description_bn, c.interest_slug, c.section,
              COUNT(DISTINCT m.id) AS module_count,
              COUNT(DISTINCT ct.id) AS content_count,
              COUNT(DISTINCT CASE WHEN p.status = 'completed' THEN ct.id END) AS completed_count

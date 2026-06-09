@@ -17,11 +17,13 @@ import {
   HelpCircle,
   LayoutDashboard,
   ListChecks,
+  MapPin,
   MessageSquareText,
   PackageCheck,
   Pencil,
   ReceiptText,
   ScrollText,
+  Search,
   Settings2,
   ShieldCheck,
   ShoppingCart,
@@ -66,9 +68,19 @@ const sections: NavSection[] = [
       { label: "All Listings", href: "/sale", icon: Store },
       { label: "Sale Categories", href: "/sale/categories", icon: Tags },
       { label: "Sale Items", href: "/sale/items", icon: ListChecks },
+      { label: "Animal Master", href: "/sale/animals", icon: Boxes },
       { label: "Animal Breeds", href: "/sale/breeds", icon: Boxes },
       { label: "Pricing Rules", href: "/sale/pricing", icon: ReceiptText },
       { label: "Payment Confirmations", href: "/sale/confirmations", icon: ShieldCheck }
+    ]
+  },
+  {
+    title: "Geography",
+    icon: MapPin,
+    items: [
+      { label: "Divisions", href: "/geo/divisions", icon: MapPin },
+      { label: "Districts", href: "/geo/districts", icon: MapPin },
+      { label: "Upazilas / Thanas", href: "/geo/upazilas", icon: MapPin }
     ]
   },
   {
@@ -126,6 +138,7 @@ function sectionHasActive(pathname: string, section: NavSection) {
 
 function SidebarNav() {
   const pathname = usePathname() ?? "";
+  const [q, setQ] = useState("");
   // Open the group that contains the active route; collapse the rest. The user
   // can toggle any group, with the open set tracked in state.
   const [open, setOpen] = useState<Record<string, boolean>>(() => {
@@ -138,8 +151,35 @@ function SidebarNav() {
     setOpen((prev) => ({ ...prev, [title]: !prev[title] }));
   }
 
+  const query = q.trim().toLowerCase();
+  const searchResults: Array<{ label: string; href: string; icon: typeof LayoutDashboard; group: string }> = query
+    ? [
+        ...pinned.map((i) => ({ ...i, group: "Quick" })),
+        ...sections.flatMap((s) => s.items.map((i) => ({ ...i, group: s.title })))
+      ].filter((i) => i.label.toLowerCase().includes(query) || i.group.toLowerCase().includes(query))
+    : [];
+
   return (
     <>
+      <div className="nav-search">
+        <Search size={15} />
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search menu…" aria-label="Search menu" />
+        {q ? <button type="button" className="nav-search-clear" onClick={() => setQ("")}>×</button> : null}
+      </div>
+
+      {query ? (
+        <nav className="nav-search-results">
+          {searchResults.length === 0 ? <p className="nav-search-empty">No menu items match “{q}”.</p> : null}
+          {searchResults.map((item) => (
+            <Link className={`nav-item${isActive(pathname, item.href) ? " active" : ""}`} href={item.href} key={item.href + item.group} title={item.group}>
+              <item.icon />
+              <span className="nav-item-label">{item.label}</span>
+              <span className="nav-item-group">{item.group}</span>
+            </Link>
+          ))}
+        </nav>
+      ) : (
+      <>
       <nav className="nav-pinned">
         {pinned.map((item) => (
           <Link className={`nav-item${isActive(pathname, item.href) ? " active" : ""}`} href={item.href} key={item.href}>
@@ -169,6 +209,8 @@ function SidebarNav() {
           </div>
         );
       })}
+      </>
+      )}
     </>
   );
 }

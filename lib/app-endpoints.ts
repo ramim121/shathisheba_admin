@@ -763,24 +763,54 @@ export async function getAppPartnerLedgers() {
   );
 }
 
-export async function getAppCommunityPosts(scope?: string | null, district?: string | null) {
+export async function getAppCommunityPosts(scope?: string | null, district?: string | null, filter?: string | null, userId?: string | null) {
   const s = scope && scope !== "all" ? scope : null;
   const d = district && district.trim() ? district.trim() : null;
+
+  // "Sale listings" filter: approved listings of the user's area straight from
+  // the marketplace table, shaped like feed posts.
+  if (filter === "listings") {
+    return queryRows<Row>(
+      `
+        SELECT CONCAT('listing-', l.id) AS id, u.full_name AS farmer_name,
+               'notice' AS post_type,
+               CONCAT('🏷️ ', COALESCE(l.title_en, 'Marketplace item'), ' — ', l.quantity, ' ', l.unit,
+                      COALESCE(CONCAT(' · ৳', FORMAT(l.farmer_expected_price, 0)), '')) AS body,
+               JSON_UNQUOTE(JSON_EXTRACT(l.media_json, '$[0]')) AS image_url,
+               0 AS is_official, 0 AS like_count, 0 AS comment_count,
+               l.district, l.upazila, 'district' AS scope, 'visible' AS status, l.created_at,
+               1 AS is_listing
+        FROM sale_listings l
+        JOIN app_users u ON u.id = l.user_id
+        WHERE l.status = 'active'
+          AND (? IS NULL OR l.district IS NULL OR l.district = ?)
+        ORDER BY l.created_at DESC
+        LIMIT 50
+      `,
+      [d, d]
+    );
+  }
+
+  const mine = filter === "mine" && userId ? userId : null;
+  // "all" drops the regional restriction; default/"regional" keeps it.
+  const regional = filter === "all" ? null : d;
   return queryRows<Row>(
     `
       SELECT CAST(p.id AS CHAR) AS id, u.full_name AS farmer_name,
              p.post_type, p.body, p.image_url, p.is_official, p.like_count, p.comment_count,
-             p.district, p.upazila, p.scope, p.status, p.created_at
+             p.district, p.upazila, p.scope, p.status, p.created_at,
+             (p.post_type = 'notice' AND p.body LIKE '🏷️%') AS is_listing
       FROM community_posts p
       JOIN app_users u ON u.id = p.user_id
       WHERE p.status = 'visible' AND (? IS NULL OR p.scope = ?)
+        AND (? IS NULL OR p.user_id = ?)
         -- Regional feed: nationwide posts always show; district-tagged posts only
         -- show to users of that district (when the app sends one).
         AND (? IS NULL OR p.district IS NULL OR p.scope = 'bangladesh' OR p.district = ?)
       ORDER BY p.is_official DESC, p.created_at DESC
       LIMIT 50
     `,
-    [s, s, d, d]
+    [s, s, mine, mine, regional, regional]
   );
 }
 

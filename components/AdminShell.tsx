@@ -92,6 +92,7 @@ const sections: NavSection[] = [
       { label: "Products", href: "/buy/products", icon: PackageCheck },
       { label: "Buy Categories", href: "/buy/categories", icon: Tags },
       { label: "Placed Orders", href: "/orders", icon: ShoppingCart },
+      { label: "Inventory", href: "/orders/inventory", icon: Boxes },
       { label: "Payments", href: "/orders/payments", icon: CreditCard }
     ]
   },

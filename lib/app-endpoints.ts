@@ -557,7 +557,7 @@ export async function getAppPricing() {
 export async function getAppBuyCategories() {
   return queryRows<Row>(
     `
-      SELECT CAST(c.id AS CHAR) AS id, c.slug, c.name_en, c.name_bn,
+      SELECT CAST(c.id AS CHAR) AS id, c.slug, c.interest_slug, c.name_en, c.name_bn,
              c.description_en, c.description_bn,
              COUNT(p.id) AS product_count
       FROM buy_categories c
@@ -569,7 +569,7 @@ export async function getAppBuyCategories() {
   );
 }
 
-export async function getAppProducts(category?: string | null) {
+export async function getAppProducts(category?: string | null, interest?: string | null) {
   return queryRows<Row>(
     `
       SELECT CAST(p.id AS CHAR) AS id, p.sku, p.name_en, p.name_bn,
@@ -581,10 +581,11 @@ export async function getAppProducts(category?: string | null) {
       FROM products p
       JOIN buy_categories c ON c.id = p.buy_category_id
       WHERE (? IS NULL OR c.slug = ?)
+        AND (? IS NULL OR c.interest_slug = ?)
         AND p.status IN ('active','out_of_stock')
       ORDER BY (p.status = 'active') DESC, p.updated_at DESC, p.id DESC
     `,
-    [category ?? null, category ?? null]
+    [category ?? null, category ?? null, interest ?? null, interest ?? null]
   );
 }
 
@@ -762,7 +763,9 @@ export async function getAppPartnerLedgers() {
   );
 }
 
-export async function getAppCommunityPosts(scope?: string | null) {
+export async function getAppCommunityPosts(scope?: string | null, district?: string | null) {
+  const s = scope && scope !== "all" ? scope : null;
+  const d = district && district.trim() ? district.trim() : null;
   return queryRows<Row>(
     `
       SELECT CAST(p.id AS CHAR) AS id, u.full_name AS farmer_name,
@@ -771,10 +774,13 @@ export async function getAppCommunityPosts(scope?: string | null) {
       FROM community_posts p
       JOIN app_users u ON u.id = p.user_id
       WHERE p.status = 'visible' AND (? IS NULL OR p.scope = ?)
+        -- Regional feed: nationwide posts always show; district-tagged posts only
+        -- show to users of that district (when the app sends one).
+        AND (? IS NULL OR p.district IS NULL OR p.scope = 'bangladesh' OR p.district = ?)
       ORDER BY p.is_official DESC, p.created_at DESC
       LIMIT 50
     `,
-    [scope && scope !== "all" ? scope : null, scope && scope !== "all" ? scope : null]
+    [s, s, d, d]
   );
 }
 
@@ -1776,6 +1782,57 @@ export async function getMyListings(userId?: string | null) {
   );
 }
 
+// GET /api/v1/app/orders/mine?user_id=  -> a buyer's own orders + items.
+export async function getMyOrders(userId?: string | null) {
+  if (!userId) return [];
+  return queryRows<Row>(
+    `
+      SELECT CAST(o.id AS CHAR) AS id, o.order_code, o.total_amount, o.delivery_fee, o.payable_amount,
+             o.payment_method, o.payment_status, o.fulfillment_status, o.district, o.upazila, o.created_at,
+             COUNT(oi.id) AS item_count,
+             GROUP_CONCAT(CONCAT(p.name_en, ' ×', oi.quantity) SEPARATOR ', ') AS items_summary,
+             JSON_UNQUOTE(JSON_EXTRACT(MAX(p.metadata), '$.image_url')) AS image_url
+      FROM orders o
+      LEFT JOIN order_items oi ON oi.order_id = o.id
+      LEFT JOIN products p ON p.id = oi.product_id
+      WHERE o.user_id = ?
+      GROUP BY o.id
+      ORDER BY o.created_at DESC
+      LIMIT 50
+    `,
+    [userId]
+  );
+}
+
+// GET /api/v1/app/admin/inventory -> stock overview + pending demand + recent movements
+// for the admin Orders → Inventory page.
+export async function getInventoryOverview() {
+  const products = await queryRows<Row>(
+    `
+      SELECT CAST(p.id AS CHAR) AS id, p.sku, p.name_en, p.unit, p.price, p.stock_qty,
+             p.low_stock_threshold, p.status, c.name_en AS category_name,
+             COALESCE(pend.qty, 0) AS pending_qty,
+             COALESCE(conf.qty, 0) AS confirmed_qty
+      FROM products p
+      JOIN buy_categories c ON c.id = p.buy_category_id
+      LEFT JOIN (SELECT oi.product_id, SUM(oi.quantity) AS qty FROM order_items oi
+                   JOIN orders o ON o.id = oi.order_id WHERE o.fulfillment_status = 'placed'
+                  GROUP BY oi.product_id) pend ON pend.product_id = p.id
+      LEFT JOIN (SELECT oi.product_id, SUM(oi.quantity) AS qty FROM order_items oi
+                   JOIN orders o ON o.id = oi.order_id WHERE o.fulfillment_status IN ('confirmed','assigned','in_transit','delivered')
+                  GROUP BY oi.product_id) conf ON conf.product_id = p.id
+      ORDER BY (p.stock_qty <= p.low_stock_threshold) DESC, pend.qty DESC, p.name_en
+    `
+  );
+  const movements = await queryRows<Row>(
+    `SELECT CAST(m.id AS CHAR) AS id, CAST(m.product_id AS CHAR) AS product_id, p.name_en,
+            m.change_qty, m.reason, m.ref_code, m.note, m.created_at
+       FROM inventory_movements m JOIN products p ON p.id = m.product_id
+      ORDER BY m.created_at DESC LIMIT 60`
+  );
+  return { products, movements };
+}
+
 // ===========================================================================
 // Approvals to-do dashboard (admin). Four queues: sale listings, project
 // enrollments, KYC documents, and newly-registered users. Each item carries the
@@ -1843,18 +1900,35 @@ export async function getApprovalQueues() {
        FROM app_users WHERE status = 'pending'
       ORDER BY created_at DESC LIMIT 40`
   );
+  // Placed buy orders pending inventory validation, with stock-coverage flag.
+  const orders = await queryRows<Row>(
+    `SELECT CAST(o.id AS CHAR) AS id, o.order_code, o.payable_amount, o.payment_method, o.district, o.created_at,
+            CAST(o.user_id AS CHAR) AS user_id, u.full_name, u.phone,
+            COUNT(oi.id) AS item_count,
+            GROUP_CONCAT(CONCAT(p.name_en, ' ×', oi.quantity) SEPARATOR ', ') AS items_summary,
+            MIN(p.stock_qty >= oi.quantity) AS stock_ok
+       FROM orders o
+       JOIN app_users u ON u.id = o.user_id
+       JOIN order_items oi ON oi.order_id = o.id
+       JOIN products p ON p.id = oi.product_id
+      WHERE o.fulfillment_status = 'placed'
+      GROUP BY o.id
+      ORDER BY o.created_at DESC LIMIT 40`
+  );
   return {
     counts: {
       listings: listings.length,
       enrollments: enrollments.length,
       kyc: kyc.length,
       users: users.length,
-      total: listings.length + enrollments.length + kyc.length + users.length
+      orders: orders.length,
+      total: listings.length + enrollments.length + kyc.length + users.length + orders.length
     },
     listings,
     enrollments,
     kyc,
-    users
+    users,
+    orders
   };
 }
 
@@ -1894,6 +1968,41 @@ export async function getApprovalDetail(type?: string | null, id?: string | null
     const rows = await queryRows<Row>("SELECT * FROM app_users WHERE id = ? LIMIT 1", [id]);
     item = rows[0] || null;
     userId = id;
+  } else if (type === "order") {
+    const rows = await queryRows<Row>(
+      `SELECT o.*, u.full_name, u.phone FROM orders o JOIN app_users u ON u.id = o.user_id WHERE o.id = ? LIMIT 1`,
+      [id]
+    );
+    item = rows[0] || null;
+    userId = item?.user_id as string;
+    if (item) {
+      // Per-line inventory status + a short stock-movement history for decisions.
+      const lines = await queryRows<Row>(
+        `SELECT CAST(oi.product_id AS CHAR) AS product_id, p.name_en, oi.quantity, oi.unit_price, oi.line_total,
+                p.stock_qty, p.low_stock_threshold, p.unit,
+                (p.stock_qty >= oi.quantity) AS stock_ok,
+                (SELECT COALESCE(SUM(oi2.quantity), 0) FROM order_items oi2
+                   JOIN orders o2 ON o2.id = oi2.order_id
+                  WHERE oi2.product_id = oi.product_id AND o2.fulfillment_status = 'placed' AND o2.id <> o.id) AS other_pending_qty
+           FROM order_items oi
+           JOIN products p ON p.id = oi.product_id
+           JOIN orders o ON o.id = oi.order_id
+          WHERE oi.order_id = ?`,
+        [id]
+      );
+      const productIds = lines.map((l) => l.product_id);
+      const history = productIds.length
+        ? await queryRows<Row>(
+            `SELECT CAST(m.product_id AS CHAR) AS product_id, p.name_en, m.change_qty, m.reason, m.ref_code, m.created_at
+               FROM inventory_movements m JOIN products p ON p.id = m.product_id
+              WHERE m.product_id IN (${productIds.map(() => "?").join(",")})
+              ORDER BY m.created_at DESC LIMIT 15`,
+            productIds
+          )
+        : [];
+      (item as Row).order_lines = lines;
+      (item as Row).inventory_history = history;
+    }
   } else {
     throw new Error("Unknown approval type.");
   }
@@ -1949,6 +2058,60 @@ async function upsertProductFromListing(l: Row, payload: Row) {
   return prod[0] ?? null;
 }
 
+// Announce an approved listing in the regional community feed so nearby buyers see it.
+async function announceListingInCommunity(l: Row, product: Row | null) {
+  try {
+    const media = Array.isArray(l.media_json) ? (l.media_json as unknown[]) : [];
+    const priceText = product?.price ? ` Price: ৳${Number(product.price).toLocaleString()}.` : "";
+    const regionTag = [l.district, l.upazila].filter(Boolean).map((r) => `#${String(r).replace(/\s+/g, "")}`).join(" ");
+    const body = `🏷️ New verified listing: ${String(l.title_en || l.item_name || "Marketplace item")} — ${l.quantity} ${l.unit}.${priceText} Available in Buy from Shathi. ${regionTag}`.trim();
+    await executeQuery(
+      `INSERT INTO community_posts (user_id, scope, post_type, body, image_url, district, upazila, status)
+       VALUES (?, 'district', 'notice', ?, ?, ?, ?, 'visible')`,
+      [l.user_id, body, media.length ? String(media[0]) : null, l.district ?? null, l.upazila ?? null]
+    );
+  } catch {
+    // The announcement is best-effort; never fail the approval because of it.
+  }
+}
+
+// POST /api/v1/app/admin/set-required-docs  { application_id, required_docs: string[], admin_id? }
+// Marks KYC documents as mandatory for one project application. The application
+// drops to needs_document until the user uploads + an admin verifies them.
+export async function setApprovalRequirements(payload: Row) {
+  const appId = payload.application_id;
+  const docs = Array.isArray(payload.required_docs) ? (payload.required_docs as unknown[]).map(String) : [];
+  if (!appId) throw new Error("application_id is required.");
+  const allowed = ["nid_front", "nid_back", "selfie", "trade_license", "passbook"];
+  const cleaned = docs.filter((d) => allowed.includes(d));
+  await executeQuery(
+    `UPDATE partner_applications SET required_docs = ?,
+        status = IF(? > 0 AND status IN ('submitted','officer_verification','ready_to_approve'), 'needs_document', status)
+      WHERE id = ?`,
+    [JSON.stringify(cleaned), cleaned.length, appId]
+  );
+  return { application_id: String(appId), required_docs: cleaned };
+}
+
+// Throws if any admin-required doc for this application is not yet verified.
+async function assertRequiredDocsVerified(application: Row) {
+  const raw = application.required_docs;
+  const required: string[] = Array.isArray(raw) ? (raw as unknown[]).map(String)
+    : typeof raw === "string" && raw.trim().startsWith("[") ? JSON.parse(raw) : [];
+  if (!required.length) return;
+  const docs = await queryRows<Row>(
+    "SELECT doc_type, status FROM app_user_kyc_documents WHERE user_id = ? ORDER BY created_at",
+    [application.user_id]
+  );
+  const latest: Record<string, string> = {};
+  for (const d of docs) latest[String(d.doc_type)] = String(d.status);
+  const missing = required.filter((r) => latest[r] !== "verified");
+  if (missing.length) {
+    const label = (t: string) => t === "selfie" ? "User Photo" : t.replace(/_/g, " ");
+    throw new Error(`Cannot approve yet — required document(s) not verified: ${missing.map(label).join(", ")}.`);
+  }
+}
+
 // POST /api/v1/app/admin/approve  { type, id, action: 'approve'|'reject', admin_id?, note? }
 export async function decideApproval(payload: Row) {
   const type = String(payload.type || "");
@@ -1976,14 +2139,52 @@ export async function decideApproval(payload: Row) {
       "UPDATE sale_listings SET status = ?, approved_by = ?, approved_at = NOW() WHERE id = ?",
       [approve ? "active" : "rejected", adminId, id]
     );
+    if (approve) await announceListingInCommunity(l, product);
     return { type, id: String(id), status: approve ? "active" : "rejected", product };
   }
   if (type === "enrollment") {
+    if (approve) {
+      const apps = await queryRows<Row>("SELECT user_id, required_docs FROM partner_applications WHERE id = ? LIMIT 1", [id]);
+      if (!apps[0]) throw new Error("Application not found.");
+      await assertRequiredDocsVerified(apps[0]);
+    }
     await executeQuery(
       "UPDATE partner_applications SET status = ?, current_step = ?, approved_by = ?, approved_at = NOW(), verification_notes = COALESCE(?, verification_notes) WHERE id = ?",
       [approve ? "approved" : "rejected", approve ? "approval" : "rejected", adminId, note, id]
     );
     return { type, id: String(id), status: approve ? "approved" : "rejected" };
+  }
+  if (type === "order") {
+    const orders = await queryRows<Row>("SELECT id, order_code, fulfillment_status FROM orders WHERE id = ? LIMIT 1", [id]);
+    const order = orders[0];
+    if (!order) throw new Error("Order not found.");
+    if (!approve) {
+      await executeQuery("UPDATE orders SET fulfillment_status = 'cancelled' WHERE id = ?", [id]);
+      return { type, id: String(id), status: "cancelled" };
+    }
+    // Inventory validation: every line must be coverable by current stock.
+    const items = await queryRows<Row>(
+      `SELECT oi.product_id, oi.quantity, p.name_en, p.stock_qty
+         FROM order_items oi JOIN products p ON p.id = oi.product_id WHERE oi.order_id = ?`,
+      [id]
+    );
+    const short = items.filter((it) => Number(it.stock_qty) < Number(it.quantity));
+    if (short.length) {
+      throw new Error(`Insufficient stock for: ${short.map((s) => `${s.name_en} (need ${s.quantity}, have ${s.stock_qty})`).join("; ")}.`);
+    }
+    // Deduct stock + write the inventory ledger.
+    for (const it of items) {
+      await executeQuery(
+        "UPDATE products SET stock_qty = stock_qty - ?, status = IF(stock_qty - ? <= 0, 'out_of_stock', status) WHERE id = ?",
+        [it.quantity, it.quantity, it.product_id]
+      );
+      await executeQuery(
+        "INSERT INTO inventory_movements (product_id, change_qty, reason, ref_code, note) VALUES (?, ?, 'order', ?, ?)",
+        [it.product_id, -Number(it.quantity), order.order_code, `Order approved by admin #${adminId ?? "?"}`]
+      );
+    }
+    await executeQuery("UPDATE orders SET fulfillment_status = 'confirmed' WHERE id = ?", [id]);
+    return { type, id: String(id), status: "confirmed", deducted: items.length };
   }
   if (type === "kyc") {
     const docs = await queryRows<Row>("SELECT user_id FROM app_user_kyc_documents WHERE id = ? LIMIT 1", [id]);

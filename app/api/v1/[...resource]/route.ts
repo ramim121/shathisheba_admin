@@ -60,9 +60,12 @@ import {
   getAppWeatherAlerts,
   getAdminNotifications,
   getMyListings,
+  getMyOrders,
+  getInventoryOverview,
   getApprovalQueues,
   getApprovalDetail,
   decideApproval,
+  setApprovalRequirements,
   getHomeFeed,
   getOnboardingTree,
   getUserBanking,
@@ -99,7 +102,7 @@ const appReadHandlers: Record<string, AppReadHandler> = {
   "geo/districts": (q) => getAppGeoDistricts(q.get("division_id")),
   "geo/upazilas": (q) => getAppGeoUpazilas(q.get("district_id")),
   "buy/categories": () => getAppBuyCategories(),
-  "buy/products": (q) => getAppProducts(q.get("category")),
+  "buy/products": (q) => getAppProducts(q.get("category"), q.get("interest")),
   "learning/modules": () => getAppLearningModules(),
   "learning/contents": () => getAppLearningContents(),
   "partners/projects": () => getAppPartnerProjects(),
@@ -109,7 +112,9 @@ const appReadHandlers: Record<string, AppReadHandler> = {
   "app/projects/prev-rates": (q) => getProjectPrevRates(q.get("animal_id"), q.get("breed_id"), q.get("district")),
   "app/sale/category-availability": (q) => getSaleCategoryAvailability(q.get("user_id"), q.get("division"), q.get("district")),
   "app/sale/my-listings": (q) => getMyListings(q.get("user_id")),
-  "community/posts": (q) => getAppCommunityPosts(q.get("scope")),
+  "app/orders/mine": (q) => getMyOrders(q.get("user_id")),
+  "app/admin/inventory": () => getInventoryOverview(),
+  "community/posts": (q) => getAppCommunityPosts(q.get("scope"), q.get("district")),
   "community/officers": (q) => getAppOfficers(q.get("district")),
   users: (q) => getAppProfileUsers(q.get("user_id")),
   "app/users": (q) => getAppProfileUsers(q.get("user_id")),
@@ -346,6 +351,9 @@ export async function POST(request: NextRequest, { params }: Params) {
     }
     if (exact === "app/admin/approve") {
       return NextResponse.json({ ok: true, source: "mysql", action: "approval_decided", result: await decideApproval(payload) }, { status: 200 });
+    }
+    if (exact === "app/admin/set-required-docs") {
+      return NextResponse.json({ ok: true, source: "mysql", action: "requirements_saved", result: await setApprovalRequirements(payload) }, { status: 200 });
     }
     if (exact === "app/community/moderate") {
       return NextResponse.json({ ok: true, source: "mysql", action: "post_moderated", result: await moderateCommunityPost(payload) }, { status: 200 });

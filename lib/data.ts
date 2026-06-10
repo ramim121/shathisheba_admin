@@ -295,6 +295,22 @@ export const apiCatalog = [
   { method: "GET", path: "/api/v1/app/market-updates?district=Mymensingh", desc: "Market updates list, location-first, with image + has_detail flag" },
   { method: "GET", path: "/api/v1/app/market-updates?id=1", desc: "Single market update blog detail (image + long-form content)" },
 
+  // --- Seller / buyer self-service ---
+  { method: "GET", path: "/api/v1/app/sale/my-listings?user_id=1", desc: "A seller's own listings with approval status (pending/active/rejected/sold) + media" },
+  { method: "GET", path: "/api/v1/app/orders/mine?user_id=1", desc: "A buyer's own orders with items summary, payment + fulfillment status" },
+
+  // --- Admin approvals & inventory ---
+  { method: "GET", path: "/api/v1/app/admin/approvals", desc: "Approvals to-do queues: listings, enrollments, KYC docs, new users, buy orders (with stock flag)" },
+  { method: "GET", path: "/api/v1/app/admin/approval?type=listing&id=1", desc: "One approval item + applicant KYC verification panel + documents (types: listing|enrollment|kyc|user|order)" },
+  { method: "POST", path: "/api/v1/app/admin/approve", desc: "Decide an approval { type, id, action, admin_id, price?, stock?, buy_category_id?, description? }: listing->publishes product + community post; order->validates + deducts inventory; user->grants seller role" },
+  { method: "POST", path: "/api/v1/app/admin/set-required-docs", desc: "Mark KYC docs mandatory for a project application { application_id, required_docs[] } — blocks approval until verified" },
+  { method: "GET", path: "/api/v1/app/admin/inventory", desc: "Inventory overview: stock, pending order demand, confirmed qty, movement ledger" },
+
+  // --- Admin console auth ---
+  { method: "POST", path: "/api/admin/login", desc: "Admin console sign-in { email, password } -> httpOnly session cookie" },
+  { method: "GET", path: "/api/admin/me", desc: "Current signed-in admin (401 when the session is missing/expired)" },
+  { method: "POST", path: "/api/admin/users", desc: "Create an admin user { name, email, password, role } (super/hq admins only)" },
+
   // --- Media ---
   { method: "POST", path: "/api/upload", desc: "Multipart image upload (profile, KYC, community, market) -> returns served URL" }
 ];

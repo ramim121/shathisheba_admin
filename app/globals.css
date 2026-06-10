@@ -1660,3 +1660,25 @@ td .tag {
 .db-muted { background: #eee7ec; color: #8a7282; }
 .def-item-empty { opacity: 0.5; }
 .def-item-empty .def-value { color: var(--muted); }
+
+/* Approvals drawer: edit link, requirement checkboxes, inventory panel, doc actions */
+.aq-editlink { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700; color: var(--brand); border: 1px dashed var(--rose-line); border-radius: 10px; padding: 9px 12px; }
+.aq-editlink:hover { background: var(--rose); }
+.reqpanel { background: #fff8ec; border: 1px solid #f0ddb5; border-radius: 12px; padding: 14px; }
+.reqpanel-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 4px; }
+.reqpanel-check { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink); font-weight: 600; }
+.reqpanel-save { margin-top: 12px; border: 0; border-radius: 10px; padding: 9px 14px; font-size: 13px; font-weight: 700; cursor: pointer; color: #fff; background: linear-gradient(135deg, var(--gold), #c9821a); }
+.invpanel { background: #f3f7fd; border: 1px solid #cdddf3; border-radius: 12px; padding: 14px; }
+.invpanel-sub { margin: 14px 0 6px; font-size: 12px; font-weight: 800; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; }
+.invpanel-row { margin: 0; padding: 5px 0; border-bottom: 1px solid #e3ecf7; font-size: 12px; color: var(--ink); }
+.vdoc-actions { display: flex; gap: 4px; padding: 0 6px 6px; }
+.vdoc-ok { flex: 1; border: 0; border-radius: 7px; padding: 4px; font-size: 11px; font-weight: 700; cursor: pointer; background: #e9f8f0; color: #197a4c; }
+.vdoc-no { border: 0; border-radius: 7px; padding: 4px 8px; font-size: 11px; font-weight: 700; cursor: pointer; background: #fdecef; color: #a11b3a; }
+.drawer-foot-wrap { border-top: 1px solid var(--rose-line); }
+.drawer-foot-wrap .drawer-foot { border-top: 0; }
+.drawer-error { display: flex; align-items: flex-start; gap: 7px; margin: 12px 20px 0; padding: 10px 12px; border-radius: 10px; background: #fdecef; border: 1px solid #f4c4ce; color: #a11b3a; font-size: 13px; }
+
+/* Inventory page */
+.inv-layout { display: grid; grid-template-columns: 1.7fr 1fr; gap: 18px; align-items: start; }
+@media (max-width: 1100px) { .inv-layout { grid-template-columns: 1fr; } }
+.inv-sku { font-size: 11px; color: var(--muted); }

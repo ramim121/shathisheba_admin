@@ -51,9 +51,17 @@ function isMoneyKey(key: string) {
   return /price|amount|earning|rate|fee|income|investment|balance|total/i.test(key);
 }
 
+// "10 Jun 2026, 3:45 PM" — compact, professional date rendering.
+function formatDate(d: Date, withTime = true): string {
+  const date = d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+  if (!withTime) return date;
+  const time = d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+  return `${date}, ${time}`;
+}
+
 function formatValue(key: string, value: unknown): string {
   if (value === null || value === undefined || value === "") return "—";
-  if (value instanceof Date) return value.toLocaleString();
+  if (value instanceof Date) return formatDate(value);
   if (typeof value === "object") return JSON.stringify(value, null, 2);
   const s = String(value);
   if (/^(is_|has_|send_|can_)/.test(key) || key === "active") {
@@ -62,7 +70,7 @@ function formatValue(key: string, value: unknown): string {
   }
   if (/_at$|_date$|^date_/.test(key) && /^\d{4}-\d{2}-\d{2}/.test(s)) {
     const d = new Date(s);
-    if (!Number.isNaN(d.getTime())) return d.toLocaleString();
+    if (!Number.isNaN(d.getTime())) return formatDate(d, /_at$/.test(key));
   }
   if (isMoneyKey(key) && /^\d+(\.\d+)?$/.test(s)) return "৳" + Number(s).toLocaleString();
   return s;
@@ -175,18 +183,17 @@ export async function ResourceDetailPage({ config, resource, id }: Props) {
               </div>
             </div>
             <div className="def-grid">
-              {sorted.map(([key, value]) => {
-                const isJson = typeof value === "object" && value !== null;
-                const isEmpty = value === null || value === "" || value === undefined;
-                return (
-                  <div key={key} className={`def-item${isJson ? " def-item-wide" : ""}${isEmpty ? " def-item-empty" : ""}`}>
-                    <span className="def-label">{humanizeKey(key)}</span>
-                    {isJson
-                      ? <pre className="json-box small">{formatValue(key, value)}</pre>
-                      : <FieldValue k={key} v={value} />}
-                  </div>
-                );
-              })}
+              {sorted
+                .filter(([, value]) => !(typeof value === "object" && value !== null && !(value instanceof Date)))
+                .map(([key, value]) => {
+                  const isEmpty = value === null || value === "" || value === undefined;
+                  return (
+                    <div key={key} className={`def-item${isEmpty ? " def-item-empty" : ""}`}>
+                      <span className="def-label">{humanizeKey(key)}</span>
+                      <FieldValue k={key} v={value} />
+                    </div>
+                  );
+                })}
             </div>
           </div>
 
@@ -197,6 +204,15 @@ export async function ResourceDetailPage({ config, resource, id }: Props) {
                 <p>Linked records from joined tables.</p>
               </div>
             </div>
+            {/* Structured (JSON) columns live here, with the related tables. */}
+            {sorted
+              .filter(([, value]) => typeof value === "object" && value !== null && !(value instanceof Date))
+              .map(([key, value]) => (
+                <div key={key} className="related-block">
+                  <h3 className="related-title">{humanizeKey(key)}</h3>
+                  <pre className="json-box small">{formatValue(key, value)}</pre>
+                </div>
+              ))}
             {!hasRelated ? (
               <p className="muted-note">No related records for this item.</p>
             ) : (

@@ -191,6 +191,7 @@ export async function GET(request: NextRequest, { params }: Params) {
       const quote = await getSalePriceQuote({
         animal_id: searchParams.get("animal_id"),
         breed_id: searchParams.get("breed_id"),
+        sale_item_id: searchParams.get("sale_item_id"),
         district: searchParams.get("district"),
         weight: searchParams.get("weight")
       });

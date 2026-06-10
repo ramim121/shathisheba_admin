@@ -155,8 +155,8 @@ const configs: Record<string, ResourceConfig> = {
       LEFT JOIN animal_breeds b ON b.id = l.breed_id
       ORDER BY l.created_at DESC
     `,
-    allowedInsert: ["listing_code", "user_id", "sale_item_id", "animal_id", "breed_id", "title_en", "title_bn", "age_months", "weight_kg", "quantity", "unit", "farmer_expected_price", "estimated_earning", "contact_phone", "address_text", "division", "district", "upazila", "ai_analysis_json", "media_json", "status"],
-    allowedUpdate: ["sale_item_id", "animal_id", "breed_id", "title_en", "title_bn", "age_months", "weight_kg", "quantity", "unit", "farmer_expected_price", "estimated_earning", "contact_phone", "address_text", "division", "district", "upazila", "ai_analysis_json", "media_json", "status", "approved_by", "approved_at"],
+    allowedInsert: ["listing_code", "user_id", "sale_item_id", "animal_id", "breed_id", "title_en", "title_bn", "description", "age_months", "weight_kg", "quantity", "unit", "farmer_expected_price", "estimated_earning", "contact_phone", "contact_name", "contact_nid", "contact_is_self", "address_text", "division", "district", "upazila", "ai_analysis_json", "media_json", "status"],
+    allowedUpdate: ["sale_item_id", "animal_id", "breed_id", "title_en", "title_bn", "description", "age_months", "weight_kg", "quantity", "unit", "farmer_expected_price", "estimated_earning", "contact_phone", "contact_name", "contact_nid", "contact_is_self", "address_text", "division", "district", "upazila", "ai_analysis_json", "media_json", "status", "approved_by", "approved_at"],
     defaults: { listing_code: `SAL-${Date.now()}`, quantity: 1, unit: "piece", status: "submitted" }
   },
   "sale/items": {

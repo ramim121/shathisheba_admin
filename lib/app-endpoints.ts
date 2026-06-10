@@ -451,11 +451,13 @@ export async function getAppGeoUpazilas(districtId?: string | null) {
 export async function getSalePriceQuote(params: {
   animal_id?: string | null;
   breed_id?: string | null;
+  sale_item_id?: string | null;
   district?: string | null;
   weight?: string | null;
 }) {
   const animalId = params.animal_id ?? null;
   const breedId = params.breed_id ?? null;
+  const saleItemId = params.sale_item_id ?? null;
   const district = params.district ?? null;
   const rows = await queryRows<Row>(
     `
@@ -471,13 +473,14 @@ export async function getSalePriceQuote(params: {
              ) AS match_score
       FROM sale_pricing_rules r
       WHERE r.is_active = 1
+        AND (? IS NULL OR r.sale_item_id = ?)
         AND (r.animal_id IS NULL OR r.animal_id = ?)
         AND (r.breed_id IS NULL OR r.breed_id = ?)
         AND (r.district IS NULL OR r.district = ?)
       ORDER BY match_score DESC, r.effective_from DESC, r.id DESC
       LIMIT 1
     `,
-    [animalId, breedId, district, animalId, breedId, district]
+    [animalId, breedId, district, saleItemId, saleItemId, animalId, breedId, district]
   );
   const rule = rows[0] ?? null;
   if (!rule) return { rule: null, breakdown: null };
@@ -894,9 +897,36 @@ export async function getUsersWithRoles() {
 
 // Shapes the app-facing user object: identity, profile fields, roles, and the
 // onboarding gates (personal info + preferences) the app uses to route screens.
+// Latest KYC document status per type + banking presence, for the contact
+// section chips and the profile KYC screen.
+async function buildKycSummary(userId: number | string) {
+  const docs = await queryRows<Row>(
+    "SELECT doc_type, status, created_at FROM app_user_kyc_documents WHERE user_id = ? ORDER BY created_at",
+    [userId]
+  );
+  const latest: Record<string, string> = {};
+  for (const d of docs) latest[String(d.doc_type)] = String(d.status); // last wins (chronological)
+  const banking = await queryRows<Row>("SELECT 1 FROM app_user_banking WHERE user_id = ? LIMIT 1", [userId]);
+  const statusOf = (...types: string[]) => {
+    const found = types.map((t) => latest[t]).filter(Boolean);
+    if (found.includes("verified")) return "verified";
+    if (found.includes("pending")) return "pending";
+    if (found.includes("rejected")) return "rejected";
+    return "none";
+  };
+  return {
+    nid: statusOf("nid_front", "nid_back"),
+    selfie: statusOf("selfie"),
+    trade_license: statusOf("trade_license"),
+    banking: banking.length > 0,
+    document_count: docs.length
+  };
+}
+
 async function buildAppUser(user: Row) {
   const profile = typeof user.profile_json === "string" ? safeJson(user.profile_json) : (user.profile_json as Row | null);
   const roles = await getUserRoles(user.id as number);
+  const kyc = await buildKycSummary(user.id as number);
   return {
     id: String(user.id),
     full_name: user.full_name ?? null,
@@ -913,6 +943,7 @@ async function buildAppUser(user: Row) {
     preferences: (profile && profile.preferences) ?? null,
     is_kyc_verified: Number(user.is_kyc_verified ?? 0) === 1,
     nid_number: user.nid_number ?? null,
+    kyc,
     needs_personal_info: Number(user.personal_info_completed ?? 0) === 0,
     needs_preferences: !(profile && profile.preferences)
   };

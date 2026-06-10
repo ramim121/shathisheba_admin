@@ -15,3 +15,4 @@ public/uploads/
 # agent tooling
 .agents/
 .codex/
+.graphify_python

@@ -1678,6 +1678,22 @@ td .tag {
 .drawer-foot-wrap .drawer-foot { border-top: 0; }
 .drawer-error { display: flex; align-items: flex-start; gap: 7px; margin: 12px 20px 0; padding: 10px 12px; border-radius: 10px; background: #fdecef; border: 1px solid #f4c4ce; color: #a11b3a; font-size: 13px; }
 
+/* Wide drawer for enrollment approvals (half page) + per-doc admin upload */
+.drawer-wide { width: min(50vw, 820px); }
+@media (max-width: 900px) { .drawer-wide { width: 96vw; } }
+.reqpanel-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.reqpanel-upload { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 800; color: var(--brand); border: 1px dashed var(--brand); border-radius: 8px; padding: 4px 10px; cursor: pointer; white-space: nowrap; }
+.reqpanel-upload:hover { background: var(--rose); }
+.def-fk-id { color: var(--muted); font-weight: 500; font-size: 12px; }
+
+/* Clickable dashboard cards */
+.metric-link { text-decoration: none; transition: transform .12s, box-shadow .12s; display: block; }
+.metric-link:hover { transform: translateY(-2px); box-shadow: 0 14px 30px rgba(58,18,42,0.14); }
+.insight-link { display: block; text-decoration: none; transition: transform .12s; }
+.insight-link:hover { transform: translateY(-2px); }
+.count-btn { display: inline-block; margin-top: 10px; padding: 8px 14px; border-radius: 999px; font-size: 13px; font-weight: 800; color: #fff; background: linear-gradient(135deg, var(--brand), var(--brand-strong)); text-decoration: none; }
+.count-btn:hover { opacity: 0.9; }
+
 /* Inventory page */
 .inv-layout { display: grid; grid-template-columns: 1.7fr 1fr; gap: 18px; align-items: start; }
 @media (max-width: 1100px) { .inv-layout { grid-template-columns: 1fr; } }

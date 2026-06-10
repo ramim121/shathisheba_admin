@@ -1834,6 +1834,21 @@ export async function getMyOrders(userId?: string | null) {
   );
 }
 
+// GET /api/v1/app/admin/stats -> live dashboard counters (replaces the old seed numbers).
+export async function getAdminStats() {
+  const rows = await queryRows<Row>(
+    `SELECT
+       (SELECT COUNT(*) FROM app_users) AS farmers,
+       (SELECT COUNT(*) FROM app_users WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)) AS farmers_30d,
+       (SELECT COUNT(*) FROM sale_listings WHERE status = 'active') AS listings_active,
+       (SELECT COUNT(*) FROM sale_listings) AS listings_total,
+       (SELECT COUNT(*) FROM orders) AS orders_total,
+       (SELECT COUNT(*) FROM orders WHERE fulfillment_status = 'delivered') AS orders_delivered,
+       (SELECT COUNT(*) FROM products WHERE status = 'active') AS products_active`
+  );
+  return rows[0] ?? {};
+}
+
 // GET /api/v1/app/admin/inventory -> stock overview + pending demand + recent movements
 // for the admin Orders → Inventory page.
 export async function getInventoryOverview() {

@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useState } from "react";
+import Link from "next/link";
 import { Download, Plus, Search } from "lucide-react";
 import {
   Area,
@@ -12,17 +14,32 @@ import {
 } from "recharts";
 import { AdminShell } from "@/components/AdminShell";
 import { Status } from "@/components/Status";
-import {
-  buyOrders,
-  communityPosts,
-  marketUpdates,
-  metrics,
-  partnerApplications,
-  reportData,
-  saleListings
-} from "@/lib/data";
+import { marketUpdates, reportData } from "@/lib/data";
+
+type Row = Record<string, unknown>;
+type Counts = { listings: number; enrollments: number; kyc: number; users: number; orders: number; total: number };
+
+function n(v: unknown) {
+  return Number(v ?? 0);
+}
 
 export function DashboardPage() {
+  const [stats, setStats] = useState<Row | null>(null);
+  const [counts, setCounts] = useState<Counts | null>(null);
+
+  useEffect(() => {
+    fetch("/api/v1/app/admin/stats").then((r) => r.json()).then((j) => { if (j.ok) setStats(j.data); }).catch(() => {});
+    fetch("/api/v1/app/admin/approvals").then((r) => r.json()).then((j) => { if (j.ok) setCounts(j.data.counts); }).catch(() => {});
+  }, []);
+
+  // Live top metrics — every card links to its management page.
+  const metricCards = [
+    { label: "Registered farmers", value: stats ? n(stats.farmers).toLocaleString() : "…", trend: stats ? `+${n(stats.farmers_30d)} in 30 days` : "loading", href: "/users" },
+    { label: "Active sale listings", value: stats ? n(stats.listings_active).toLocaleString() : "…", trend: stats ? `${n(stats.listings_total)} total submitted` : "loading", href: "/sale" },
+    { label: "Pending approvals", value: counts ? String(counts.total) : "…", trend: "KYC, listings, projects, orders", href: "/approvals" },
+    { label: "Buy orders", value: stats ? n(stats.orders_total).toLocaleString() : "…", trend: stats ? `${n(stats.orders_delivered)} delivered` : "loading", href: "/orders" }
+  ];
+
   return (
     <AdminShell>
       <section className="topbar">
@@ -34,19 +51,19 @@ export function DashboardPage() {
           </p>
         </div>
         <div className="toolbar">
-          <button className="btn ghost" type="button"><Search size={18} /> Search records</button>
+          <Link className="btn ghost" href="/manage/view"><Search size={18} /> Search records</Link>
           <button className="btn ghost" type="button"><Download size={18} /> Export MIS</button>
-          <button className="btn primary" type="button"><Plus size={18} /> Create item</button>
+          <Link className="btn primary" href="/manage/form"><Plus size={18} /> Create item</Link>
         </div>
       </section>
 
       <section className="grid metrics">
-        {metrics.map((metric) => (
-          <article className="metric" key={metric.label}>
+        {metricCards.map((metric) => (
+          <Link className="metric metric-link" key={metric.label} href={metric.href}>
             <span>{metric.label}</span>
             <strong>{metric.value}</strong>
             <small>{metric.trend}</small>
-          </article>
+          </Link>
         ))}
       </section>
 
@@ -81,10 +98,10 @@ export function DashboardPage() {
         </div>
 
         <aside>
-          <div className="insight">
+          <Link className="insight insight-link" href="/approvals">
             <h2>Work queue</h2>
-            <p>{partnerApplications.length + saleListings.length + communityPosts.length} priority items need admin review across KYC, sale verification, and community moderation.</p>
-          </div>
+            <p>{counts ? counts.total : "…"} priority item(s) need admin review across listings, project enrollment, KYC, new users and orders. Open the approvals to-do board →</p>
+          </Link>
           <div className="panel">
             <div className="panel-header">
               <div>
@@ -109,17 +126,17 @@ export function DashboardPage() {
         <article className="feature-card">
           <h3>Sale verification</h3>
           <p>Review AI-filled livestock/crop listings, weights, breed, price breakdown, and field verification.</p>
-          <strong>{saleListings.length} listings</strong>
+          <Link className="count-btn" href="/approvals">{counts ? counts.listings : "…"} pending listings →</Link>
         </article>
         <article className="feature-card">
           <h3>Order fulfillment</h3>
           <p>Track payment status, delivery assignment, stock confirmation, and customer support notes.</p>
-          <strong>{buyOrders.length} active orders</strong>
+          <Link className="count-btn" href="/approvals">{counts ? counts.orders : "…"} orders awaiting stock check →</Link>
         </article>
         <article className="feature-card">
           <h3>KYC approvals</h3>
           <p>Verify NID, land, banking, farm assessment, due diligence, and project enrollment.</p>
-          <strong>{partnerApplications.length} applications</strong>
+          <Link className="count-btn" href="/approvals">{counts ? counts.enrollments + counts.kyc + counts.users : "…"} applications to review →</Link>
         </article>
       </section>
     </AdminShell>

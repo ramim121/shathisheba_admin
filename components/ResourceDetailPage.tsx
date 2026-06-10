@@ -3,6 +3,7 @@ import { ArrowLeft, Edit3, Database, Link2 } from "lucide-react";
 import { AdminShell } from "@/components/AdminShell";
 import { Status } from "@/components/Status";
 import { getResourceRelated, getResourceRow } from "@/lib/db-resources";
+import { queryRows } from "@/lib/db";
 import type { ManagementPageProps } from "@/components/ManagementPage";
 import { getListRoute } from "@/lib/resource-routes";
 
@@ -122,9 +123,51 @@ function FieldValue({ k, v }: { k: string; v: unknown }) {
   return <strong className="def-value">{formatValue(k, v)}</strong>;
 }
 
+// Foreign-key columns -> where their human name lives. Detail pages show the
+// name (with the id de-emphasised) instead of a bare number.
+const FK_LOOKUP: Record<string, { table: string; nameCol: string }> = {
+  user_id: { table: "app_users", nameCol: "full_name" },
+  approved_by: { table: "admin_users", nameCol: "name" },
+  moderated_by: { table: "admin_users", nameCol: "name" },
+  assigned_officer_id: { table: "admin_users", nameCol: "name" },
+  admin_user_id: { table: "admin_users", nameCol: "name" },
+  sale_item_id: { table: "sale_items", nameCol: "name_en" },
+  sale_category_id: { table: "sale_categories", nameCol: "name_en" },
+  animal_id: { table: "animals", nameCol: "name_en" },
+  breed_id: { table: "animal_breeds", nameCol: "name_en" },
+  buy_category_id: { table: "buy_categories", nameCol: "name_en" },
+  partner_project_id: { table: "partner_projects", nameCol: "name_en" },
+  product_id: { table: "products", nameCol: "name_en" },
+  order_id: { table: "orders", nameCol: "order_code" },
+  learning_category_id: { table: "learning_categories", nameCol: "name_en" },
+  learning_module_id: { table: "learning_modules", nameCol: "title_en" },
+  community_post_id: { table: "community_posts", nameCol: "id" }
+};
+
+async function resolveFkNames(row: Record<string, unknown>): Promise<Record<string, string>> {
+  const resolved: Record<string, string> = {};
+  await Promise.all(
+    Object.entries(row).map(async ([key, value]) => {
+      const fk = FK_LOOKUP[key];
+      if (!fk || value === null || value === undefined || value === "") return;
+      try {
+        const rows = await queryRows<Record<string, unknown>>(
+          `SELECT ${fk.nameCol} AS name FROM ${fk.table} WHERE id = ? LIMIT 1`,
+          [value]
+        );
+        if (rows[0]?.name) resolved[key] = String(rows[0].name);
+      } catch {
+        // Lookup failures fall back to showing the raw id.
+      }
+    })
+  );
+  return resolved;
+}
+
 export async function ResourceDetailPage({ config, resource, id }: Props) {
   const row = (await getResourceRow(resource, id)) as Record<string, unknown> | null;
   const related = (await getResourceRelated(resource, id)) as Record<string, unknown[]>;
+  const fkNames = row ? await resolveFkNames(row) : {};
   const listHref = getListRoute(resource);
   const images = row ? collectImages(row) : [];
   const entries = row ? Object.entries(row) : [];
@@ -184,13 +227,16 @@ export async function ResourceDetailPage({ config, resource, id }: Props) {
             </div>
             <div className="def-grid">
               {sorted
-                .filter(([, value]) => !(typeof value === "object" && value !== null && !(value instanceof Date)))
+                .filter(([key, value]) => key !== "id" && !(typeof value === "object" && value !== null && !(value instanceof Date)))
                 .map(([key, value]) => {
                   const isEmpty = value === null || value === "" || value === undefined;
+                  const fkName = fkNames[key];
                   return (
                     <div key={key} className={`def-item${isEmpty ? " def-item-empty" : ""}`}>
-                      <span className="def-label">{humanizeKey(key)}</span>
-                      <FieldValue k={key} v={value} />
+                      <span className="def-label">{humanizeKey(key).replace(/ ID$/i, "")}</span>
+                      {fkName
+                        ? <strong className="def-value">{fkName} <span className="def-fk-id">#{String(value)}</span></strong>
+                        : <FieldValue k={key} v={value} />}
                     </div>
                   );
                 })}

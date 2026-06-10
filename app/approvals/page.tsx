@@ -154,6 +154,42 @@ export default function ApprovalsPage() {
     loadQueues();
   }
 
+  // Admin uploads a required document on the applicant's behalf: file -> /api/upload,
+  // then attach to the user's KYC documents and auto-verify it.
+  async function uploadDocForUser(docType: string, file: File) {
+    if (!detail) return;
+    const applicantId = (detail.item as Row).user_id;
+    if (!applicantId) { setReqMsg("No applicant user on this record."); return; }
+    setReqMsg(`Uploading ${DOC_LABEL[docType] || docType}…`);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      form.append("folder", "kyc");
+      const up = await fetch("/api/upload", { method: "POST", body: form });
+      const upJson = await up.json();
+      if (!up.ok || !upJson.url) throw new Error(upJson.message || "Upload failed.");
+      const docRes = await fetch("/api/v1/app/kyc-documents", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: applicantId, doc_type: docType, document_url: upJson.url, note: `Uploaded by admin #${adminId ?? "?"}` })
+      });
+      const docJson = await docRes.json();
+      const newDocId = docJson?.result?.id;
+      if (!docRes.ok || !newDocId) throw new Error(docJson.message || "Could not attach the document.");
+      // Auto-verify: the admin sourced this document directly.
+      await fetch("/api/v1/app/admin/approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "kyc", id: String(newDocId), action: "approve", admin_id: adminId })
+      });
+      setReqMsg(`${DOC_LABEL[docType] || docType} uploaded, assigned to the applicant and verified.`);
+      if (selected) openDetail(selected);
+      loadQueues();
+    } catch (e) {
+      setReqMsg(e instanceof Error ? e.message : "Upload failed.");
+    }
+  }
+
   async function decide(action: "approve" | "reject") {
     if (!selected) return;
     if (selected.type === "listing" && action === "approve" && !(Number(pub.price) > 0)) {
@@ -268,7 +304,7 @@ export default function ApprovalsPage() {
 
       {selected ? (
         <div className="drawer-backdrop" onClick={() => setSelected(null)}>
-          <aside className="drawer" onClick={(e) => e.stopPropagation()}>
+          <aside className={`drawer${selected.type === "enrollment" ? " drawer-wide" : ""}`} onClick={(e) => e.stopPropagation()}>
             <header className="drawer-head">
               <div>
                 <span className="drawer-kicker">{selected.type.toUpperCase()} APPROVAL</span>
@@ -308,16 +344,37 @@ export default function ApprovalsPage() {
                     <h3 className="vpanel-title"><ShieldCheck size={15} /> Required documents for this project</h3>
                     <p className="pubform-note">Tick a document to make it mandatory before this application can be approved.</p>
                     <div className="reqpanel-grid">
-                      {REQUIRABLE_DOCS.map(([key, label]) => (
-                        <label className="reqpanel-check" key={key}>
-                          <input
-                            type="checkbox"
-                            checked={reqDocs.includes(key)}
-                            onChange={(e) => setReqDocs(e.target.checked ? [...reqDocs, key] : reqDocs.filter((d) => d !== key))}
-                          />
-                          {label}
-                        </label>
-                      ))}
+                      {REQUIRABLE_DOCS.map(([key, label]) => {
+                        const checked = reqDocs.includes(key);
+                        const have = detail.documents.some((d) => String(d.doc_type) === key && String(d.status) === "verified");
+                        return (
+                          <div className="reqpanel-row" key={key}>
+                            <label className="reqpanel-check">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={(e) => setReqDocs(e.target.checked ? [...reqDocs, key] : reqDocs.filter((d) => d !== key))}
+                              />
+                              {label}
+                            </label>
+                            {have ? <span className="vbadge vb-ok">✓ verified</span> : checked ? (
+                              <label className="reqpanel-upload">
+                                ⬆ Upload
+                                <input
+                                  type="file"
+                                  accept="image/*,.pdf"
+                                  style={{ display: "none" }}
+                                  onChange={(e) => {
+                                    const f = e.target.files?.[0];
+                                    if (f) uploadDocForUser(key, f);
+                                    e.target.value = "";
+                                  }}
+                                />
+                              </label>
+                            ) : null}
+                          </div>
+                        );
+                      })}
                     </div>
                     <button type="button" className="reqpanel-save" onClick={saveRequiredDocs}>Save requirements</button>
                     {reqMsg ? <p className="pubform-note" style={{ marginTop: 8 }}>{reqMsg}</p> : null}

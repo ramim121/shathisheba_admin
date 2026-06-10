@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { NotificationBell } from "@/components/NotificationBell";
 import {
   BellRing,
@@ -17,6 +17,7 @@ import {
   HelpCircle,
   LayoutDashboard,
   ListChecks,
+  LogOut,
   MapPin,
   MessageSquareText,
   PackageCheck,
@@ -40,6 +41,7 @@ type NavSection = { title: string; icon: typeof LayoutDashboard; items: NavLink[
 // Flat quick-access items pinned at the top of the sidebar.
 const pinned: NavLink[] = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+  { label: "Approvals", href: "/approvals", icon: ListChecks },
   { label: "Notifications", href: "/notifications", icon: BellRing },
   { label: "API Viewer", href: "/api-viewer", icon: ScrollText }
 ];
@@ -124,7 +126,10 @@ const sections: NavSection[] = [
   {
     title: "System",
     icon: Settings2,
-    items: [{ label: "Settings", href: "/settings", icon: Settings2 }]
+    items: [
+      { label: "Admin Users", href: "/admin-users", icon: ShieldCheck },
+      { label: "Settings", href: "/settings", icon: Settings2 }
+    ]
   }
 ];
 
@@ -215,6 +220,55 @@ function SidebarNav() {
   );
 }
 
+function AdminIdentity() {
+  const router = useRouter();
+  const [admin, setAdmin] = useState<{ name: string; role: string } | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/admin/me")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (!alive) return;
+        if (j?.ok) setAdmin({ name: j.admin.name, role: j.admin.role });
+        else router.replace("/login");
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [router]);
+
+  async function logout() {
+    await fetch("/api/admin/logout", { method: "POST" }).catch(() => {});
+    router.replace("/login");
+    router.refresh();
+  }
+
+  const initials = (admin?.name || "A")
+    .split(" ")
+    .map((w) => w[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+  const roleLabel = (admin?.role || "").replace(/_/g, " ");
+
+  return (
+    <div className="admin-id-wrap">
+      <div className="admin-id">
+        <div className="admin-id-avatar">{initials}</div>
+        <div className="admin-id-meta">
+          <div className="admin-id-name">{admin?.name ?? "…"}</div>
+          <div className="admin-id-role">{roleLabel}</div>
+        </div>
+      </div>
+      <button type="button" className="admin-logout" onClick={logout}>
+        <LogOut size={15} /> Sign out
+      </button>
+    </div>
+  );
+}
+
 export function AdminShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="app-shell">
@@ -235,6 +289,8 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
         <NotificationBell />
 
         <SidebarNav />
+
+        <AdminIdentity />
       </aside>
 
       <main className="main">{children}</main>

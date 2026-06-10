@@ -59,6 +59,10 @@ import {
   getAppSaleItems,
   getAppWeatherAlerts,
   getAdminNotifications,
+  getMyListings,
+  getApprovalQueues,
+  getApprovalDetail,
+  decideApproval,
   getHomeFeed,
   getOnboardingTree,
   getUserBanking,
@@ -104,6 +108,7 @@ const appReadHandlers: Record<string, AppReadHandler> = {
   "app/projects/mine": (q) => getAppMyProjects(q.get("user_id")),
   "app/projects/prev-rates": (q) => getProjectPrevRates(q.get("animal_id"), q.get("breed_id"), q.get("district")),
   "app/sale/category-availability": (q) => getSaleCategoryAvailability(q.get("user_id"), q.get("division"), q.get("district")),
+  "app/sale/my-listings": (q) => getMyListings(q.get("user_id")),
   "community/posts": (q) => getAppCommunityPosts(q.get("scope")),
   "community/officers": (q) => getAppOfficers(q.get("district")),
   users: (q) => getAppProfileUsers(q.get("user_id")),
@@ -196,6 +201,22 @@ export async function GET(request: NextRequest, { params }: Params) {
         weight: searchParams.get("weight")
       });
       return envelope(quote, { source: "mysql", surface: "app", resource });
+    } catch (error) {
+      return dbError(error);
+    }
+  }
+
+  // Admin approvals to-do dashboard: queues + per-item detail with verification panel.
+  if (resource === "app/admin/approvals") {
+    try {
+      return envelope(await getApprovalQueues(), { source: "mysql", surface: "admin", resource });
+    } catch (error) {
+      return dbError(error);
+    }
+  }
+  if (resource === "app/admin/approval") {
+    try {
+      return envelope(await getApprovalDetail(searchParams.get("type"), searchParams.get("id")), { source: "mysql", surface: "admin", resource });
     } catch (error) {
       return dbError(error);
     }
@@ -322,6 +343,9 @@ export async function POST(request: NextRequest, { params }: Params) {
     }
     if (exact === "app/user-roles/set") {
       return NextResponse.json({ ok: true, source: "mysql", action: "roles_updated", result: await setUserRoles(payload) }, { status: 200 });
+    }
+    if (exact === "app/admin/approve") {
+      return NextResponse.json({ ok: true, source: "mysql", action: "approval_decided", result: await decideApproval(payload) }, { status: 200 });
     }
     if (exact === "app/community/moderate") {
       return NextResponse.json({ ok: true, source: "mysql", action: "post_moderated", result: await moderateCommunityPost(payload) }, { status: 200 });

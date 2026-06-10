@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowLeft, Edit3 } from "lucide-react";
+import { ArrowLeft, Edit3, Database, Link2 } from "lucide-react";
 import { AdminShell } from "@/components/AdminShell";
 import { Status } from "@/components/Status";
 import { getResourceRelated, getResourceRow } from "@/lib/db-resources";
@@ -27,6 +27,10 @@ function looksLikeImageUrl(value: unknown) {
   return /^(https?:\/\/|\/uploads\/|\/)/.test(value) && /\.(png|jpe?g|webp|gif|avif)(\?|$)/i.test(value);
 }
 
+function looksLikeUrl(value: unknown) {
+  return typeof value === "string" && /^https?:\/\//.test(value);
+}
+
 // Collects every image URL on the record (single image fields + media_json arrays).
 function collectImages(row: Record<string, unknown>): string[] {
   const out: string[] = [];
@@ -43,6 +47,10 @@ function collectImages(row: Record<string, unknown>): string[] {
   return [...new Set(out)].filter(Boolean);
 }
 
+function isMoneyKey(key: string) {
+  return /price|amount|earning|rate|fee|income|investment|balance|total/i.test(key);
+}
+
 function formatValue(key: string, value: unknown): string {
   if (value === null || value === undefined || value === "") return "—";
   if (value instanceof Date) return value.toLocaleString();
@@ -56,7 +64,54 @@ function formatValue(key: string, value: unknown): string {
     const d = new Date(s);
     if (!Number.isNaN(d.getTime())) return d.toLocaleString();
   }
+  if (isMoneyKey(key) && /^\d+(\.\d+)?$/.test(s)) return "৳" + Number(s).toLocaleString();
   return s;
+}
+
+// Pick the most human title for the record header.
+function pickTitle(row: Record<string, unknown>, fallback: string): string {
+  for (const k of ["title_en", "name_en", "full_name", "display_name", "name", "title", "project_name", "listing_code", "application_code", "order_code", "sku", "email"]) {
+    const v = row[k];
+    if (typeof v === "string" && v.trim()) return v;
+  }
+  return fallback;
+}
+
+const STATUS_TONE: Record<string, string> = {
+  active: "ok", approved: "ok", verified: "ok", open: "ok", paid: "ok", live: "ok",
+  pending: "warn", submitted: "warn", draft: "warn", opening_soon: "warn", needs_document: "warn", officer_verification: "warn", ready_to_approve: "warn",
+  rejected: "bad", cancelled: "bad", suspended: "bad", out_of_stock: "bad", inactive: "bad", sold: "muted"
+};
+
+// A short list of the most useful facts to surface as chips at the top.
+function keyFacts(row: Record<string, unknown>): Array<[string, string]> {
+  const wanted = ["status", "phone", "email", "district", "upazila", "price", "stock_qty", "quantity",
+    "farmer_expected_price", "amount", "total_amount", "investment_amount", "current_step",
+    "interest_slug", "category_slug", "created_at"];
+  const facts: Array<[string, string]> = [];
+  for (const k of wanted) {
+    if (k in row && row[k] !== null && row[k] !== "" && row[k] !== undefined) {
+      facts.push([humanizeKey(k), formatValue(k, row[k])]);
+    }
+    if (facts.length >= 6) break;
+  }
+  return facts;
+}
+
+function FieldValue({ k, v }: { k: string; v: unknown }) {
+  if (looksLikeImageUrl(v)) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return <a href={String(v)} target="_blank" rel="noreferrer"><img src={String(v)} alt={k} className="def-thumb" /></a>;
+  }
+  if (looksLikeUrl(v)) {
+    return <a className="def-link" href={String(v)} target="_blank" rel="noreferrer"><Link2 size={13} /> {String(v).replace(/^https?:\/\//, "").slice(0, 48)}</a>;
+  }
+  if (k === "status" || /^(is_|has_|can_)/.test(k) || k === "active") {
+    const sv = formatValue(k, v);
+    const tone = STATUS_TONE[String(v)] || (sv === "Yes" ? "ok" : sv === "No" ? "muted" : "muted");
+    return <span className={`def-badge db-${tone}`}>{sv}</span>;
+  }
+  return <strong className="def-value">{formatValue(k, v)}</strong>;
 }
 
 export async function ResourceDetailPage({ config, resource, id }: Props) {
@@ -66,18 +121,32 @@ export async function ResourceDetailPage({ config, resource, id }: Props) {
   const images = row ? collectImages(row) : [];
   const entries = row ? Object.entries(row) : [];
   const hasRelated = Object.values(related || {}).some((v) => Array.isArray(v) && v.length);
+  const title = row ? pickTitle(row, `${config.entityName} #${id}`) : `${config.entityName} #${id}`;
+  const facts = row ? keyFacts(row) : [];
+  // Non-null fields first (the useful data), null/empty last and dimmed.
+  const sorted = entries.sort((a, b) => {
+    const an = a[1] === null || a[1] === "" || a[1] === undefined ? 1 : 0;
+    const bn = b[1] === null || b[1] === "" || b[1] === undefined ? 1 : 0;
+    return an - bn;
+  });
 
   return (
     <AdminShell>
       <section className="detail-hero">
-        <div>
-          <Link className="back-link" href={listHref}><ArrowLeft size={18} /> Back to list</Link>
-          <p className="eyeline">Record Details</p>
-          <h1 className="page-title">{config.entityName} #{id}</h1>
-          <p className="subtitle">Full database view for this record, including related tables where available.</p>
+        <div className="detail-hero-main">
+          <Link className="back-link" href={listHref}><ArrowLeft size={18} /> Back to {config.entityName}</Link>
+          <p className="eyeline">{config.entityName} · Record #{id}</p>
+          <h1 className="page-title">{title}</h1>
+          {facts.length ? (
+            <div className="detail-facts">
+              {facts.map(([label, value]) => (
+                <span className="detail-fact" key={label}><span className="detail-fact-l">{label}</span><span className="detail-fact-v">{value}</span></span>
+              ))}
+            </div>
+          ) : null}
         </div>
         <div className="detail-actions">
-          <Status label={row?.status ? String(row.status) : row ? "Loaded" : "Missing"} />
+          {row?.status ? <Status label={String(row.status)} /> : null}
           <Link className="btn primary" href={`/manage/form?resource=${encodeURIComponent(resource)}&id=${encodeURIComponent(id)}`}><Edit3 size={18} /> Edit</Link>
         </div>
       </section>
@@ -95,25 +164,26 @@ export async function ResourceDetailPage({ config, resource, id }: Props) {
                 <div className="panel-header"><div><h2>Media</h2><p>{images.length} image{images.length > 1 ? "s" : ""} on this record.</p></div></div>
                 <div className="detail-gallery">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  {images.map((src) => <img key={src} src={src} alt="" className="detail-img" />)}
+                  {images.map((src) => <a key={src} href={src} target="_blank" rel="noreferrer"><img src={src} alt="" className="detail-img" /></a>)}
                 </div>
               </>
             ) : null}
             <div className="panel-header">
               <div>
-                <h2>Main Record</h2>
-                <p>All available columns from the database table.</p>
+                <h2><Database size={16} style={{ verticalAlign: "-2px", marginRight: 6 }} />Record Fields</h2>
+                <p>{entries.length} columns from <code>{resource}</code>.</p>
               </div>
             </div>
             <div className="def-grid">
-              {entries.map(([key, value]) => {
+              {sorted.map(([key, value]) => {
                 const isJson = typeof value === "object" && value !== null;
+                const isEmpty = value === null || value === "" || value === undefined;
                 return (
-                  <div key={key} className={`def-item${isJson ? " def-item-wide" : ""}`}>
+                  <div key={key} className={`def-item${isJson ? " def-item-wide" : ""}${isEmpty ? " def-item-empty" : ""}`}>
                     <span className="def-label">{humanizeKey(key)}</span>
                     {isJson
                       ? <pre className="json-box small">{formatValue(key, value)}</pre>
-                      : <strong className="def-value">{formatValue(key, value)}</strong>}
+                      : <FieldValue k={key} v={value} />}
                   </div>
                 );
               })}
@@ -123,8 +193,8 @@ export async function ResourceDetailPage({ config, resource, id }: Props) {
           <aside className="panel">
             <div className="panel-header">
               <div>
-                <h2>Related Data</h2>
-                <p>Joined or linked records that help explain this item.</p>
+                <h2><Link2 size={16} style={{ verticalAlign: "-2px", marginRight: 6 }} />Related Data</h2>
+                <p>Linked records from joined tables.</p>
               </div>
             </div>
             {!hasRelated ? (

@@ -552,14 +552,19 @@ export async function getAppPricing() {
   );
 }
 
+// Only surface categories that actually have sellable products (availability-gated),
+// with a live product_count so the app can badge/sort them.
 export async function getAppBuyCategories() {
   return queryRows<Row>(
     `
-      SELECT CAST(id AS CHAR) AS id, slug, name_en, name_bn,
-             description_en, description_bn
-      FROM buy_categories
-      WHERE is_active = 1
-      ORDER BY sort_order, id
+      SELECT CAST(c.id AS CHAR) AS id, c.slug, c.name_en, c.name_bn,
+             c.description_en, c.description_bn,
+             COUNT(p.id) AS product_count
+      FROM buy_categories c
+      JOIN products p ON p.buy_category_id = c.id AND p.status IN ('active','out_of_stock')
+      WHERE c.is_active = 1
+      GROUP BY c.id
+      ORDER BY c.sort_order, c.id
     `
   );
 }
@@ -570,11 +575,14 @@ export async function getAppProducts(category?: string | null) {
       SELECT CAST(p.id AS CHAR) AS id, p.sku, p.name_en, p.name_bn,
              p.short_description_en, p.short_description_bn,
              p.package_size, p.unit, p.price, p.stock_qty, p.low_stock_threshold,
-             p.delivery_window, p.status, p.metadata, c.slug AS category_slug
+             p.delivery_window, p.status, p.metadata,
+             JSON_UNQUOTE(JSON_EXTRACT(p.metadata, '$.image_url')) AS image_url,
+             c.slug AS category_slug, c.name_en AS category_name
       FROM products p
       JOIN buy_categories c ON c.id = p.buy_category_id
       WHERE (? IS NULL OR c.slug = ?)
-      ORDER BY p.updated_at DESC, p.id DESC
+        AND p.status IN ('active','out_of_stock')
+      ORDER BY (p.status = 'active') DESC, p.updated_at DESC, p.id DESC
     `,
     [category ?? null, category ?? null]
   );
@@ -1742,4 +1750,266 @@ export async function getLearningProgressOverview() {
       LIMIT 200
     `
   );
+}
+
+// GET /api/v1/app/sale/my-listings?user_id=
+// A seller's own listings with approval status — shown in the app's My Listings
+// screen (submitted/field_verification = pending; active = approved; etc).
+export async function getMyListings(userId?: string | null) {
+  if (!userId) return [];
+  return queryRows<Row>(
+    `
+      SELECT CAST(l.id AS CHAR) AS id, l.listing_code, l.title_en, l.title_bn,
+             l.description, l.quantity, l.unit, l.weight_kg,
+             l.farmer_expected_price, l.estimated_earning,
+             l.status, l.approved_at, l.created_at, l.media_json,
+             si.name_en AS item_name, si.name_bn AS item_name_bn,
+             c.slug AS category_slug
+      FROM sale_listings l
+      LEFT JOIN sale_items si ON si.id = l.sale_item_id
+      LEFT JOIN sale_categories c ON c.id = si.sale_category_id
+      WHERE l.user_id = ?
+      ORDER BY l.created_at DESC
+      LIMIT 100
+    `,
+    [userId]
+  );
+}
+
+// ===========================================================================
+// Approvals to-do dashboard (admin). Four queues: sale listings, project
+// enrollments, KYC documents, and newly-registered users. Each item carries the
+// applicant's KYC verification panel so an admin can decide in one place.
+// ===========================================================================
+
+const PENDING_LISTING_STATUSES = ["submitted", "field_verification"];
+const PENDING_ENROLLMENT_STATUSES = ["submitted", "needs_document", "officer_verification", "ready_to_approve"];
+
+// Verification panel for one applicant: presence/status of each required check.
+async function buildVerificationPanel(userId: number | string) {
+  const summary = await buildKycSummary(userId);
+  const users = await queryRows<Row>(
+    "SELECT id, full_name, phone, nid_number, is_kyc_verified, status FROM app_users WHERE id = ? LIMIT 1",
+    [userId]
+  );
+  const u = users[0] || {};
+  return {
+    in_system: users.length > 0,
+    nid: summary.nid,                       // verified | pending | rejected | none
+    user_photo: summary.selfie,             // term: "User Photo" (doc_type 'selfie')
+    trade_license: summary.trade_license,
+    banking: summary.banking,
+    document_count: summary.document_count,
+    nid_number: u.nid_number ?? null,
+    is_kyc_verified: Number(u.is_kyc_verified ?? 0) === 1,
+    user_status: u.status ?? null
+  };
+}
+
+// GET /api/v1/app/admin/approvals -> counts + recent items per queue.
+export async function getApprovalQueues() {
+  const listings = await queryRows<Row>(
+    `SELECT CAST(l.id AS CHAR) AS id, l.listing_code, COALESCE(l.title_en, si.name_en, 'Listing') AS title,
+            l.status, l.quantity, l.unit, l.farmer_expected_price, l.created_at,
+            CAST(l.user_id AS CHAR) AS user_id, u.full_name, u.phone, u.is_kyc_verified
+       FROM sale_listings l
+       JOIN app_users u ON u.id = l.user_id
+       LEFT JOIN sale_items si ON si.id = l.sale_item_id
+      WHERE l.status IN (?, ?)
+      ORDER BY l.created_at DESC LIMIT 40`,
+    PENDING_LISTING_STATUSES
+  );
+  const enrollments = await queryRows<Row>(
+    `SELECT CAST(a.id AS CHAR) AS id, a.application_code, a.status, a.current_step, a.created_at,
+            CAST(a.user_id AS CHAR) AS user_id, u.full_name, u.phone, u.is_kyc_verified,
+            p.name_en AS project_name, p.interest_slug
+       FROM partner_applications a
+       JOIN app_users u ON u.id = a.user_id
+       JOIN partner_projects p ON p.id = a.partner_project_id
+      WHERE a.status IN (?, ?, ?, ?)
+      ORDER BY a.created_at DESC LIMIT 40`,
+    PENDING_ENROLLMENT_STATUSES
+  );
+  const kyc = await queryRows<Row>(
+    `SELECT CAST(k.id AS CHAR) AS id, CAST(k.user_id AS CHAR) AS user_id, k.doc_type, k.document_url, k.status, k.created_at,
+            u.full_name, u.phone
+       FROM app_user_kyc_documents k
+       JOIN app_users u ON u.id = k.user_id
+      WHERE k.status = 'pending'
+      ORDER BY k.created_at DESC LIMIT 60`
+  );
+  const users = await queryRows<Row>(
+    `SELECT CAST(id AS CHAR) AS id, full_name, phone, district, upazila, is_kyc_verified, created_at
+       FROM app_users WHERE status = 'pending'
+      ORDER BY created_at DESC LIMIT 40`
+  );
+  return {
+    counts: {
+      listings: listings.length,
+      enrollments: enrollments.length,
+      kyc: kyc.length,
+      users: users.length,
+      total: listings.length + enrollments.length + kyc.length + users.length
+    },
+    listings,
+    enrollments,
+    kyc,
+    users
+  };
+}
+
+// GET /api/v1/app/admin/approval?type=&id= -> one item + applicant verification panel.
+export async function getApprovalDetail(type?: string | null, id?: string | null) {
+  if (!type || !id) throw new Error("type and id are required.");
+  let item: Row | null = null;
+  let userId: string | number | null = null;
+
+  if (type === "listing") {
+    const rows = await queryRows<Row>(
+      `SELECT l.*, si.name_en AS item_name, u.full_name, u.phone, u.district, u.upazila
+         FROM sale_listings l JOIN app_users u ON u.id = l.user_id
+         LEFT JOIN sale_items si ON si.id = l.sale_item_id WHERE l.id = ? LIMIT 1`,
+      [id]
+    );
+    item = rows[0] || null;
+    userId = item?.user_id as string;
+  } else if (type === "enrollment") {
+    const rows = await queryRows<Row>(
+      `SELECT a.*, u.full_name, u.phone, u.district, u.upazila, p.name_en AS project_name
+         FROM partner_applications a JOIN app_users u ON u.id = a.user_id
+         JOIN partner_projects p ON p.id = a.partner_project_id WHERE a.id = ? LIMIT 1`,
+      [id]
+    );
+    item = rows[0] || null;
+    userId = item?.user_id as string;
+  } else if (type === "kyc") {
+    const rows = await queryRows<Row>(
+      `SELECT k.*, u.full_name, u.phone FROM app_user_kyc_documents k
+         JOIN app_users u ON u.id = k.user_id WHERE k.id = ? LIMIT 1`,
+      [id]
+    );
+    item = rows[0] || null;
+    userId = item?.user_id as string;
+  } else if (type === "user") {
+    const rows = await queryRows<Row>("SELECT * FROM app_users WHERE id = ? LIMIT 1", [id]);
+    item = rows[0] || null;
+    userId = id;
+  } else {
+    throw new Error("Unknown approval type.");
+  }
+
+  if (!item) throw new Error("Approval item not found.");
+  const verification = userId ? await buildVerificationPanel(userId) : null;
+  const documents = userId
+    ? await queryRows<Row>(
+        "SELECT CAST(id AS CHAR) AS id, doc_type, document_url, status, note, created_at FROM app_user_kyc_documents WHERE user_id = ? ORDER BY created_at",
+        [userId]
+      )
+    : [];
+  return { type, item, verification, documents };
+}
+
+// Recompute app_users.is_kyc_verified from current document statuses
+// (verified NID + verified user photo == identity verified).
+async function refreshUserKycVerified(userId: string | number) {
+  const summary = await buildKycSummary(userId);
+  const verified = summary.nid === "verified" && summary.selfie === "verified" ? 1 : 0;
+  await executeQuery("UPDATE app_users SET is_kyc_verified = ? WHERE id = ?", [verified, userId]);
+  return verified === 1;
+}
+
+// Publish an approved seller listing into Buy-from-Shathi as a managed Product.
+// Admin-set price/stock/description/category come from the approval payload;
+// sku = listing_code keeps it idempotent (re-approve updates the same product).
+async function upsertProductFromListing(l: Row, payload: Row) {
+  let categoryId = payload.buy_category_id ? Number(payload.buy_category_id) : 0;
+  if (!categoryId) {
+    const cat = await queryRows<Row>("SELECT id FROM buy_categories WHERE slug = 'livestock' LIMIT 1");
+    categoryId = cat[0] ? Number(cat[0].id) : 1;
+  }
+  const price = Number(payload.price ?? l.farmer_expected_price ?? 0);
+  if (!(price > 0)) throw new Error("A product price (> 0) is required to publish this listing to Buy-from-Shathi.");
+  const stock = Number(payload.stock ?? payload.stock_qty ?? l.quantity ?? 0);
+  const name = String(payload.name || l.title_en || l.item_name || "Marketplace item").slice(0, 190);
+  const description = (payload.description ?? l.description ?? null) as string | null;
+  const unit = String(l.unit || "piece");
+  const media = Array.isArray(l.media_json) ? (l.media_json as unknown[]) : [];
+  const imageUrl = media.length ? String(media[0]) : null;
+  const metadata = JSON.stringify({ source_listing_id: l.id, image_url: imageUrl, images: media, seller_user_id: l.user_id });
+  const sku = String(l.listing_code);
+  await executeQuery(
+    `INSERT INTO products (buy_category_id, sku, name_en, short_description_en, unit, package_size, price, stock_qty, status, metadata)
+     VALUES (?,?,?,?,?,?,?,?, 'active', ?)
+     ON DUPLICATE KEY UPDATE buy_category_id=VALUES(buy_category_id), name_en=VALUES(name_en),
+       short_description_en=VALUES(short_description_en), unit=VALUES(unit), package_size=VALUES(package_size),
+       price=VALUES(price), stock_qty=VALUES(stock_qty), status='active', metadata=VALUES(metadata)`,
+    [categoryId, sku, name, description, unit, `${l.quantity} ${unit}`, price, stock, metadata]
+  );
+  const prod = await queryRows<Row>("SELECT CAST(id AS CHAR) AS id, sku, name_en, price, stock_qty, status FROM products WHERE sku = ? LIMIT 1", [sku]);
+  return prod[0] ?? null;
+}
+
+// POST /api/v1/app/admin/approve  { type, id, action: 'approve'|'reject', admin_id?, note? }
+export async function decideApproval(payload: Row) {
+  const type = String(payload.type || "");
+  const id = payload.id;
+  const action = String(payload.action || "");
+  const adminId = payload.admin_id ?? null;
+  const note = payload.note ? String(payload.note).slice(0, 255) : null;
+  if (!id || (action !== "approve" && action !== "reject")) {
+    throw new Error("id and a valid action (approve|reject) are required.");
+  }
+  const approve = action === "approve";
+
+  if (type === "listing") {
+    const rows = await queryRows<Row>(
+      `SELECT l.*, si.name_en AS item_name FROM sale_listings l
+         LEFT JOIN sale_items si ON si.id = l.sale_item_id WHERE l.id = ? LIMIT 1`,
+      [id]
+    );
+    const l = rows[0];
+    if (!l) throw new Error("Listing not found.");
+    // Create/refresh the Buy-from-Shathi product first; if price is missing this
+    // throws before the listing is marked active.
+    const product = approve ? await upsertProductFromListing(l, payload) : null;
+    await executeQuery(
+      "UPDATE sale_listings SET status = ?, approved_by = ?, approved_at = NOW() WHERE id = ?",
+      [approve ? "active" : "rejected", adminId, id]
+    );
+    return { type, id: String(id), status: approve ? "active" : "rejected", product };
+  }
+  if (type === "enrollment") {
+    await executeQuery(
+      "UPDATE partner_applications SET status = ?, current_step = ?, approved_by = ?, approved_at = NOW(), verification_notes = COALESCE(?, verification_notes) WHERE id = ?",
+      [approve ? "approved" : "rejected", approve ? "approval" : "rejected", adminId, note, id]
+    );
+    return { type, id: String(id), status: approve ? "approved" : "rejected" };
+  }
+  if (type === "kyc") {
+    const docs = await queryRows<Row>("SELECT user_id FROM app_user_kyc_documents WHERE id = ? LIMIT 1", [id]);
+    await executeQuery(
+      "UPDATE app_user_kyc_documents SET status = ?, note = COALESCE(?, note) WHERE id = ?",
+      [approve ? "verified" : "rejected", note, id]
+    );
+    let kycVerified = false;
+    if (docs[0]?.user_id) kycVerified = await refreshUserKycVerified(docs[0].user_id as number);
+    return { type, id: String(id), status: approve ? "verified" : "rejected", user_kyc_verified: kycVerified };
+  }
+  if (type === "user") {
+    await executeQuery("UPDATE app_users SET status = ? WHERE id = ?", [approve ? "active" : "suspended", id]);
+    if (approve) {
+      // Approving a user automatically grants the seller role.
+      await executeQuery(
+        "INSERT IGNORE INTO app_user_roles (user_id, role, assigned_by) VALUES (?, 'shathisheba_seller', ?)",
+        [id, adminId]
+      );
+    }
+    return {
+      type,
+      id: String(id),
+      status: approve ? "active" : "suspended",
+      roles: approve ? await getUserRoles(String(id)) : []
+    };
+  }
+  throw new Error("Unknown approval type.");
 }

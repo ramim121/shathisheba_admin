@@ -877,50 +877,7 @@ export async function setUserRoles(payload: Row) {
   };
 }
 
-// GET /api/v1/app/admin/notifications
-// Admin alerts: newly registered app users and KYC documents awaiting approval.
-export async function getAdminNotifications() {
-  const newUsers = await queryRows<Row>(
-    `
-      SELECT CAST(id AS CHAR) AS id, full_name, phone,
-             CONCAT(COALESCE(district,''), CASE WHEN upazila IS NOT NULL THEN CONCAT(' / ', upazila) ELSE '' END) AS location,
-             created_at
-      FROM app_users
-      ORDER BY created_at DESC
-      LIMIT 15
-    `
-  );
-  const pendingKyc = await queryRows<Row>(
-    `
-      SELECT CAST(k.id AS CHAR) AS id, CAST(k.user_id AS CHAR) AS user_id,
-             u.full_name, u.phone, k.doc_type, k.document_url, k.created_at
-      FROM app_user_kyc_documents k
-      JOIN app_users u ON u.id = k.user_id
-      WHERE k.status = 'pending'
-      ORDER BY k.created_at DESC
-      LIMIT 30
-    `
-  );
-  const counts = await queryRows<Row>(
-    `
-      SELECT
-        (SELECT COUNT(*) FROM app_users WHERE created_at >= DATE_SUB(NOW(), INTERVAL 1 DAY)) AS new_users_24h,
-        (SELECT COUNT(*) FROM app_users WHERE created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)) AS new_users_7d,
-        (SELECT COUNT(*) FROM app_user_kyc_documents WHERE status = 'pending') AS pending_kyc
-    `
-  );
-  const c = counts[0] || {};
-  return {
-    counts: {
-      new_users_24h: Number(c.new_users_24h ?? 0),
-      new_users_7d: Number(c.new_users_7d ?? 0),
-      pending_kyc: Number(c.pending_kyc ?? 0),
-      total: Number(c.new_users_24h ?? 0) + Number(c.pending_kyc ?? 0)
-    },
-    new_users: newUsers,
-    pending_kyc: pendingKyc
-  };
-}
+// (Admin notification feature removed — the approvals to-do dashboard covers it.)
 
 // GET /api/v1/app/users-with-roles  -> users + their role array (for the admin role editor).
 export async function getUsersWithRoles() {

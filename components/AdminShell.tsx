@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { NotificationBell } from "@/components/NotificationBell";
 import {
   BellRing,
   BookOpen,
@@ -42,7 +41,6 @@ type NavSection = { title: string; icon: typeof LayoutDashboard; items: NavLink[
 const pinned: NavLink[] = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { label: "Approvals", href: "/approvals", icon: ListChecks },
-  { label: "Notifications", href: "/notifications", icon: BellRing },
   { label: "API Viewer", href: "/api-viewer", icon: ScrollText }
 ];
 
@@ -286,8 +284,6 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
           <span>Live MySQL</span>
           <strong>Admin Console</strong>
         </div>
-
-        <NotificationBell />
 
         <SidebarNav />
 

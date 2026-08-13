@@ -1,6 +1,11 @@
 // BulkSMSBD gateway helper. api_key/sender stay server-side (never in the app).
-// GET http://bulksmsbd.net/api/smsapi?api_key=KEY&type=text&number=88017...&senderid=ID&message=...
+// GET https://bulksmsbd.net/api/smsapi?api_key=KEY&type=text&number=88017...&senderid=ID&message=...
 // Returns the gateway's response code (202 = submitted). See PDF error/success codes.
+//
+// HTTPS, not HTTP. The API key and the recipient's phone number travel in the
+// query string, so over plaintext every hop between this server and the gateway
+// could read the key and harvest numbers. The gateway answers on 443, so there
+// was no reason for the cleartext call.
 
 export function normalizeBdNumber(phone: string): string {
   const digits = String(phone).replace(/\D/g, "");
@@ -26,7 +31,7 @@ export async function sendSms(number: string, message: string): Promise<SmsResul
     throw new Error("SMS gateway is not configured (BULKSMSBD_API_KEY / BULKSMSBD_SENDER_ID).");
   }
   const url =
-    `http://bulksmsbd.net/api/smsapi?api_key=${encodeURIComponent(apiKey)}` +
+    `https://bulksmsbd.net/api/smsapi?api_key=${encodeURIComponent(apiKey)}` +
     `&type=text&number=${encodeURIComponent(normalizeBdNumber(number))}` +
     `&senderid=${encodeURIComponent(senderId)}&message=${encodeURIComponent(message)}`;
 

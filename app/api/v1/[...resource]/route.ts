@@ -1,4 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import { resolveCaller, unauthorized, forbidden, type Caller } from "@/lib/app-auth";
+import { checkAccess } from "@/lib/api-access";
+import { RateLimitError, isDatabaseError } from "@/lib/errors";
 import {
   apiCatalog,
   buyOrders,
@@ -14,7 +17,8 @@ import {
   getResourceRelated,
   getResourceRow,
   hasDbResource,
-  listResource,
+  listResourcePage,
+  parseListPage,
   updateResource
 } from "@/lib/db-resources";
 import {
@@ -148,27 +152,91 @@ function envelope(data: unknown, meta: Record<string, unknown> = {}) {
   });
 }
 
-function accepted(method: string, payload: unknown, resource: string) {
+// Writes to a path with no resource behind it used to answer `ok: true` with 201
+// Created and echo the payload back — a success response for something that was
+// never stored. A client had no way to tell a real write from a typo'd path.
+function unknownResource(method: string, resource: string) {
   return NextResponse.json(
     {
-      ok: true,
-      message: `${method} accepted for ${resource}. Replace seed handler with DB service when MySQL is connected.`,
-      received: payload
+      ok: false,
+      message: `No writable resource at '${resource}'. Check GET /api/v1/catalog for the available resources.`,
+      code: "unknown_resource",
+      method
     },
-    { status: method === "POST" ? 201 : 202 }
+    { status: 404 }
   );
 }
 
 function dbError(error: unknown) {
-  const message = error instanceof Error ? error.message : "Unknown database error";
+  // A deliberate refusal is not a database failure — surface it as 429 so the
+  // client can back off instead of treating it as a server fault and retrying.
+  if (error instanceof RateLimitError) {
+    return NextResponse.json(
+      { ok: false, message: error.message, code: "rate_limited", retry_after: error.retryAfterSeconds },
+      { status: 429, headers: { "Retry-After": String(error.retryAfterSeconds) } }
+    );
+  }
+  // Input the caller can fix is a 400, not a 500 — and its message is safe to
+  // show, because it was written for the user. A real database fault stays a 500
+  // and does not leak the driver's message to the client.
+  if (!isDatabaseError(error)) {
+    const message = error instanceof Error ? error.message : "Invalid request.";
+    return NextResponse.json({ ok: false, message, code: "invalid_request" }, { status: 400 });
+  }
+  console.error("database error", error);
   return NextResponse.json(
     {
       ok: false,
-      message,
+      message: "A database error occurred. Please try again.",
       source: "mysql"
     },
     { status: 500 }
   );
+}
+
+// Best-effort client address for rate limiting. Behind Vercel/any proxy the
+// socket address is the proxy, so the forwarded header is the useful one.
+function clientIp(request: NextRequest): string | null {
+  const forwarded = request.headers.get("x-forwarded-for");
+  if (forwarded) return forwarded.split(",")[0].trim().slice(0, 45) || null;
+  return request.headers.get("x-real-ip")?.slice(0, 45) ?? null;
+}
+
+// Identify the caller and apply the access policy in one step. Returns either a
+// ready-to-send rejection or the caller, so each verb handler is a two-line guard.
+async function guard(
+  request: NextRequest,
+  resource: string,
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE"
+): Promise<{ deny: NextResponse; caller: null } | { deny: null; caller: Caller }> {
+  const caller = await resolveCaller(request);
+  const decision = checkAccess(caller, resource, method);
+  if (decision.allow) return { deny: null, caller };
+  return {
+    deny: decision.reason === "unauthenticated" ? unauthorized() : forbidden(),
+    caller: null
+  };
+}
+
+// Pin every user-scoped read to the session's own user. The mobile app still
+// sends ?user_id=, but for an app caller that value is overwritten rather than
+// trusted, so there is no parameter left to tamper with. Admins keep the
+// supplied id — the console legitimately inspects other people's records.
+function scopedParams(request: NextRequest, caller: Caller): URLSearchParams {
+  const params = new URLSearchParams(request.nextUrl.searchParams);
+  if (caller.kind === "app") {
+    params.set("user_id", String(caller.user.id));
+  }
+  return params;
+}
+
+// Same pinning for write payloads.
+function scopedPayload(payload: unknown, caller: Caller): Record<string, unknown> {
+  const body = (payload ?? {}) as Record<string, unknown>;
+  if (caller.kind === "app") {
+    return { ...body, user_id: caller.user.id };
+  }
+  return body;
 }
 
 async function resolveResourceContext(params: Params["params"], request: NextRequest) {
@@ -193,7 +261,9 @@ async function resolveResourceContext(params: Params["params"], request: NextReq
 
 export async function GET(request: NextRequest, { params }: Params) {
   const { resource, id } = await resolveResourceContext(params, request);
-  const searchParams = request.nextUrl.searchParams;
+  const { deny, caller } = await guard(request, resource, "GET");
+  if (deny) return deny;
+  const searchParams = scopedParams(request, caller);
 
   // App sale price quote: resolve the B2B preset for animal + breed + region.
   if (resource === "app/sale/price-quote") {
@@ -244,7 +314,11 @@ export async function GET(request: NextRequest, { params }: Params) {
   // The admin panel passes ?surface=admin to opt out and receive the
   // admin-column-shaped rows from listResource() instead (otherwise its tables
   // would render blank cells against app field names).
-  if (!id && appReadHandlers[resource] && searchParams.get("surface") !== "admin") {
+  // ?surface=admin returns admin-column-shaped rows; only an admin caller may ask
+  // for it, so an app token cannot opt out of the app-shaped projection.
+  const adminSurface = caller.kind === "admin" && searchParams.get("surface") === "admin";
+
+  if (!id && appReadHandlers[resource] && !adminSurface) {
     try {
       const data = await appReadHandlers[resource](searchParams);
       return envelope(data ?? [], { source: "mysql", surface: "app", resource });
@@ -260,8 +334,15 @@ export async function GET(request: NextRequest, { params }: Params) {
         const related = await getResourceRelated(resource, id);
         return envelope({ row, related }, { source: "mysql", resource, id });
       }
-      const rows = await listResource(resource);
-      return envelope(rows ?? [], { source: "mysql", resource });
+      const listed = await listResourcePage(resource, parseListPage(searchParams));
+      return envelope(listed?.rows ?? [], {
+        source: "mysql",
+        resource,
+        total: listed?.total ?? null,
+        limit: listed?.limit ?? null,
+        offset: listed?.offset ?? 0,
+        truncated: listed?.truncated ?? false
+      });
     } catch (error) {
       return dbError(error);
     }
@@ -321,12 +402,14 @@ export async function GET(request: NextRequest, { params }: Params) {
 export async function POST(request: NextRequest, { params }: Params) {
   const { resource: segments } = await params;
   const exact = segments.join("/");
-  const payload = await request.json().catch(() => ({}));
+  const { deny, caller } = await guard(request, exact, "POST");
+  if (deny) return deny;
+  const payload = scopedPayload(await request.json().catch(() => ({})), caller);
 
   // App action routes (composite writes that the mobile screens call directly).
   try {
     if (exact === "app/auth/request-otp") {
-      return NextResponse.json({ ok: true, source: "mysql", action: "otp_sent", result: await requestOtp(payload) }, { status: 200 });
+      return NextResponse.json({ ok: true, source: "mysql", action: "otp_sent", result: await requestOtp(payload, clientIp(request)) }, { status: 200 });
     }
     if (exact === "app/auth/verify-otp") {
       return NextResponse.json({ ok: true, source: "mysql", action: "authenticated", result: await verifyOtpLogin(payload) }, { status: 200 });
@@ -350,7 +433,13 @@ export async function POST(request: NextRequest, { params }: Params) {
       return NextResponse.json({ ok: true, source: "mysql", action: "roles_updated", result: await setUserRoles(payload) }, { status: 200 });
     }
     if (exact === "app/admin/approve") {
-      return NextResponse.json({ ok: true, source: "mysql", action: "approval_decided", result: await decideApproval(payload) }, { status: 200 });
+      // The console does not send admin_id; take it from the authenticated
+      // session so the audit trail names a real administrator.
+      const decision = await decideApproval(
+        { ...payload, admin_id: payload.admin_id ?? caller.admin?.id ?? null },
+        { ip: clientIp(request), userAgent: request.headers.get("user-agent") }
+      );
+      return NextResponse.json({ ok: true, source: "mysql", action: "approval_decided", result: decision }, { status: 200 });
     }
     if (exact === "app/admin/set-required-docs") {
       return NextResponse.json({ ok: true, source: "mysql", action: "requirements_saved", result: await setApprovalRequirements(payload) }, { status: 200 });
@@ -398,13 +487,15 @@ export async function POST(request: NextRequest, { params }: Params) {
       return dbError(error);
     }
   }
-  return accepted("POST", payload, resource);
+  return unknownResource("POST", resource);
 }
 
 export async function PUT(request: NextRequest, { params }: Params) {
   const context = await resolveResourceContext(params, request);
   const resource = context.resource;
-  const payload = await request.json().catch(() => ({}));
+  const { deny, caller } = await guard(request, resource, "PUT");
+  if (deny) return deny;
+  const payload = scopedPayload(await request.json().catch(() => ({})), caller);
   const id = context.id ?? String((payload as Record<string, unknown>).id ?? "");
   if (hasDbResource(resource)) {
     if (!id) {
@@ -417,13 +508,15 @@ export async function PUT(request: NextRequest, { params }: Params) {
       return dbError(error);
     }
   }
-  return accepted("PUT", payload, resource);
+  return unknownResource("PUT", resource);
 }
 
 export async function PATCH(request: NextRequest, { params }: Params) {
   const context = await resolveResourceContext(params, request);
   const resource = context.resource;
-  const payload = await request.json().catch(() => ({}));
+  const { deny, caller } = await guard(request, resource, "PATCH");
+  if (deny) return deny;
+  const payload = scopedPayload(await request.json().catch(() => ({})), caller);
   const id = context.id ?? String((payload as Record<string, unknown>).id ?? "");
   if (hasDbResource(resource)) {
     if (!id) {
@@ -436,12 +529,14 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       return dbError(error);
     }
   }
-  return accepted("PATCH", payload, resource);
+  return unknownResource("PATCH", resource);
 }
 
 export async function DELETE(request: NextRequest, { params }: Params) {
   const context = await resolveResourceContext(params, request);
   const resource = context.resource;
+  const { deny } = await guard(request, resource, "DELETE");
+  if (deny) return deny;
   const payload = await request.json().catch(() => ({}));
   const id = context.id ?? String((payload as Record<string, unknown>).id ?? "");
   if (hasDbResource(resource)) {
@@ -455,5 +550,5 @@ export async function DELETE(request: NextRequest, { params }: Params) {
       return dbError(error);
     }
   }
-  return accepted("DELETE", payload, resource);
+  return unknownResource("DELETE", resource);
 }

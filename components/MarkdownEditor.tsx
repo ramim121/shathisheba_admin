@@ -7,12 +7,39 @@ import { Bold, Heading2, Heading3, Image as ImageIcon, Italic, Link2, List, Eye,
 // Markdown around the selection, plus a live preview. Stores Markdown (the app
 // renders it with its MarkdownText component) — no external editor/API key.
 
+// The preview is injected with dangerouslySetInnerHTML, so everything below has
+// to be safe against markdown that was written to attack the reader.
+//
+// Escaping only < and > is not enough: the link and image rules drop the captured
+// URL straight into an href/src attribute, so a quote in the URL closes the
+// attribute early and the rest becomes markup —
+//   ![x](y" onerror="alert(document.cookie))
+// produced a working <img ... onerror="..."> even with angle brackets escaped.
+// Quotes are now escaped too, and URLs are restricted to safe schemes so
+// [click](javascript:...) cannot execute either.
+const SAFE_URL = /^(https?:\/\/|mailto:|\/|#)/i;
+
+// esc() has already entity-escaped & < > " ' by the time a URL reaches here, so
+// this only has to reject schemes that execute. Re-escaping would double it.
+function safeUrl(url: string): string {
+  const trimmed = url.trim();
+  return SAFE_URL.test(trimmed) ? trimmed : "#";
+}
+
 function renderMarkdown(md: string): string {
-  const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const esc = (s: string) =>
+    s
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
   const inline = (s: string) =>
     esc(s)
-      .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img alt="$1" src="$2" style="max-width:100%;border-radius:8px;margin:6px 0" />')
-      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>')
+      .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_m, alt: string, url: string) =>
+        `<img alt="${alt}" src="${safeUrl(url)}" style="max-width:100%;border-radius:8px;margin:6px 0" />`)
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, label: string, url: string) =>
+        `<a href="${safeUrl(url)}" target="_blank" rel="noreferrer noopener">${label}</a>`)
       .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
       .replace(/\*([^*]+)\*/g, "<em>$1</em>")
       .replace(/`([^`]+)`/g, "<code>$1</code>");

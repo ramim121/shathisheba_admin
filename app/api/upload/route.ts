@@ -3,6 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import path from "node:path";
 import { s3Enabled, uploadToS3 } from "@/lib/s3";
+import { resolveCaller, unauthorized } from "@/lib/app-auth";
 
 // POST /api/upload  (multipart/form-data, field "file")
 // Used by the admin panel AND the mobile app for every upload (profile pictures,
@@ -10,10 +11,17 @@ import { s3Enabled, uploadToS3 } from "@/lib/s3";
 // files go to the S3 bucket: general media public-read, the kyc folder private
 // (served via /api/files/kyc presigned redirects). Without S3 config it falls
 // back to local public/uploads, so old environments keep working.
+//
+// Requires an identified caller (mobile bearer token or admin cookie). While this
+// was open, anyone on the internet could push 8MB objects into the production
+// bucket for as long as they cared to, at the bucket owner's expense.
 const ALLOWED = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
 const MAX_BYTES = 8 * 1024 * 1024;
 
 export async function POST(request: NextRequest) {
+  const caller = await resolveCaller(request);
+  if (caller.kind === "anon") return unauthorized();
+
   try {
     const form = await request.formData();
     const file = form.get("file");

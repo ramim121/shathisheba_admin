@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { queryRows } from "@/lib/db";
 import { verifyPassword } from "@/lib/auth";
 import { ADMIN_COOKIE, createAdminSession } from "@/lib/admin-auth";
+import { recordAudit } from "@/lib/audit";
 
 type AdminRow = { id: number; name: string; email: string; role: string; password_hash: string; is_active: number };
 
@@ -16,10 +17,32 @@ export async function POST(request: NextRequest) {
     [email.trim().toLowerCase()]
   );
   const admin = rows[0];
+  const ip = request.headers.get("x-forwarded-for");
+  const userAgent = request.headers.get("user-agent");
   if (!admin || !admin.is_active || !verifyPassword(password, admin.password_hash)) {
+    // Failed attempts are recorded too — a run of them against one account is
+    // the signal you want in the log, and it is missing if only wins are kept.
+    await recordAudit({
+      actorAdminId: admin?.id ?? null,
+      action: "admin.login.failed",
+      entityType: "admin_user",
+      entityId: admin?.id ?? null,
+      after: { email: email.trim().toLowerCase() },
+      ip,
+      userAgent
+    });
     return NextResponse.json({ ok: false, message: "Invalid email or password." }, { status: 401 });
   }
-  const { token, expires } = await createAdminSession(admin.id, request.headers.get("user-agent"), request.headers.get("x-forwarded-for"));
+  const { token, expires } = await createAdminSession(admin.id, userAgent, ip);
+  await recordAudit({
+    actorAdminId: admin.id,
+    action: "admin.login",
+    entityType: "admin_user",
+    entityId: admin.id,
+    after: { email: admin.email, role: admin.role },
+    ip,
+    userAgent
+  });
   const res = NextResponse.json({ ok: true, admin: { id: admin.id, name: admin.name, email: admin.email, role: admin.role } });
   res.cookies.set(ADMIN_COOKIE, token, {
     httpOnly: true,

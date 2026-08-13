@@ -26,11 +26,6 @@ const configs: Record<string, ResourceConfig> = {
     ["name", "email", "phone", "password_hash", "role", "district", "upazila", "is_active", "last_login_at"],
     { name: "New admin", email: `admin-${Date.now()}@shathisheba.local`, password_hash: "change-me", role: "hq_admin", is_active: 1 }
   ),
-  "media/assets": simpleConfig(
-    "media_assets",
-    ["owner_type", "owner_id", "asset_type", "title", "alt_text", "url", "mime_type", "size_bytes", "metadata", "uploaded_by"],
-    { owner_type: "system", asset_type: "image", url: "https://example.com/asset.jpg" }
-  ),
   interests: {
     table: "interest_categories",
     listSql: `
@@ -415,11 +410,15 @@ const configs: Record<string, ResourceConfig> = {
     allowedUpdate: ["status", "moderated_by", "moderated_at", "report_count"],
     defaults: { scope: "upazila", post_type: "general", body: "Reported community post", status: "moderation" }
   },
-  "notifications/campaigns": simpleConfig(
-    "notification_campaigns",
-    ["title_en", "title_bn", "body_en", "body_bn", "target_json", "campaign_type", "status", "scheduled_at", "sent_at", "created_by"],
-    { title_en: "New notification", body_en: "Notification body", target_json: "{}", campaign_type: "custom", status: "draft" }
-  ),
+  // Removed: "notifications/campaigns" and "media/assets".
+  //
+  // Both were CRUD endpoints over tables that nothing in the platform reads or
+  // writes, with no console page and no mobile caller — creating a campaign row
+  // sent no notification (the app has no push transport at all), and /api/upload
+  // stores its result on the owning record's own column rather than in a media
+  // registry. Exposing them implied working features that did not exist. The
+  // tables are left in place; restoring an endpoint is a few lines here once a
+  // real writer exists behind it.
   "audit/logs": simpleConfig(
     "audit_logs",
     ["actor_admin_id", "action", "entity_type", "entity_id", "before_json", "after_json", "ip_address", "user_agent"],
@@ -574,7 +573,39 @@ export function getDbResourceKeys() {
   return Object.keys(configs).sort();
 }
 
+// Write payloads were only ever filtered against the column allow-list — which
+// stops mass assignment, but says nothing about the values themselves. A caller
+// could send a 10MB string, a NaN, or thousands of keys, and the first the system
+// heard of it was MySQL truncating the value or the driver throwing.
+//
+// This does not replace per-column schemas; it rejects the shapes that are wrong
+// for any column, before the query is built.
+const MAX_FIELD_CHARS = 20000;
+const MAX_PAYLOAD_FIELDS = 100;
+
+function assertPayloadSane(payload: unknown): asserts payload is Record<string, unknown> {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new Error("Request body must be a JSON object.");
+  }
+  const entries = Object.entries(payload as Record<string, unknown>);
+  if (entries.length > MAX_PAYLOAD_FIELDS) {
+    throw new Error(`Too many fields in request body (max ${MAX_PAYLOAD_FIELDS}).`);
+  }
+  for (const [key, value] of entries) {
+    if (typeof value === "number" && !Number.isFinite(value)) {
+      throw new Error(`Field '${key}' must be a finite number.`);
+    }
+    if (typeof value === "string" && value.length > MAX_FIELD_CHARS) {
+      throw new Error(`Field '${key}' is too long (max ${MAX_FIELD_CHARS} characters).`);
+    }
+    if (typeof value === "function" || typeof value === "symbol" || typeof value === "bigint") {
+      throw new Error(`Field '${key}' has an unsupported type.`);
+    }
+  }
+}
+
 function normalizePayload(payload: Record<string, unknown>, config: ResourceConfig, mode: "insert" | "update") {
+  assertPayloadSane(payload);
   const allowed = mode === "insert" ? config.allowedInsert : config.allowedUpdate;
   const aliased = { ...payload };
 
@@ -613,10 +644,85 @@ function normalizePayload(payload: Record<string, unknown>, config: ResourceConf
   return Object.fromEntries(entries);
 }
 
-export async function listResource(resource: string) {
+// Collection reads used to be unbounded `SELECT ... ORDER BY` with no ceiling —
+// every row of every table, every request. Two things changed:
+//
+//   * callers may now ask for a window (?limit=&offset=) and get a total back, so
+//     a table can grow past what a phone or a browser can hold; and
+//   * a request that asks for no window still gets a hard cap, so no single query
+//     can pull an unbounded result set. The cap is well above today's largest
+//     table (geo_upazilas, 494 rows), so no existing screen silently truncates —
+//     and when it is ever hit the response says so rather than quietly lying.
+export const DEFAULT_LIST_LIMIT = 50;
+export const MAX_LIST_LIMIT = 500;
+export const UNPAGED_LIST_CAP = 1000;
+
+export type ListPage = { limit: number; offset: number };
+
+export type ListResult = {
+  rows: Record<string, unknown>[];
+  total: number | null;
+  limit: number;
+  offset: number;
+  truncated: boolean;
+};
+
+// Read a page window off a query string. Returns null when the caller asked for
+// no window at all, which selects the capped-but-unpaged path.
+export function parseListPage(params: URLSearchParams): ListPage | null {
+  const rawLimit = params.get("limit");
+  const rawOffset = params.get("offset");
+  const rawPage = params.get("page");
+  if (rawLimit === null && rawOffset === null && rawPage === null) return null;
+
+  const parsedLimit = Number.parseInt(rawLimit ?? "", 10);
+  const limit = Number.isFinite(parsedLimit) && parsedLimit > 0
+    ? Math.min(parsedLimit, MAX_LIST_LIMIT)
+    : DEFAULT_LIST_LIMIT;
+
+  const parsedOffset = Number.parseInt(rawOffset ?? "", 10);
+  if (Number.isFinite(parsedOffset) && parsedOffset >= 0) {
+    return { limit, offset: parsedOffset };
+  }
+
+  const parsedPage = Number.parseInt(rawPage ?? "", 10);
+  const page = Number.isFinite(parsedPage) && parsedPage > 1 ? parsedPage : 1;
+  return { limit, offset: (page - 1) * limit };
+}
+
+export async function listResource(resource: string, page: ListPage | null = null) {
+  const result = await listResourcePage(resource, page);
+  return result ? result.rows : null;
+}
+
+export async function listResourcePage(resource: string, page: ListPage | null = null): Promise<ListResult | null> {
   const config = configs[resource];
   if (!config) return null;
-  return queryRows<Record<string, unknown>>(config.listSql);
+
+  // limit/offset are integers parsed above, never caller text, so they are
+  // interpolated rather than bound — MySQL will not accept a placeholder for
+  // LIMIT through this driver's text protocol.
+  if (!page) {
+    const rows = await queryRows<Record<string, unknown>>(`${config.listSql} LIMIT ${UNPAGED_LIST_CAP}`);
+    return {
+      rows,
+      total: null,
+      limit: UNPAGED_LIST_CAP,
+      offset: 0,
+      truncated: rows.length === UNPAGED_LIST_CAP
+    };
+  }
+
+  const limit = Math.min(Math.max(1, Math.trunc(page.limit)), MAX_LIST_LIMIT);
+  const offset = Math.max(0, Math.trunc(page.offset));
+  const rows = await queryRows<Record<string, unknown>>(
+    `${config.listSql} LIMIT ${limit} OFFSET ${offset}`
+  );
+  const totalRows = await queryRows<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM (${config.listSql}) AS counted`
+  );
+  const total = Number(totalRows[0]?.n ?? 0);
+  return { rows, total, limit, offset, truncated: offset + rows.length < total };
 }
 
 export async function getResourceRow(resource: string, id: string) {

@@ -27,16 +27,39 @@ Every database-backed route returns **500 in production** while working locally.
 deployment has looked healthy. **The mobile app has never received live data from
 the deployed backend.**
 
-Two candidates, both outside the repo:
+**Most likely root cause — confirmed by inspection.** `README.md` documented the
+wrong environment variables, and Vercel was almost certainly configured from it:
 
-1. The `MYSQL_*` environment variables in the Vercel project are missing or stale.
-   `.env.local` still carries a note: *"Previous host (kept for reference):
-   43.224.119.70 / ramim1"* — if Vercel holds that host, it no longer resolves.
+| README told you to set | What `lib/db.ts` actually reads |
+|---|---|
+| `DATABASE_URL` | `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DATABASE` |
+| `NEXTAUTH_SECRET`, `NEXTAUTH_URL` | neither — admin auth is a custom `admin_session` cookie |
+
+`DATABASE_URL` appears nowhere in `lib/`, `app/` or `scripts/`. A deployment
+configured from the old README therefore has **no database credentials at all**:
+`mysql.createPool({ host: undefined, … })` fails on every query, which is exactly
+the observed pattern — static routes 200, every database route 500.
+
+The README has been corrected (commit following this note). Two secondary
+candidates remain if fixing the variables is not sufficient:
+
+1. The `MYSQL_HOST` in Vercel is the retired host. `.env.local` carries a
+   commented-out "previous host" line — if Vercel still holds that value it no
+   longer resolves. Compare it against the live `MYSQL_HOST` in `.env.local`.
 2. The RDS security group does not permit Vercel's egress addresses.
 
-**Action:** check the Vercel project's environment variables against `.env.local`,
-then check the RDS security group. Verify with:
-`curl https://shathisheba-admin.vercel.app/api/v1/geo/divisions` — it must return 200.
+**Action:**
+1. In Vercel → Settings → Environment Variables, add the five `MYSQL_*` values
+   from `.env.local`. Remove `DATABASE_URL` / `NEXTAUTH_*` if present — they do
+   nothing.
+2. Redeploy, then verify against a route that reads the database:
+   ```bash
+   curl -s -o /dev/null -w "%{http_code}\n" \
+     https://shathisheba-admin.vercel.app/api/v1/geo/divisions
+   ```
+   200 = connected. **Do not use `/api/v1/catalog` to check** — it returns a
+   hard-coded array and passes even with no database.
+3. If it still returns 500, open the RDS security group to Vercel.
 
 ### 1.2 🔴 Custom domain serves a different deployment
 

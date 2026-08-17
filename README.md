@@ -97,22 +97,60 @@ Open [http://localhost:3000](https://www.google.com/search?q=http://localhost:30
 
 ## 🔑 Environment Variables
 
-Create a `.env.local` file in the root directory and configure the keys required for database connections, authentication, and Gemini AI features:
+Create a `.env.local` file in the root directory. **These are the exact variable
+names the code reads** — `lib/db.ts` builds the MySQL pool from the five
+`MYSQL_*` values individually, and there is no `DATABASE_URL` anywhere in the
+codebase.
+
+> ⚠️ **If you are configuring Vercel, use this list.** An earlier version of this
+> file documented `DATABASE_URL`, `NEXTAUTH_SECRET` and `NEXTAUTH_URL`. None of
+> those are read by the application. A deployment configured from that list has
+> no database credentials at all: static routes such as `/api/v1/catalog` still
+> answer 200 because they return a hard-coded array, while every database-backed
+> route returns 500. That failure mode looks like a healthy deployment and is not.
 
 ```env
-# Authentication & App Roles
-NEXTAUTH_SECRET=your_next_auth_secret
-NEXTAUTH_URL=http://localhost:3000
+# Database — all five are required (lib/db.ts)
+MYSQL_HOST=your_mysql_host
+MYSQL_PORT=3306
+MYSQL_USER=your_mysql_user
+MYSQL_PASSWORD=your_mysql_password
+MYSQL_DATABASE=shathi_sheba
 
-# Database Configuration
-DATABASE_URL=your_database_connection_string
+# Gemini AI — server-side moderation and content tools
+GEMINI_API_KEY=your_gemini_api_key
 
-# Gemini AI Integration
-GEMINI_API_KEY=your_gemini_ai_api_key
+# S3 — media is public-read; the kyc/ folder is private and served via presigned redirects
+S3_BUCKET_NAME=your_bucket
+S3_BUCKET_REGION=ap-southeast-1
+S3_ACCESS_KEY_ID=your_access_key
+S3_SECRET_ACCESS_KEY=your_secret_key
+S3_PUBLIC_URL=https://your-bucket.s3.ap-southeast-1.amazonaws.com
 
-# Additional Services
-NEXT_PUBLIC_API_URL=your_backend_api_url
+# BulkSMSBD — OTP delivery
+BULKSMSBD_API_KEY=your_api_key
+BULKSMSBD_SENDER_ID=your_sender_id
+OTP_BRAND=Shathi Sheba
 
+# OTP behaviour
+# true  -> no SMS is sent and the code is returned in the response (use for testing)
+# false -> real SMS is delivered and costs credits
+OTP_DEV_MODE=false
+# Master code that verifies any number. Refused outright when NODE_ENV=production.
+# Leave empty.
+OTP_DEV_MASTER=
+```
+
+**Admin authentication does not use NextAuth.** Sessions are rows in
+`admin_sessions` behind an httpOnly `admin_session` cookie (`lib/admin-auth.ts`),
+so no `NEXTAUTH_*` variable is needed.
+
+To verify a deployment is actually wired to the database, call a route that
+reads from it — not `/api/v1/catalog`, which passes without a database:
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" https://<your-deployment>/api/v1/geo/divisions
+# 200 = connected · 500 = the MYSQL_* variables are missing or wrong
 ```
 
 > ⚠️ **Important:** Never commit your `.env.local` file to GitHub. It is already added to the `.gitignore` to prevent credential exposure.

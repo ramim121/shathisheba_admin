@@ -148,6 +148,16 @@ Database errors use:
 
 ## 5. Authentication Note
 
+> **Superseded — this section is out of date.** `/api/v1` has enforced
+> authentication since 2026-08-13. Every route requires a caller: the mobile app
+> sends `Authorization: Bearer <token>` resolved against `app_sessions`, and the
+> admin console is recognised by its `admin_session` cookie. Resources are
+> default-deny — only reference data and the OTP handshake are reachable without
+> a session. A user's `user_id` is derived from that session and a client-supplied
+> value is overwritten, not trusted. See `SECURITY.md` for the current contract.
+>
+> The original note is kept below for historical context only.
+
 The current route does not enforce authentication yet. Before production mobile release, add one of these:
 
 - Bearer token for mobile users

@@ -367,6 +367,37 @@ loan intake screen.
 | POST | `admin/loan/assess` |
 | GET | `admin/loan/assessment?application_id=` |
 | GET | `admin/loan/scorecard/integrity` |
+| GET | `admin/loan/workspace?application_id=` |
+| POST | `admin/loan/evidence` |
+| POST | `admin/loan/verification` |
+| POST | `admin/loan/development-plan` |
+
+### The workspace (P3)
+
+`/loan/applications/{id}` is where an officer works an application. The queue
+links here rather than to the generic row viewer.
+
+Only the sections the scorecard reads are editable: financial profile, enterprise
+experience, the behavioural score, and the eleven-item field verification. The
+rest of §18.3 is captured through the existing KYC and profile surfaces.
+
+Three things the workspace does that a plain form would not:
+
+- **The requirement checklist is computed server-side**, not remembered. A
+  checklist someone has to hold in their head is a checklist that gets skipped on
+  the busy day. `ready_to_score` is false until every blocking item is done, and
+  the screen names what is missing.
+- **Saving the financial profile also records `debt_section_complete`.** Zero
+  recorded debts is otherwise indistinguishable from "never asked", and the
+  difference is a rating of 5 versus 0 on a fifteen-point criterion.
+- **A `contradictory` verdict raises mandatory manual review** (`ADM-LON-19`) from
+  inside the save, not from the caller. Resolving it clears the flag, because the
+  rule is recomputed rather than latched.
+
+Writes are open to `field_officer` and above — capture is their job — while
+scoring stays with the credit roles. Every save is audited with the previous
+value, because "who changed the income figure after the field visit" is the first
+question anyone asks when an assessment looks wrong.
 
 Every figure on the credit dashboard is queried. `ADM-LON-34` forbids seeded
 numbers on credit surfaces, and rightly — a plausible fake figure on a credit

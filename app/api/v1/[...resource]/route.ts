@@ -112,6 +112,10 @@ import {
   getAssessmentHistory,
   getDevelopmentPlan,
   requestReassessment,
+  getLoanWorkspace,
+  saveLoanEvidence,
+  saveFieldVerification,
+  assignDevelopmentTasks,
   previewUserRecords,
   clearUserRecords
 } from "@/lib/app-endpoints";
@@ -186,6 +190,7 @@ const appReadHandlers: Record<string, AppReadHandler> = {
   "admin/loan/questionnaire/integrity": () => getQuestionnaireIntegrity(),
   "admin/loan/scorecard/integrity": () => getScorecardIntegrity(),
   "admin/loan/assessment": (q) => getAssessment(q.get("application_id") ?? ""),
+  "admin/loan/workspace": (q) => getLoanWorkspace(q.get("application_id") ?? ""),
   "admin/users/clear-records/preview": (q) => previewUserRecords(q.get("identifier") ?? "")
 };
 
@@ -496,6 +501,27 @@ export async function POST(request: NextRequest, { params }: Params) {
         { adminId: caller.admin.id, ip: clientIp(request), userAgent: request.headers.get("user-agent") }
       );
       return NextResponse.json({ ok: true, source: "mysql", action: "records_cleared", result }, { status: 200 });
+    }
+
+    // ---- Loan workspace capture (P3) ----------------------------------------
+    // Field officers own data capture (§18.3), so the write roles are wider than
+    // scoring — but never wider than staff.
+    if (exact === "admin/loan/evidence" || exact === "admin/loan/verification" || exact === "admin/loan/development-plan") {
+      const CAPTURE_ROLES = ["super_admin", "hq_admin", "credit_analyst", "credit_approver", "field_officer"];
+      if (caller.kind !== "admin" || !CAPTURE_ROLES.includes(caller.admin.role)) {
+        return forbidden("Capturing loan evidence is restricted to staff.");
+      }
+      const ctx = {
+        adminId: caller.admin.id,
+        ip: clientIp(request),
+        userAgent: request.headers.get("user-agent"),
+      };
+      const body = payload as Record<string, unknown>;
+      const result =
+        exact === "admin/loan/evidence" ? await saveLoanEvidence(body, ctx)
+        : exact === "admin/loan/verification" ? await saveFieldVerification(body, ctx)
+        : await assignDevelopmentTasks(body, ctx);
+      return NextResponse.json({ ok: true, source: "mysql", action: "saved", result }, { status: 200 });
     }
 
     // ---- Credit assessment (P4) ---------------------------------------------

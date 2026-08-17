@@ -184,7 +184,9 @@ export default function LoanApplicationsPage() {
                     <td>{r.district ?? "—"}</td>
                     <td className={r.days_open > 5 ? "late" : ""}>{r.days_open}d</td>
                     <td>
-                      <Link className="open" href={`/manage/view?resource=loan/applications&id=${r.id}`}>
+                      {/* The workspace, not the generic row viewer — this is the
+                          screen an officer actually works the application in. */}
+                      <Link className="open" href={`/loan/applications/${r.id}`}>
                         Open →
                       </Link>
                     </td>

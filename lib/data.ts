@@ -342,6 +342,10 @@ export const apiCatalog = [
   { method: "POST", path: "/api/v1/admin/loan/assess", desc: "Run the 100-point scorecard against an application { application_id, overrides?, shadow? }. Credit roles only; every override needs a 0–5 rating and a reason. Inserts a new immutable assessment and supersedes the previous one" },
   { method: "GET", path: "/api/v1/admin/loan/assessment?application_id=1", desc: "The live assessment for an application, its eight criterion ratings and the full reassessment history" },
   { method: "GET", path: "/api/v1/admin/loan/scorecard/integrity", desc: "Per-model criterion weight totals, the 60/40 quantitative-qualitative split and grade-threshold ordering — check before editing the scorecard" },
+  { method: "GET", path: "/api/v1/admin/loan/workspace?application_id=1", desc: "The Loan Application Workspace: applicant (NID masked), computed requirement checklist, all captured evidence with provenance, assets, debts, the 11 verification items, documents, safeguards, visits and the event timeline" },
+  { method: "POST", path: "/api/v1/admin/loan/evidence", desc: "Upsert a batch of evidence fields { application_id, fields[] }. Each field carries source type and verification status; the save is audited with the previous values. Field officers and above" },
+  { method: "POST", path: "/api/v1/admin/loan/verification", desc: "Record field-verification verdicts { application_id, items[] }. A 'contradictory' verdict on any item raises mandatory manual review on the application; resolving it clears the flag" },
+  { method: "POST", path: "/api/v1/admin/loan/development-plan", desc: "Assign development tasks from templates { application_id, template_codes[] }, with due dates from each template" },
 
   // --- Admin maintenance ---
   { method: "GET", path: "/api/v1/admin/users/clear-records/preview?identifier=01966662633", desc: "Per-table count of what Clear Records would delete for an account, before anything is touched" },

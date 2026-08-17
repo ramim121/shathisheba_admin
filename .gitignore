@@ -16,3 +16,6 @@ public/uploads/
 .agents/
 .codex/
 .graphify_python
+
+.vercel
+.env*

@@ -12,63 +12,51 @@ Severity: 🔴 blocks pilot · 🟠 fix before scale · 🟡 quality/maintenance
 
 ## 1. Needs a human — cannot be fixed in code
 
-### 1.1 🔴 Deployed backend cannot reach the database
+### 1.1 🟠 Vercel cannot reach RDS — network, not configuration
 
-Every database-backed route returns **500 in production** while working locally.
+The environment variables were the first half of this and are now **fixed**: the
+project had **zero** variables set (confirmed via `vercel env ls`), because the
+old README documented `DATABASE_URL` / `NEXTAUTH_*`, none of which the code reads.
+All fifteen `MYSQL_*` / S3 / SMS / OTP variables are now set across Production,
+Preview and Development, and the deployment has been rebuilt.
 
-| Route | `shathisheba-admin.vercel.app` | localhost |
+After that fix the finance routes answer **401** rather than 404 — so the code is
+current and the runtime is healthy — but the database routes still return 500:
+
+| Route | vercel.app | EC2 / localhost |
 |---|---|---|
 | `/api/v1/catalog` (static array, no DB) | 200 | 200 |
 | `/api/v1/geo/divisions` | **500** | 200 |
-| `/api/v1/sale/categories` | **500** | 200 |
-| `/api/v1/faq` | **500** | 200 |
+| `/api/v1/app/finance/loan-products` | 401 (was 404) | 401 |
 
-`catalog` passes only because it is a hard-coded array, which is probably why the
-deployment has looked healthy. **The mobile app has never received live data from
-the deployed backend.**
+The remaining cause is network. This laptop and the EC2 box both connect to RDS,
+Vercel does not, so the RDS security group admits specific addresses and Vercel's
+function egress is not among them. Vercel egress is dynamic unless you buy static
+IPs, so there is no small CIDR to add.
 
-**Most likely root cause — confirmed by inspection.** `README.md` documented the
-wrong environment variables, and Vercel was almost certainly configured from it:
+**This is not on the critical path.** `shathisheba.digigramventures.com` — the
+address the APK is built against — is the EC2 box, which reaches RDS fine. Vercel
+is a spare.
 
-| README told you to set | What `lib/db.ts` actually reads |
-|---|---|
-| `DATABASE_URL` | `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DATABASE` |
-| `NEXTAUTH_SECRET`, `NEXTAUTH_URL` | neither — admin auth is a custom `admin_session` cookie |
+**Action (choose one, none urgent):**
+1. Leave it. Treat Vercel as a build-preview target only.
+2. Buy Vercel static egress IPs and allow those in the RDS security group.
+3. Allow `0.0.0.0/0` on 3306 — **do not**, unless RDS is first put behind
+   IAM auth or a proxy. It exposes the database to the internet.
 
-`DATABASE_URL` appears nowhere in `lib/`, `app/` or `scripts/`. A deployment
-configured from the old README therefore has **no database credentials at all**:
-`mysql.createPool({ host: undefined, … })` fails on every query, which is exactly
-the observed pattern — static routes 200, every database route 500.
+### 1.2 🔴 GitHub token in plaintext in the server's git remote
 
-The README has been corrected (commit following this note). Two secondary
-candidates remain if fixing the variables is not sufficient:
+`/var/www/html/shathisheba-admin` had its `origin` set to
+`https://ramim121:ghp_…@github.com/ramim121/shathisheba_admin`. Any process that
+can run `git remote -v` there — or read `.git/config` — gets a working GitHub
+credential. The repository is public, so `git fetch` never needed it.
 
-1. The `MYSQL_HOST` in Vercel is the retired host. `.env.local` carries a
-   commented-out "previous host" line — if Vercel still holds that value it no
-   longer resolves. Compare it against the live `MYSQL_HOST` in `.env.local`.
-2. The RDS security group does not permit Vercel's egress addresses.
+The remote has been rewritten to the plain HTTPS URL. **The token itself is still
+live and must be revoked.**
 
-**Action:**
-1. In Vercel → Settings → Environment Variables, add the five `MYSQL_*` values
-   from `.env.local`. Remove `DATABASE_URL` / `NEXTAUTH_*` if present — they do
-   nothing.
-2. Redeploy, then verify against a route that reads the database:
-   ```bash
-   curl -s -o /dev/null -w "%{http_code}\n" \
-     https://shathisheba-admin.vercel.app/api/v1/geo/divisions
-   ```
-   200 = connected. **Do not use `/api/v1/catalog` to check** — it returns a
-   hard-coded array and passes even with no database.
-3. If it still returns 500, open the RDS security group to Vercel.
-
-### 1.2 🔴 Custom domain serves a different deployment
-
-`shathisheba.digigramventures.com` returns **404** for `/api/v1/app/finance/loan-products`
-while `shathisheba-admin.vercel.app` returns 401 (route present, session required).
-The custom domain is pointing at an older project or deployment.
-
-**Action:** repoint the domain in Vercel. Until then, the app must not use it —
-it would silently talk to stale code.
+**Action:** revoke it at github.com/settings/tokens. If the server ever needs to
+push, use a deploy key (`ssh-keygen` + repo → Settings → Deploy keys) rather than
+a PAT in a URL.
 
 ### 1.3 🔴 WeatherAPI key is public in git history
 
@@ -95,12 +83,15 @@ Affects `EXPO_PUBLIC_GEMINI_API_KEY` and `EXPO_PUBLIC_WEATHERAPI_KEY`.
 phone calls `/api/v1/...` with its session token. `src/ai/gemini.ts` was extracted
 partly to make this a single-file change.
 
-### 1.5 🟠 Three high dependency advisories need Next.js 16
+### 1.5 🟡 `middleware.ts` is deprecated in Next 16
 
-`next`, `postcss` and `sharp` in the admin are only resolvable by a breaking major
-upgrade. Left as a deliberate decision rather than forced.
+Next 16 renamed the convention to `proxy`. The build warns but still routes it
+correctly (`ƒ Proxy (Middleware)` appears in the build output), so nothing is
+broken. It will stop working in a future major.
 
-**Action:** `npm audit fix --force` pulls next@16 — schedule and test properly.
+**Action:** `npx @next/codemod@canary middleware-to-proxy .` — mechanical, but it
+touches the auth boundary, so do it deliberately with the auth tests to hand
+rather than as a drive-by.
 
 ---
 
@@ -200,6 +191,18 @@ Fixed and verified; listed so they are not re-reported.
 - `audit_logs` existed since migration 001 and nothing ever wrote to it.
 - `media/assets` and `notifications/campaigns` were CRUD endpoints over tables
   nothing read or wrote.
+- **Three high dependency advisories** (`next`, `postcss`, `sharp`) needed a
+  breaking major. Upgraded to Next 16.3.1 with `eslint-config-next` 16,
+  TypeScript 5.9 and `@types/react` 19.2: `npm audit` is now clean, and the 46
+  engine, 20 questionnaire-guard and 15 Clear Records tests all pass on it. The
+  EC2 box had already been running Next 16 locally since June without the change
+  ever reaching the repository, so repo, Vercel and EC2 had drifted apart; they
+  are now identical.
+- **The custom domain was not a stale Vercel deployment.**
+  `shathisheba.digigramventures.com` resolves to `18.143.126.210`, an EC2 box
+  running the admin under pm2 behind nginx — a separate deployment that had never
+  been diagnosed as such. Its 404s were simply June code. Redeployed from
+  `origin/main`.
 - `ADM-RDY-02`: the readiness instrument could be unbalanced by a single mistyped
   weight, with no error — the engine normalises by the in-scope weight, so a set
   summing to 0.94 still produced a score, a grade and a status, just the wrong

@@ -161,6 +161,7 @@ curl -s -o /dev/null -w "%{http_code}\n" https://<your-deployment>/api/v1/geo/di
 
 | Document | What it covers |
 |---|---|
+| [`docs/deployment.md`](docs/deployment.md) | The two deployments (EC2 and Vercel), which one the APK talks to, and how to deploy, verify and roll back |
 | [`docs/finance-features.md`](docs/finance-features.md) | Readiness and Loan: the scoring model, pricing arithmetic, API surface, schema, mobile screens and the invariants the code enforces |
 | [`docs/mobile-api-documentation.md`](docs/mobile-api-documentation.md) | The `/api/v1` surface the mobile app consumes |
 | [`SECURITY.md`](SECURITY.md) | What was found, what was fixed and how it is enforced |

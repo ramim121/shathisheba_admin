@@ -123,8 +123,9 @@ data. All become required before real applicant data is captured.
 
 ## 3. Finance features — specified but not built (phases P3–P6)
 
-Phases P1 (Readiness) and P2 (loan intake + pricing) are complete. What remains
-from `SRS-FIN-01 v1.2`:
+Phases P1 (Readiness) and P2 (loan intake + pricing) are complete and documented
+in [`docs/finance-features.md`](docs/finance-features.md). What remains from
+`SRS-FIN-01 v1.2`:
 
 | Phase | Scope | Severity |
 |---|---|---|
@@ -137,15 +138,8 @@ Mobile screens specified but not yet added: `mpowerUAssessment`, `loanResult`,
 `developmentPlan`, `assessmentHistory`, `loanAccount`, `loanConsentManage`,
 `loanReviewRequest`.
 
-Also outstanding from this pass:
-
-- 🟡 API viewer is not yet regrouped into sections (requested).
-- 🟡 The main dashboard has no loan-pipeline stat card or fourth action card
-  (`ADM-LON-04`). The dedicated credit dashboard exists at `/loan/dashboard`.
-- 🟡 Readiness question sets are versioned in schema but the admin editor does
-  not yet enforce the "weights must total 1.0000 before publish" check
-  (`ADM-RDY-02`). The engine and seed are correct; a bad manual edit could
-  currently corrupt scoring silently.
+Nothing else from this pass is outstanding — the API viewer regrouping, the
+dashboard loan-pipeline card and `ADM-RDY-02` are all in section 6.
 
 ---
 
@@ -179,6 +173,11 @@ Still open, unrelated to the finance work:
 - 🔵 Migration `020` onwards is applied to the live RDS instance directly.
   There is no migration-tracking table — applied state is inferred from schema
   probes. Fine while idempotent, but worth a `schema_migrations` table.
+- 🔵 Commit `f1c326c` quoted a **retired** database host and username in this
+  file. HEAD no longer contains them, but the blob remains in the public repo's
+  history. The host is decommissioned and no password was involved, so this is
+  housekeeping rather than an exposure — worth folding into the history purge if
+  §1.3 is ever actioned.
 
 ---
 
@@ -201,3 +200,15 @@ Fixed and verified; listed so they are not re-reported.
 - `audit_logs` existed since migration 001 and nothing ever wrote to it.
 - `media/assets` and `notifications/campaigns` were CRUD endpoints over tables
   nothing read or wrote.
+- `ADM-RDY-02`: the readiness instrument could be unbalanced by a single mistyped
+  weight, with no error — the engine normalises by the in-scope weight, so a set
+  summing to 0.94 still produced a score, a grade and a status, just the wrong
+  ones, silently, for every assessment taken afterwards. Writes to
+  `loan/questionnaire` now run inside a transaction and are rolled back unless
+  each active set totals exactly 1.0000 and no branch points at a missing
+  question (`lib/finance/questionnaire-guard.ts`). `GET
+  admin/loan/questionnaire/integrity` shows the current totals and the core/deep
+  split. Verified 20/20, including that a balance-preserving edit still passes.
+- The API viewer listed ~70 rows flat and did not list the finance routes at all;
+  it is now eleven filterable sections and the catalog documents all 97 routes.
+- The main dashboard had no loan-pipeline card (`ADM-LON-04`).

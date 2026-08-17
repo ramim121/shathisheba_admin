@@ -21,6 +21,7 @@ export * from "./endpoints/learning";
 export * from "./endpoints/approvals";
 export * from "./endpoints/finance";
 export * from "./endpoints/admin-loan";
+export { getQuestionnaireIntegrity } from "./finance/questionnaire-guard";
 export * from "./endpoints/admin-maintenance";
 
 import { getUserRoles, safeJson, type Row } from "./endpoints/shared";

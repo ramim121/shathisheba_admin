@@ -1,5 +1,6 @@
 import type { ResultSetHeader } from "mysql2";
-import { executeQuery, queryRows } from "@/lib/db";
+import { executeQuery, queryRows, withTransaction, type Tx } from "@/lib/db";
+import { assertQuestionSetIntegrity } from "@/lib/finance/questionnaire-guard";
 
 type ResourceConfig = {
   table: string;
@@ -8,6 +9,10 @@ type ResourceConfig = {
   allowedInsert: string[];
   allowedUpdate: string[];
   defaults?: Record<string, unknown>;
+  // Run after the write, on the same connection, before the commit. Throwing
+  // rolls the write back — the place to enforce an invariant that spans rows and
+  // therefore cannot be expressed as a column constraint.
+  afterWrite?: (tx: Tx) => Promise<void>;
 };
 
 function simpleConfig(table: string, allowedFields: string[], defaults: Record<string, unknown> = {}): ResourceConfig {
@@ -431,7 +436,10 @@ const configs: Record<string, ResourceConfig> = {
     `,
     allowedInsert: ["set_id","part","sort_order","category","weight","flag","flag_code","branch_parent_order","branch_show_when","question_bn","question_en","helper_bn","helper_en","strength_bn","strength_en","gap_bn","gap_en","action_title_bn","action_title_en","action_rationale_bn","action_rationale_en","action_deeplink","is_active"],
     allowedUpdate: ["part","sort_order","category","weight","flag","flag_code","branch_parent_order","branch_show_when","question_bn","question_en","helper_bn","helper_en","strength_bn","strength_en","gap_bn","gap_en","action_title_bn","action_title_en","action_rationale_bn","action_rationale_en","action_deeplink","is_active"],
-    defaults: { part: "core", category: "financial", weight: 0.05, is_active: 1 }
+    defaults: { part: "core", category: "financial", weight: 0.05, is_active: 1 },
+    // ADM-RDY-02. A weight edit that unbalances the live instrument is rejected
+    // and rolled back rather than accepted and quietly mis-scored from then on.
+    afterWrite: assertQuestionSetIntegrity
   },
   "loan/readiness-checks": {
     table: "readiness_assessments",
@@ -931,6 +939,23 @@ export async function getResourceRelated(resource: string, id: string) {
   return {};
 }
 
+// Most resources are a single autocommitted statement. A resource carrying an
+// afterWrite guard needs the write and the check on one connection so the check
+// can veto: same SQL either way, different execution context.
+async function runWrite(
+  config: ResourceConfig,
+  sql: string,
+  values: unknown[]
+): Promise<ResultSetHeader> {
+  if (!config.afterWrite) return executeQuery(sql, values);
+  const guard = config.afterWrite;
+  return withTransaction(async (tx) => {
+    const result = await tx.execute(sql, values);
+    await guard(tx);
+    return result;
+  });
+}
+
 export async function createResource(resource: string, payload: Record<string, unknown>) {
   const config = configs[resource];
   if (!config) return null;
@@ -942,7 +967,8 @@ export async function createResource(resource: string, payload: Record<string, u
 
   const columns = Object.keys(data);
   const placeholders = columns.map(() => "?").join(", ");
-  const result = await executeQuery(
+  const result = await runWrite(
+    config,
     `INSERT INTO ${config.table} (${columns.map((column) => `\`${column}\``).join(", ")}) VALUES (${placeholders})`,
     Object.values(data)
   );
@@ -960,7 +986,8 @@ export async function updateResource(resource: string, id: string, payload: Reco
   }
 
   const assignments = Object.keys(data).map((column) => `\`${column}\` = ?`).join(", ");
-  const result = await executeQuery(
+  const result = await runWrite(
+    config,
     `UPDATE ${config.table} SET ${assignments} WHERE \`${idColumn}\` = ?`,
     [...Object.values(data), id]
   );
@@ -971,7 +998,7 @@ export async function deleteResource(resource: string, id: string) {
   const config = configs[resource];
   if (!config) return null;
   const idColumn = config.idColumn ?? "id";
-  const result = await executeQuery(`DELETE FROM ${config.table} WHERE \`${idColumn}\` = ?`, [id]);
+  const result = await runWrite(config, `DELETE FROM ${config.table} WHERE \`${idColumn}\` = ?`, [id]);
   return { affectedRows: result.affectedRows };
 }
 

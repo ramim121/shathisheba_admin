@@ -57,6 +57,7 @@ export const ADMIN_ONLY = new Set<string>([
   "loan/confidence-signals",
   "admin/loan/dashboard",
   "admin/loan/queue",
+  "admin/loan/questionnaire/integrity",
   "admin/users/clear-records",
   "admin/users/clear-records/preview",
   "orders/payments",

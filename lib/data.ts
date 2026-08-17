@@ -306,6 +306,36 @@ export const apiCatalog = [
   { method: "POST", path: "/api/v1/app/admin/set-required-docs", desc: "Mark KYC docs mandatory for a project application { application_id, required_docs[] } — blocks approval until verified" },
   { method: "GET", path: "/api/v1/app/admin/inventory", desc: "Inventory overview: stock, pending order demand, confirmed qty, movement ledger" },
 
+  // --- Finance / Feature 1: Readiness ---
+  // Weights, categories and flags are deliberately absent from every farmer-facing
+  // payload — a client that cannot see the model cannot reverse-engineer it.
+  { method: "GET", path: "/api/v1/app/finance/readiness/questions", desc: "The active readiness instrument as the app renders it: order, part, branching, bilingual text — no weights, categories or flags" },
+  { method: "POST", path: "/api/v1/app/finance/readiness/submit", desc: "Score a readiness check { user_id, part: 'core'|'deep', answers[] }: returns score, grade, status, confidence, ranked gaps and next actions. A 'deep' submission merges the stored Part 1 answers" },
+  { method: "GET", path: "/api/v1/app/finance/readiness/latest?user_id=1", desc: "The user's most recent readiness result, reshaped for the result screen" },
+  { method: "GET", path: "/api/v1/app/finance/readiness/history?user_id=1", desc: "Every readiness check the user has taken, newest first" },
+  { method: "GET", path: "/api/v1/app/finance/readiness/signals?user_id=1", desc: "Which corroboration signals have fired for the user, and what would clear the rest" },
+  { method: "GET", path: "/api/v1/app/finance/summary?user_id=1", desc: "The home Finance Passport card: current state, grade, active application and the next-payment ticker" },
+
+  // --- Finance / Feature 2: Loan intake and pricing ---
+  { method: "GET", path: "/api/v1/app/finance/loan-products", desc: "Active loan products with rate, method, tenures, repayment modes and amount bounds" },
+  { method: "GET", path: "/api/v1/app/finance/purposes", desc: "Loan purposes for the intake picker (the farmer-facing counterpart of loan/purposes)" },
+  { method: "POST", path: "/api/v1/app/finance/quote", desc: "Price a loan { product_id, amount, tenure_months, repayment_mode }: instalment, total interest and total payable in integer paisa. The effective annual rate is computed and stored but withheld from the app" },
+  { method: "POST", path: "/api/v1/app/finance/quote/schedule", desc: "The full repayment schedule for a quote — every instalment dated, with the rounding residue carried onto the final row so the sum reconciles exactly" },
+  { method: "GET", path: "/api/v1/app/finance/applications?user_id=1", desc: "The user's loan applications with status and product summary" },
+  { method: "GET", path: "/api/v1/app/finance/applications/SS-L-0001", desc: "One application by code: terms, consents, event timeline. Ownership is enforced by the query itself" },
+  { method: "POST", path: "/api/v1/app/finance/applications", desc: "Submit an application — one transaction writing the application, its six required consent rows and the first event" },
+  { method: "POST", path: "/api/v1/app/finance/applications/SS-L-0001/withdraw", desc: "Withdraw an application the user has not yet had decided" },
+  { method: "GET", path: "/api/v1/app/finance/consents?user_id=1", desc: "Consents the user has given, with version and timestamp" },
+
+  // --- Finance back-office (staff only) ---
+  { method: "GET", path: "/api/v1/admin/loan/dashboard", desc: "Credit portfolio dashboard: pipeline by status, readiness grade mix, conversion and disbursement — every figure queried, none seeded" },
+  { method: "GET", path: "/api/v1/admin/loan/queue?status=submitted&limit=20", desc: "Paginated credit queue with the KPI band above it" },
+  { method: "GET", path: "/api/v1/admin/loan/questionnaire/integrity", desc: "ADM-RDY-02: per-set weight totals, core/deep split and branch integrity for every active question set — check before editing the instrument" },
+
+  // --- Admin maintenance ---
+  { method: "GET", path: "/api/v1/admin/users/clear-records/preview?identifier=01966662633", desc: "Per-table count of what Clear Records would delete for an account, before anything is touched" },
+  { method: "POST", path: "/api/v1/admin/users/clear-records", desc: "Reset a test account without deleting it { identifier, confirm_phone, reset_onboarding?, reset_roles? }. super_admin only, the phone must be typed back, one transaction, audit-logged" },
+
   // --- Admin console auth ---
   { method: "POST", path: "/api/admin/login", desc: "Admin console sign-in { email, password } -> httpOnly session cookie" },
   { method: "GET", path: "/api/admin/me", desc: "Current signed-in admin (401 when the session is missing/expired)" },

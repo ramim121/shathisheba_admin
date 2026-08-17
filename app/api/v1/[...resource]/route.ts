@@ -104,6 +104,7 @@ import {
   getLoanPurposes,
   getCreditDashboard,
   getLoanQueue,
+  getQuestionnaireIntegrity,
   previewUserRecords,
   clearUserRecords
 } from "@/lib/app-endpoints";
@@ -170,6 +171,7 @@ const appReadHandlers: Record<string, AppReadHandler> = {
   // Admin finance aggregates. Staff-only via ADMIN_ONLY in lib/api-access.ts.
   "admin/loan/dashboard": () => getCreditDashboard(),
   "admin/loan/queue": (q) => getLoanQueue(q),
+  "admin/loan/questionnaire/integrity": () => getQuestionnaireIntegrity(),
   "admin/users/clear-records/preview": (q) => previewUserRecords(q.get("identifier") ?? "")
 };
 

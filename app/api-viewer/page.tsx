@@ -63,6 +63,11 @@ export default function ApiViewerPage() {
         test: (p) => p.includes("/finance/readiness") },
       { title: "Finance — Loan", blurb: "Feature 2: products, quoting, applications and consents.",
         test: (p) => p.includes("/finance/") || p.includes("/loan") },
+      // Ahead of Authentication & Profile, which would otherwise claim this on
+      // the bare "/users" in the path — it is a maintenance operation, not a
+      // profile one, and it is the last place someone should have to hunt for.
+      { title: "Admin — Maintenance", blurb: "Destructive back-office operations. Guarded, transactional and audit-logged.",
+        test: (p) => p.includes("/clear-records") },
       { title: "Authentication & Profile", blurb: "OTP handshake, the app user record and its profile modules.",
         test: (p) => /\/(auth|me|users|banking|farm|kyc|preferences|profile)/.test(p) },
       { title: "Marketplace — Sell", blurb: "Listings, sale taxonomy, pricing and confirmations.",

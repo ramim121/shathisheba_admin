@@ -47,6 +47,29 @@ const pinned: NavLink[] = [
 // Grouped, collapsible (cascading) navigation. Trimmed of the redundant
 // "Product Catalogue" (duplicate of Products) and the static "Reports" stub.
 const sections: NavSection[] = [
+  // Loan operations sit directly beneath the pinned items because they become
+  // the highest-frequency daily work for field officers and credit staff.
+  {
+    title: "Loan & Credit",
+    icon: HandCoins,
+    items: [
+      { label: "Loan Applications", href: "/loan/applications", icon: ListChecks },
+      { label: "Credit Dashboard", href: "/loan/dashboard", icon: LayoutDashboard },
+      { label: "Readiness Checks", href: "/loan/readiness-checks", icon: ShieldCheck },
+      { label: "Loan Accounts", href: "/loan/accounts", icon: CreditCard }
+    ]
+  },
+  {
+    title: "Loan Setup",
+    icon: Settings2,
+    items: [
+      { label: "Loan Products", href: "/loan/products", icon: HandCoins },
+      { label: "Readiness Questionnaire", href: "/loan/questionnaire", icon: ScrollText },
+      { label: "Corroboration Signals", href: "/loan/confidence-signals", icon: ShieldCheck },
+      { label: "Consent Types", href: "/loan/consent-types", icon: BookOpen },
+      { label: "Loan Purposes", href: "/loan/purposes", icon: Tags }
+    ]
+  },
   {
     title: "Content & CMS",
     icon: GraduationCap,

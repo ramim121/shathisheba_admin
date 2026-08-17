@@ -86,7 +86,23 @@ import {
   saveUserFarm,
   saveUserPreferences,
   verifyOtp,
-  verifyOtpLogin
+  verifyOtpLogin,
+  getFinanceSummary,
+  getReadinessQuestions,
+  getReadinessLatest,
+  getReadinessSignals,
+  getReadinessHistory,
+  submitReadiness,
+  getLoanProducts,
+  createQuote,
+  getQuoteSchedule,
+  createLoanApplication,
+  getLoanApplications,
+  getLoanApplicationDetail,
+  withdrawLoanApplication,
+  getLoanConsents,
+  getCreditDashboard,
+  getLoanQueue
 } from "@/lib/app-endpoints";
 
 // App-facing list reads. The mobile app hits these generic resource paths and
@@ -134,7 +150,22 @@ const appReadHandlers: Record<string, AppReadHandler> = {
   "app/learning/contents": (q) => getAppLearningModuleContents(q.get("module_id"), q.get("user_id")),
   "app/learning/content": (q) => getAppLearningContent(q.get("content_id"), q.get("user_id")),
   "app/learning/user-progress": (q) => getUserLearningProgress(q.get("user_id")),
-  "app/learning/progress-overview": () => getLearningProgressOverview()
+  "app/learning/progress-overview": () => getLearningProgressOverview(),
+
+  // Finance — Feature 1 (readiness) and Feature 2 (loan) reads. user_id is
+  // already pinned to the session by scopedParams() before these run.
+  "app/finance/summary": (q) => getFinanceSummary(q.get("user_id")!),
+  "app/finance/readiness/questions": () => getReadinessQuestions(),
+  "app/finance/readiness/latest": (q) => getReadinessLatest(q.get("user_id")!),
+  "app/finance/readiness/signals": (q) => getReadinessSignals(q.get("user_id")!),
+  "app/finance/readiness/history": (q) => getReadinessHistory(q.get("user_id")!),
+  "app/finance/loan-products": () => getLoanProducts(),
+  "app/finance/applications": (q) => getLoanApplications(q.get("user_id")!),
+  "app/finance/consents": (q) => getLoanConsents(q.get("user_id")!),
+
+  // Admin finance aggregates. Staff-only via ADMIN_ONLY in lib/api-access.ts.
+  "admin/loan/dashboard": () => getCreditDashboard(),
+  "admin/loan/queue": (q) => getLoanQueue(q)
 };
 
 type Params = {
@@ -297,6 +328,19 @@ export async function GET(request: NextRequest, { params }: Params) {
     }
   }
 
+  // Finance application detail: app/finance/applications/{code}. Ownership is
+  // enforced by the query itself — it filters on the session's user_id.
+  if (resource.startsWith("app/finance/applications/")) {
+    const code = resource.slice("app/finance/applications/".length);
+    try {
+      return envelope(await getLoanApplicationDetail(searchParams.get("user_id")!, code), {
+        source: "mysql", surface: "app", resource: "app/finance/applications/{code}",
+      });
+    } catch (error) {
+      return dbError(error);
+    }
+  }
+
   // App market updates: list (location-first) or blog detail by id.
   if (resource === "app/market-updates") {
     try {
@@ -408,6 +452,24 @@ export async function POST(request: NextRequest, { params }: Params) {
 
   // App action routes (composite writes that the mobile screens call directly).
   try {
+    // ---- Finance writes -----------------------------------------------------
+    if (exact === "app/finance/readiness/submit") {
+      return NextResponse.json({ ok: true, source: "mysql", action: "readiness_scored", result: await submitReadiness(payload) }, { status: 200 });
+    }
+    if (exact === "app/finance/quote") {
+      return NextResponse.json({ ok: true, source: "mysql", action: "quoted", result: await createQuote(payload) }, { status: 200 });
+    }
+    if (exact === "app/finance/quote/schedule") {
+      return NextResponse.json({ ok: true, source: "mysql", action: "schedule_previewed", result: await getQuoteSchedule(payload) }, { status: 200 });
+    }
+    if (exact === "app/finance/applications") {
+      return NextResponse.json({ ok: true, source: "mysql", action: "application_created", result: await createLoanApplication(payload) }, { status: 201 });
+    }
+    if (segments[0] === "app" && segments[1] === "finance" && segments[2] === "applications" && segments[4] === "withdraw") {
+      const uid = String((payload as Record<string, unknown>).user_id ?? "");
+      return NextResponse.json({ ok: true, source: "mysql", action: "withdrawn", result: await withdrawLoanApplication(uid, segments[3]) }, { status: 200 });
+    }
+
     if (exact === "app/auth/request-otp") {
       return NextResponse.json({ ok: true, source: "mysql", action: "otp_sent", result: await requestOtp(payload, clientIp(request)) }, { status: 200 });
     }

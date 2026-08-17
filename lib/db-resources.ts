@@ -410,6 +410,137 @@ const configs: Record<string, ResourceConfig> = {
     allowedUpdate: ["status", "moderated_by", "moderated_at", "report_count"],
     defaults: { scope: "upazila", post_type: "general", body: "Reported community post", status: "moderation" }
   },
+  // ---- Finance: readiness (Feature 1) --------------------------------------
+  "loan/questionnaire": {
+    table: "readiness_questions",
+    listSql: `
+      SELECT
+        CAST(q.id AS CHAR) AS id,
+        q.sort_order AS num,
+        q.part,
+        q.question_en AS question,
+        q.question_bn AS bangla,
+        q.category,
+        q.weight,
+        COALESCE(q.flag, '—') AS flag,
+        COALESCE(q.action_deeplink, '—') AS action,
+        q.is_active
+      FROM readiness_questions q
+      JOIN readiness_question_sets s ON s.id = q.set_id AND s.status = 'active'
+      ORDER BY q.sort_order
+    `,
+    allowedInsert: ["set_id","part","sort_order","category","weight","flag","flag_code","branch_parent_order","branch_show_when","question_bn","question_en","helper_bn","helper_en","strength_bn","strength_en","gap_bn","gap_en","action_title_bn","action_title_en","action_rationale_bn","action_rationale_en","action_deeplink","is_active"],
+    allowedUpdate: ["part","sort_order","category","weight","flag","flag_code","branch_parent_order","branch_show_when","question_bn","question_en","helper_bn","helper_en","strength_bn","strength_en","gap_bn","gap_en","action_title_bn","action_title_en","action_rationale_bn","action_rationale_en","action_deeplink","is_active"],
+    defaults: { part: "core", category: "financial", weight: 0.05, is_active: 1 }
+  },
+  "loan/readiness-checks": {
+    table: "readiness_assessments",
+    listSql: `
+      SELECT
+        CAST(a.id AS CHAR) AS id,
+        u.full_name AS farmer,
+        u.district,
+        a.depth,
+        a.score,
+        a.grade,
+        a.readiness_status AS status,
+        a.data_confidence AS confidence,
+        a.signal_count AS signals,
+        IF(EXISTS(SELECT 1 FROM loan_applications la WHERE la.user_id = a.user_id), 'Yes', 'No') AS converted,
+        a.created_at
+      FROM readiness_assessments a
+      JOIN app_users u ON u.id = a.user_id
+      ORDER BY a.created_at DESC
+    `,
+    allowedInsert: [],
+    allowedUpdate: []
+  },
+  "loan/confidence-signals": simpleConfig(
+    "readiness_confidence_signals",
+    ["code","label_bn","label_en","source_check","fix_deeplink","sort_order","is_active"],
+    { code: "S9", label_en: "New signal", label_bn: "নতুন সংকেত", source_check: "custom", is_active: 1 }
+  ),
+
+  // ---- Finance: loan (Feature 2) -------------------------------------------
+  "loan/products": {
+    table: "loan_products",
+    listSql: `
+      SELECT
+        CAST(id AS CHAR) AS id,
+        CONCAT(COALESCE(icon,''), ' ', name_en) AS product,
+        name_bn AS bangla,
+        code,
+        CONCAT(interest_rate_annual, '%') AS rate,
+        interest_method AS method,
+        allowed_tenures_json AS tenures,
+        CONCAT('৳', FORMAT(min_amount,0), ' – ৳', FORMAT(max_amount,0)) AS amount_range,
+        IF(is_active = 1, 'Live', IF(coming_soon = 1, 'Coming soon', 'Off')) AS availability,
+        sort_order
+      FROM loan_products
+      ORDER BY sort_order, id
+    `,
+    allowedInsert: ["code","name_bn","name_en","description_bn","description_en","icon","interest_rate_annual","interest_method","allowed_tenures_json","allowed_repayment_modes_json","min_amount","max_amount","amount_step","weeks_per_month","first_payment_offset_days","grace_period_months","processing_fee_pct","processing_fee_flat","late_penalty_pct","late_penalty_grace_days","collateral_required","is_active","coming_soon","sort_order"],
+    allowedUpdate: ["name_bn","name_en","description_bn","description_en","icon","interest_rate_annual","interest_method","allowed_tenures_json","allowed_repayment_modes_json","min_amount","max_amount","amount_step","weeks_per_month","first_payment_offset_days","grace_period_months","processing_fee_pct","processing_fee_flat","late_penalty_pct","late_penalty_grace_days","collateral_required","is_active","coming_soon","sort_order"],
+    defaults: { interest_method: "flat", amount_step: 1000, weeks_per_month: 4, first_payment_offset_days: 30, is_active: 0, coming_soon: 1 }
+  },
+  "loan/applications": {
+    table: "loan_applications",
+    listSql: `
+      SELECT
+        CAST(a.id AS CHAR) AS id,
+        a.application_code AS code,
+        u.full_name AS farmer,
+        u.phone,
+        p.name_en AS product,
+        CONCAT('৳', FORMAT(a.requested_amount,0)) AS requested,
+        a.status,
+        a.district,
+        a.repayment_mode AS mode,
+        a.tenure_months AS months,
+        DATEDIFF(NOW(), a.created_at) AS days_open,
+        a.created_at
+      FROM loan_applications a
+      JOIN app_users u ON u.id = a.user_id
+      JOIN loan_products p ON p.id = a.loan_product_id
+      ORDER BY a.created_at DESC
+    `,
+    allowedInsert: [],
+    allowedUpdate: ["status","assigned_officer_id","pending_user_action","recommended_amount","approved_amount","needs_correction_note"]
+  },
+  "loan/consent-types": simpleConfig(
+    "loan_consent_types",
+    ["consent_key","title_bn","title_en","description_bn","description_en","version","is_required","is_revocable","collected_at_stage","is_active","sort_order"],
+    { version: "v1", is_required: 1, is_revocable: 1, collected_at_stage: "apply", is_active: 1 }
+  ),
+  "loan/purposes": simpleConfig(
+    "loan_purposes",
+    ["code","label_bn","label_en","icon","is_active","sort_order"],
+    { is_active: 1 }
+  ),
+  "loan/accounts": {
+    table: "loan_accounts",
+    listSql: `
+      SELECT
+        CAST(acc.id AS CHAR) AS id,
+        a.application_code AS code,
+        u.full_name AS farmer,
+        CONCAT('৳', FORMAT(acc.principal,0)) AS disbursed,
+        CONCAT(acc.interest_rate_annual, '%') AS rate,
+        acc.repayment_mode AS mode,
+        CONCAT('৳', FORMAT(acc.emi_amount,2)) AS installment,
+        CONCAT('৳', FORMAT(acc.outstanding_total,0)) AS outstanding,
+        acc.next_due_date,
+        acc.days_past_due AS dpd,
+        acc.status
+      FROM loan_accounts acc
+      JOIN loan_applications a ON a.id = acc.application_id
+      JOIN app_users u ON u.id = acc.user_id
+      ORDER BY acc.next_due_date
+    `,
+    allowedInsert: [],
+    allowedUpdate: ["status"]
+  },
+
   // Removed: "notifications/campaigns" and "media/assets".
   //
   // Both were CRUD endpoints over tables that nothing in the platform reads or

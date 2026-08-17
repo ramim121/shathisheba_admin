@@ -820,9 +820,225 @@ export const nestedPages: Record<string, ManagementPageProps> = {
   }
 };
 
+// ---------------------------------------------------------------------------
+// Finance — Readiness (Feature 1) and Loan (Feature 2)
+//
+// These sit on the generic management surface deliberately: the questionnaire,
+// the product catalogue and the consent register are configuration, and the
+// spec requires them to be editable without a release (ADM-RDY-01, ADM-LON-42).
+// The operational screens that are not simple tables — the applications queue
+// with its KPI band, the workspace, and the credit dashboard — have their own
+// pages under app/loan/.
+// ---------------------------------------------------------------------------
+const financePages: Record<string, ManagementPageProps> = {
+  "loan/questionnaire": {
+    title: "Readiness Questionnaire",
+    description:
+      "The 20-question instrument behind the farmer's finance-readiness check. Weights must total exactly 1.0000 before a set can be published — the score is meaningless otherwise. Part 1 is always asked; Part 2 is the optional accuracy pass.",
+    entityName: "Question",
+    endpoint: "/api/v1/loan/questionnaire",
+    columns: [
+      { key: "num", label: "#" },
+      { key: "part", label: "Part" },
+      { key: "question", label: "Question" },
+      { key: "bangla", label: "Bangla" },
+      { key: "category", label: "Category" },
+      { key: "weight", label: "Weight" },
+      { key: "flag", label: "Flag" },
+      { key: "action", label: "Action link" }
+    ],
+    rows: [],
+    formFields: [
+      { label: "Part", name: "part", type: "select", options: ["core", "deep"] },
+      { label: "Order", name: "sort_order", value: "21" },
+      { label: "Category", name: "category", type: "select", options: ["kyc", "enterprise", "financial"] },
+      { label: "Weight (all active questions must sum to 1.0000)", name: "weight", value: "0.05" },
+      { label: "Question (Bangla)", name: "question_bn", type: "textarea", value: "" },
+      { label: "Question (English)", name: "question_en", type: "textarea", value: "" },
+      { label: "Helper — why we ask (Bangla)", name: "helper_bn", type: "textarea", value: "" },
+      { label: "Helper — why we ask (English)", name: "helper_en", type: "textarea", value: "" },
+      { label: "Flag", name: "flag", type: "select", options: ["", "gate", "risk"] },
+      { label: "Flag code (e.g. NO_NID, ARREARS)", name: "flag_code", value: "" },
+      { label: "Branch parent question number", name: "branch_parent_order", value: "" },
+      { label: "Show when parent answered", name: "branch_show_when", type: "select", options: ["", "yes", "no"] },
+      { label: "Strength phrasing (Bangla)", name: "strength_bn", value: "" },
+      { label: "Strength phrasing (English)", name: "strength_en", value: "" },
+      { label: "Gap phrasing (Bangla)", name: "gap_bn", value: "" },
+      { label: "Gap phrasing (English)", name: "gap_en", value: "" },
+      { label: "Action title (Bangla)", name: "action_title_bn", value: "" },
+      { label: "Action title (English)", name: "action_title_en", value: "" },
+      { label: "Action deep link (screen:… or sheet:…)", name: "action_deeplink", value: "screen:training" },
+      { label: "Active", name: "is_active", type: "select", options: ["1", "0"] }
+    ]
+  },
+  "loan/readiness-checks": {
+    title: "Readiness Checks",
+    description:
+      "Every self-declared readiness check taken in the app, with depth, score, indicative grade and whether it converted into a loan application. High-readiness users who have not applied are the field team's warmest lead list.",
+    entityName: "Readiness Check",
+    endpoint: "/api/v1/loan/readiness-checks",
+    columns: [
+      { key: "farmer", label: "Farmer" },
+      { key: "district", label: "District" },
+      { key: "depth", label: "Depth" },
+      { key: "score", label: "Score" },
+      { key: "grade", label: "Grade" },
+      { key: "status", label: "Readiness" },
+      { key: "confidence", label: "Confidence" },
+      { key: "signals", label: "Signals" },
+      { key: "converted", label: "Applied?" },
+      { key: "created_at", label: "Taken" }
+    ],
+    rows: [],
+    formFields: []
+  },
+  "loan/confidence-signals": {
+    title: "Corroboration Signals",
+    description:
+      "What the platform can independently verify about a farmer. Confidence responds only to these — never to the answers themselves, which is what stops the check being gamed.",
+    entityName: "Signal",
+    endpoint: "/api/v1/loan/confidence-signals",
+    columns: [
+      { key: "code", label: "Code" },
+      { key: "label_en", label: "Signal" },
+      { key: "label_bn", label: "Bangla" },
+      { key: "source_check", label: "Source check" },
+      { key: "fix_deeplink", label: "Fix link" },
+      { key: "is_active", label: "Active" }
+    ],
+    rows: [],
+    formFields: [
+      { label: "Code", name: "code", value: "S8" },
+      { label: "Label (Bangla)", name: "label_bn", value: "" },
+      { label: "Label (English)", name: "label_en", value: "" },
+      { label: "Source check key", name: "source_check", value: "" },
+      { label: "Fix deep link", name: "fix_deeplink", value: "screen:menuKyc" },
+      { label: "Sort order", name: "sort_order", value: "8" },
+      { label: "Active", name: "is_active", type: "select", options: ["1", "0"] }
+    ]
+  },
+  "loan/products": {
+    title: "Loan Products & Rates",
+    description:
+      "The finance catalogue and its pricing. Interest is flat-rate: it accrues on the full original principal for the whole tenure, so a farmer can check the total with a calculator. Changing a rate here never alters a loan that has already been disbursed — those terms are snapshotted at disbursement.",
+    entityName: "Loan Product",
+    endpoint: "/api/v1/loan/products",
+    columns: [
+      { key: "product", label: "Product" },
+      { key: "bangla", label: "Bangla" },
+      { key: "rate", label: "Rate p.a." },
+      { key: "method", label: "Method" },
+      { key: "tenures", label: "Tenures (months)" },
+      { key: "amount_range", label: "Amount range" },
+      { key: "availability", label: "Availability" }
+    ],
+    rows: [],
+    formFields: [
+      { label: "Code", name: "code", value: "agricultural" },
+      { label: "Name (Bangla)", name: "name_bn", value: "" },
+      { label: "Name (English)", name: "name_en", value: "" },
+      { label: "Description (Bangla)", name: "description_bn", type: "textarea", value: "" },
+      { label: "Description (English)", name: "description_en", type: "textarea", value: "" },
+      { label: "Emoji / icon", name: "icon", value: "🌾" },
+      { label: "Annual interest rate (%)", name: "interest_rate_annual", value: "7" },
+      { label: "Interest method", name: "interest_method", type: "select", options: ["flat", "reducing_balance"] },
+      { label: "Allowed tenures, JSON array e.g. [6,12,24]", name: "allowed_tenures_json", value: "[6,12,24]" },
+      { label: "Allowed repayment modes, JSON array", name: "allowed_repayment_modes_json", value: '["weekly","monthly","one_time"]' },
+      { label: "Minimum amount", name: "min_amount", value: "10000" },
+      { label: "Maximum amount", name: "max_amount", value: "200000" },
+      { label: "Slider step", name: "amount_step", value: "1000" },
+      { label: "Weeks per month (weekly instalments)", name: "weeks_per_month", value: "4" },
+      { label: "Days from disbursement to first instalment", name: "first_payment_offset_days", value: "30" },
+      { label: "Grace period (months)", name: "grace_period_months", value: "0" },
+      { label: "Processing fee (% of principal)", name: "processing_fee_pct", value: "0" },
+      { label: "Processing fee (flat ৳)", name: "processing_fee_flat", value: "0" },
+      { label: "Late penalty (%)", name: "late_penalty_pct", value: "0" },
+      { label: "Late penalty grace (days)", name: "late_penalty_grace_days", value: "7" },
+      { label: "Collateral required", name: "collateral_required", type: "select", options: ["0", "1"] },
+      { label: "Live (farmers can apply)", name: "is_active", type: "select", options: ["0", "1"] },
+      { label: "Show as coming soon", name: "coming_soon", type: "select", options: ["1", "0"] },
+      { label: "Sort order", name: "sort_order", value: "10" }
+    ]
+  },
+  "loan/consent-types": {
+    title: "Consent Types",
+    description:
+      "Each consent the loan application collects, its version and whether it can be withdrawn. Six are required at apply time; project-partner sharing is requested just-in-time instead of being bundled into an upfront wall.",
+    entityName: "Consent Type",
+    endpoint: "/api/v1/loan/consent-types",
+    columns: [
+      { key: "consent_key", label: "Key" },
+      { key: "title_en", label: "Consent" },
+      { key: "title_bn", label: "Bangla" },
+      { key: "version", label: "Version" },
+      { key: "is_required", label: "Required" },
+      { key: "collected_at_stage", label: "Collected" },
+      { key: "is_revocable", label: "Revocable" }
+    ],
+    rows: [],
+    formFields: [
+      { label: "Consent key", name: "consent_key", value: "" },
+      { label: "Title (Bangla)", name: "title_bn", value: "" },
+      { label: "Title (English)", name: "title_en", value: "" },
+      { label: "Description (Bangla)", name: "description_bn", type: "textarea", value: "" },
+      { label: "Description (English)", name: "description_en", type: "textarea", value: "" },
+      { label: "Version", name: "version", value: "v1" },
+      { label: "Required", name: "is_required", type: "select", options: ["1", "0"] },
+      { label: "Revocable", name: "is_revocable", type: "select", options: ["1", "0"] },
+      { label: "Collected at", name: "collected_at_stage", type: "select", options: ["apply", "just_in_time"] },
+      { label: "Active", name: "is_active", type: "select", options: ["1", "0"] },
+      { label: "Sort order", name: "sort_order", value: "7" }
+    ]
+  },
+  "loan/purposes": {
+    title: "Loan Purposes",
+    description: "The purpose options offered in the apply flow's request step.",
+    entityName: "Loan Purpose",
+    endpoint: "/api/v1/loan/purposes",
+    columns: [
+      { key: "code", label: "Code" },
+      { key: "label_en", label: "Purpose" },
+      { key: "label_bn", label: "Bangla" },
+      { key: "icon", label: "Icon" },
+      { key: "is_active", label: "Active" }
+    ],
+    rows: [],
+    formFields: [
+      { label: "Code", name: "code", value: "" },
+      { label: "Label (Bangla)", name: "label_bn", value: "" },
+      { label: "Label (English)", name: "label_en", value: "" },
+      { label: "Emoji / icon", name: "icon", value: "📝" },
+      { label: "Active", name: "is_active", type: "select", options: ["1", "0"] },
+      { label: "Sort order", name: "sort_order", value: "7" }
+    ]
+  },
+  "loan/accounts": {
+    title: "Loan Accounts & Repayment",
+    description:
+      "Disbursed facilities and their repayment position. Terms here are snapshotted from the product at disbursement, so later pricing changes never reach a live loan.",
+    entityName: "Loan Account",
+    endpoint: "/api/v1/loan/accounts",
+    columns: [
+      { key: "code", label: "Application" },
+      { key: "farmer", label: "Farmer" },
+      { key: "disbursed", label: "Principal" },
+      { key: "rate", label: "Rate" },
+      { key: "mode", label: "Mode" },
+      { key: "installment", label: "Per instalment" },
+      { key: "outstanding", label: "Outstanding" },
+      { key: "next_due_date", label: "Next due" },
+      { key: "dpd", label: "Days late" },
+      { key: "status", label: "Status" }
+    ],
+    rows: [],
+    formFields: []
+  }
+};
+
 export const allManagementPages: Record<string, ManagementPageProps> = {
   ...pages,
   ...nestedPages,
+  ...financePages,
   "sale/listings": pages.sale,
   "buy/orders": pages.orders,
   "learning/modules": pages.learning,

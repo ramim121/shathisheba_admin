@@ -44,6 +44,18 @@ export const ADMIN_ONLY = new Set<string>([
   "admin/users",
   "audit/logs",
   "reports",
+  // Finance back-office. The farmer's own finance data is reached through
+  // app/finance/* and is ownership-scoped; these are the console-side views
+  // across every applicant and are staff-only.
+  "loan/applications",
+  "loan/readiness-checks",
+  "loan/accounts",
+  "loan/questionnaire",
+  "loan/products",
+  "loan/consent-types",
+  "loan/purposes",
+  "loan/confidence-signals",
+  "admin/loan/dashboard",
   "orders/payments",
   "community/reports",
   "sale/confirmations",
@@ -81,6 +93,12 @@ export const APP_WRITABLE_RESOURCES = new Set<string>([
 export function policyKey(resource: string): string {
   const like = resource.match(/^community\/posts\/[^/]+\/like$/);
   if (like) return "community/posts/like";
+  // Finance application paths carry the application code; judge them on the
+  // collection they belong to rather than defaulting them to deny.
+  const financeApp = resource.match(/^app\/finance\/applications\/[^/]+(?:\/([a-z-]+))?$/);
+  if (financeApp) {
+    return financeApp[1] ? `app/finance/applications/${financeApp[1]}` : "app/finance/applications";
+  }
   return resource;
 }
 
@@ -103,20 +121,36 @@ export type AdminDomain =
   | "content"        // learning, market updates, weather, FAQ, assistant prompts
   | "community"      // moderation
   | "users"          // app users, roles, banking, KYC records
+  | "credit_ops"     // loan applications, accounts — day-to-day credit work
+  | "credit_config"  // scorecard, questionnaire, products, rates
   | "system";        // admin accounts, audit log, geography
 
 // Which write domains each role may act in. `super_admin` is deliberately absent
 // from the map and short-circuits to full access below.
+//
+// The credit split matters: an analyst runs and progresses cases but must not be
+// able to change the rates or the instrument they are judged against. Config is
+// propose-then-approve, so only an approver commits it (ADM-LON-03).
 const ROLE_GRANTS: Record<string, AdminDomain[]> = {
-  hq_admin: ["approvals", "marketplace", "content", "community", "users"],
+  hq_admin: ["approvals", "marketplace", "content", "community", "users", "credit_ops"],
   marketplace_manager: ["marketplace", "approvals"],
   content_editor: ["content"],
-  field_officer: ["approvals"],
+  field_officer: ["approvals", "credit_ops"],
+  credit_analyst: ["credit_ops", "approvals"],
+  credit_approver: ["credit_ops", "credit_config", "approvals"],
   auditor: []
 };
 
+// Configuration surfaces, as opposed to per-application operational work.
+const CREDIT_CONFIG = new Set([
+  "loan/products", "loan/questionnaire", "loan/consent-types",
+  "loan/purposes", "loan/confidence-signals",
+]);
+
 // Which domain a resource belongs to, for write purposes.
 function domainOf(resource: string): AdminDomain {
+  if (CREDIT_CONFIG.has(resource)) return "credit_config";
+  if (resource.startsWith("loan/") || resource.startsWith("admin/loan/")) return "credit_ops";
   if (resource.startsWith("app/admin/approve") || resource.startsWith("app/admin/set-required-docs")) return "approvals";
   if (resource.startsWith("partners/") || resource.startsWith("sale/confirmations")) return "approvals";
   if (resource.startsWith("sale/") || resource.startsWith("buy/") || resource.startsWith("orders/")) return "marketplace";

@@ -1190,6 +1190,37 @@ const financePages: Record<string, ManagementPageProps> = {
       { label: "Active", name: "is_active", type: "select", options: ["1", "0"] }
     ]
   },
+  "loan/lenders": {
+    title: "Lenders",
+    description:
+      "Partner lenders and the rules each will accept. A submission is refused before it reaches them if the grade, confidence or amount falls outside these — a lender should never receive a file their own policy rejects. New lenders are created inactive.",
+    entityName: "Lender",
+    endpoint: "/api/v1/loan/lenders",
+    columns: [
+      { key: "code", label: "Code" },
+      { key: "name_en", label: "Lender" },
+      { key: "lender_type", label: "Type" },
+      { key: "min_grade", label: "Min grade" },
+      { key: "min_confidence", label: "Min confidence" },
+      { key: "max_amount", label: "Max amount" },
+      { key: "is_active", label: "Active" }
+    ],
+    rows: [],
+    formFields: [
+      { label: "Code", name: "code", value: "" },
+      { label: "Name (English)", name: "name_en", value: "" },
+      { label: "Name (Bangla)", name: "name_bn", value: "" },
+      { label: "Type", name: "lender_type", type: "select", options: ["bank", "mfi", "ngo", "development_partner", "cooperative", "other"] },
+      { label: "Contact name", name: "contact_name", value: "" },
+      { label: "Contact email", name: "contact_email", value: "" },
+      { label: "Contact phone", name: "contact_phone", value: "" },
+      { label: "Minimum grade accepted", name: "min_grade", type: "select", options: ["A", "B", "C", "D"] },
+      { label: "Minimum data confidence", name: "min_confidence", type: "select", options: ["high", "medium", "low"] },
+      { label: "Maximum amount (৳)", name: "max_amount", value: "" },
+      { label: "Notes", name: "notes", value: "" },
+      { label: "Active", name: "is_active", type: "select", options: ["0", "1"] }
+    ]
+  },
   "loan/development-templates": {
     title: "Development Tasks",
     description:

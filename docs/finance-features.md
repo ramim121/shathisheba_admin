@@ -381,6 +381,61 @@ Environment: `MPOWERU_DRIVER`, `MPOWERU_RESPONDENT_SALT`, `MPOWERU_WEBHOOK_SECRE
 
 ---
 
+## 3D. Lender packs and submissions (§20.1)
+
+`/loan/lenders` is the pipeline; `/loan/lenders-setup` configures who the lenders
+are and what each will accept.
+
+- **Consent is read at submission, every time.** Not cached on the row, not
+  checked at application — `share_with_lender` must be granted *now*, because it
+  can be revoked in between. `consent_verified_at` being null means nobody
+  checked, which is visibly different from "checked and it was fine".
+- **Lender rules are enforced before the file reaches them.** Minimum grade,
+  minimum confidence and maximum amount are configuration; a submission the
+  lender's own policy would reject never gets sent.
+- **`approved` and `declined` are terminal.** A change of mind is a new
+  submission, so both decisions stay on the record. A decline that a stray click
+  can flip back to "under review" is a decline nobody can rely on.
+- **A decline needs a structured reason code.** Free text cannot be learned from;
+  the code feeds the model and the text is for the human reading the file.
+- **Every pack view and export is logged** to `lender_pack_access` *before* the
+  data is returned, so a leak is reconstructable even if nobody noticed.
+
+The pack masks the NID to its last four digits — a pack is the document most
+likely to be emailed onward — and marks the behavioural score `is_simulated`
+while the mPowerU driver is the stub, so a lender cannot mistake it for real.
+
+Format: CSV (with a UTF-8 BOM so Excel opens Bangla correctly) and a printable
+page rather than a generated binary PDF. See `OPEN-ISSUES.md` §1.7 for why.
+
+## 3E. Notifications (§23)
+
+A queue, not a fire-and-forget send. An SMS that failed silently is
+indistinguishable from one nobody read, and repayment reminders are where that
+difference costs money.
+
+Three windows — three days out, due today, and overdue — each worded differently.
+Lateness is computed from the due date rather than the cached `days_past_due`
+column, because that column is only as fresh as the last arrears refresh, and
+reminding people from a stale cache misses exactly the farmers who most need the
+reminder.
+
+Deduplicated on `(kind, account, due date)`, so a retry or a second run cannot
+send the same reminder twice. People who receive duplicates learn to ignore all
+of them.
+
+## 3F. Champion/challenger (ENG-34)
+
+`POST admin/loan/scorecard/shadow-run` scores recent applications with the model
+marked `shadow` and reports the grade distribution against the live one, plus how
+many applicants would move and in which direction.
+
+Shadow assessments are written with `is_shadow = 1` and are filtered out of
+`getAssessment`, the farmer's view and the lender pack. That is the whole point:
+a challenger has to be measurable without being able to affect anybody.
+
+---
+
 ## 4. API surface
 
 All finance routes are bearer-authenticated. `app/finance/*` is ownership-scoped

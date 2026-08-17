@@ -618,6 +618,38 @@ const configs: Record<string, ResourceConfig> = {
      "action_deeplink","default_days","sort_order","is_active"],
     { default_days: 30, is_active: 1 }
   ),
+  "loan/lenders": simpleConfig(
+    "lenders",
+    ["code","name_bn","name_en","lender_type","contact_name","contact_email","contact_phone",
+     "min_grade","min_confidence","max_amount","notes","is_active"],
+    { lender_type: "bank", is_active: 0 }
+  ),
+  "loan/submissions": {
+    table: "lender_submissions",
+    listSql: `
+      SELECT
+        CAST(s.id AS CHAR) AS id,
+        a.application_code AS application,
+        u.full_name AS farmer,
+        l.name_en AS lender,
+        s.status,
+        CONCAT('৳', FORMAT(COALESCE(s.submitted_amount,0),0)) AS submitted,
+        CONCAT('৳', FORMAT(COALESCE(s.approved_amount,0),0)) AS approved,
+        COALESCE(s.decline_reason_code, '—') AS decline_reason,
+        IF(s.consent_verified_at IS NULL, 'NOT CHECKED', 'Yes') AS consent,
+        s.submitted_at
+      FROM lender_submissions s
+      JOIN loan_applications a ON a.id = s.application_id
+      JOIN app_users u ON u.id = a.user_id
+      JOIN lenders l ON l.id = s.lender_id
+      ORDER BY s.submitted_at DESC, s.id DESC
+    `,
+    // Decisions go through admin/loan/lenders/decision, which enforces the legal
+    // transitions and the structured decline reason. Editing the row directly
+    // would let someone move a declined submission back to "under review".
+    allowedInsert: [],
+    allowedUpdate: []
+  },
   "loan/assessments": {
     table: "credit_assessments",
     listSql: `

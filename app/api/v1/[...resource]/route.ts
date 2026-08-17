@@ -129,6 +129,16 @@ import {
   syncMpowerUSession,
   pollPendingMpowerUSessions,
   getMpowerUStatus,
+  buildLenderPack,
+  packToCsv,
+  submitToLender,
+  recordLenderDecision,
+  getLenderPipeline,
+  LENDER_ROLES,
+  runShadowComparison,
+  queueRepaymentReminders,
+  dispatchFinanceNotifications,
+  getNotificationQueue,
   previewUserRecords,
   clearUserRecords
 } from "@/lib/app-endpoints";
@@ -209,6 +219,8 @@ const appReadHandlers: Record<string, AppReadHandler> = {
   // Role decides whether factor-level output is included at all (ADM-LON-24), so
   // it is threaded through the query rather than read from the handler.
   "admin/loan/mpoweru": (q) => getMpowerUStatus(q.get("application_id") ?? "", q.get("__role") ?? ""),
+  "admin/loan/lenders/pipeline": (q) => getLenderPipeline(q),
+  "admin/loan/notifications": (q) => getNotificationQueue(q),
   "admin/users/clear-records/preview": (q) => previewUserRecords(q.get("identifier") ?? "")
 };
 
@@ -385,6 +397,33 @@ export async function GET(request: NextRequest, { params }: Params) {
     }
   }
 
+  // The lender pack. Not an appReadHandler because a CSV export is not an
+  // envelope — the browser needs a text/csv body with a filename.
+  if (resource === "admin/loan/lenders/pack") {
+    if (caller.kind !== "admin") return forbidden("Lender packs are staff-only.");
+    const format = (searchParams.get("format") ?? "json").toLowerCase();
+    try {
+      const pack = await buildLenderPack(searchParams.get("application_id") ?? "", {
+        adminId: caller.admin.id,
+        ip: clientIp(request),
+        lenderId: searchParams.get("lender_id") ? Number(searchParams.get("lender_id")) : null,
+        action: format === "csv" ? "export_csv" : "view",
+      });
+      if (format === "csv") {
+        return new NextResponse(packToCsv(pack), {
+          status: 200,
+          headers: {
+            "Content-Type": "text/csv; charset=utf-8",
+            "Content-Disposition": `attachment; filename="lender-pack-${pack.identity.application_code}.csv"`,
+          },
+        });
+      }
+      return envelope(pack, { source: "mysql", surface: "admin", resource });
+    } catch (error) {
+      return dbError(error);
+    }
+  }
+
   // App market updates: list (location-first) or blog detail by id.
   if (resource === "app/market-updates") {
     try {
@@ -523,6 +562,42 @@ export async function POST(request: NextRequest, { params }: Params) {
         { adminId: caller.admin.id, ip: clientIp(request), userAgent: request.headers.get("user-agent") }
       );
       return NextResponse.json({ ok: true, source: "mysql", action: "records_cleared", result }, { status: 200 });
+    }
+
+    // ---- Lender packs and submissions (P6 / §20.1) --------------------------
+    if (exact === "admin/loan/lenders/submit" || exact === "admin/loan/lenders/decision") {
+      if (caller.kind !== "admin" || !LENDER_ROLES.includes(caller.admin.role)) {
+        return forbidden("Lender submissions are restricted to credit staff.");
+      }
+      const ctx = { adminId: caller.admin.id, ip: clientIp(request), userAgent: request.headers.get("user-agent") };
+      const body = payload as Record<string, unknown>;
+      const result = exact === "admin/loan/lenders/submit"
+        ? await submitToLender(body, ctx)
+        : await recordLenderDecision(body, ctx);
+      return NextResponse.json({ ok: true, source: "mysql", action: "lender", result }, { status: 200 });
+    }
+
+    // ---- Champion/challenger (ENG-34) ---------------------------------------
+    if (exact === "admin/loan/scorecard/shadow-run") {
+      const CREDIT_ROLES = ["super_admin", "hq_admin", "credit_analyst", "credit_approver"];
+      if (caller.kind !== "admin" || !CREDIT_ROLES.includes(caller.admin.role)) {
+        return forbidden("Running a shadow comparison is restricted to credit staff.");
+      }
+      const result = await runShadowComparison(payload as Record<string, unknown>, caller.admin.id);
+      return NextResponse.json({ ok: true, source: "mysql", action: "shadow_compared", result }, { status: 200 });
+    }
+
+    // ---- Notifications (§23) -------------------------------------------------
+    if (exact === "admin/loan/notifications/queue" || exact === "admin/loan/notifications/dispatch") {
+      const NOTIFY_ROLES = ["super_admin", "hq_admin", "credit_approver", "credit_analyst"];
+      if (caller.kind !== "admin" || !NOTIFY_ROLES.includes(caller.admin.role)) {
+        return forbidden("Sending finance notifications is restricted to credit staff.");
+      }
+      const ctx = { adminId: caller.admin.id, ip: clientIp(request), userAgent: request.headers.get("user-agent") };
+      const result = exact === "admin/loan/notifications/queue"
+        ? await queueRepaymentReminders(ctx)
+        : await dispatchFinanceNotifications(ctx);
+      return NextResponse.json({ ok: true, source: "mysql", action: "notifications", result }, { status: 200 });
     }
 
     // ---- mPowerU (P5) — stub driver until EcoDev supply a sandbox -----------

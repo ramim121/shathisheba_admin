@@ -32,7 +32,8 @@ import {
   Tags,
   Trash2,
   Trophy,
-  UsersRound
+  UsersRound,
+  Building2
 } from "lucide-react";
 
 type NavLink = { label: string; href: string; icon: typeof LayoutDashboard };
@@ -58,7 +59,8 @@ const sections: NavSection[] = [
       { label: "Credit Dashboard", href: "/loan/dashboard", icon: LayoutDashboard },
       { label: "Readiness Checks", href: "/loan/readiness-checks", icon: ShieldCheck },
       { label: "Loan Accounts", href: "/loan/accounts", icon: CreditCard },
-      { label: "Collections", href: "/loan/collections", icon: HandCoins }
+      { label: "Collections", href: "/loan/collections", icon: HandCoins },
+      { label: "Lender Submissions", href: "/loan/lenders", icon: Building2 }
     ]
   },
   {
@@ -66,6 +68,7 @@ const sections: NavSection[] = [
     icon: Settings2,
     items: [
       { label: "Loan Products", href: "/loan/products", icon: HandCoins },
+      { label: "Lenders", href: "/loan/lenders-setup", icon: Building2 },
       { label: "Readiness Questionnaire", href: "/loan/questionnaire", icon: ScrollText },
       { label: "Scorecard Criteria", href: "/loan/scorecard-criteria", icon: ListChecks },
       { label: "Scorecard Rules", href: "/loan/scorecard-rules", icon: ScrollText },

@@ -105,6 +105,23 @@ Until then the behavioural criterion is worth 20 of the 100 points and will read
 as no-data on every real application — rated 0 and flagged, which is the correct
 behaviour but does cap everyone's achievable score at 80.
 
+### 1.7 🟡 The lender pack is CSV and printable HTML, not a generated PDF
+
+`ADM-LON-27` asks for PDF and CSV with Bangla rendering correctly in both. The CSV
+is there, with a UTF-8 BOM so Excel opens Bangla rather than mojibake. "PDF" is
+served as a self-contained printable page rather than a generated binary.
+
+That was a deliberate trade. Generating a PDF with Bangla needs an embedded
+OpenType font carrying the right shaping tables — several megabytes in the
+bundle, and a failure mode where conjuncts render as boxes **only for the people
+who read Bangla**, which is precisely the group least likely to be the one
+testing it. Printing from a browser uses the reader's own system font and is
+correct by construction.
+
+**Action if a binary PDF is required for a lender's process:** bundle Noto Sans
+Bengali and render server-side, and test the output with a Bangla reader before
+shipping it — not by eye in a Latin-script locale.
+
 ### 1.5 🟡 `middleware.ts` is deprecated in Next 16
 
 Next 16 renamed the convention to `proxy`. The build warns but still routes it
@@ -150,7 +167,7 @@ complete**; what remains of P3 is the admin UI to capture into it.
 | P3 | **Done**: workspace at `/loan/applications/{id}`, computed requirement checklist, evidence capture with provenance, the 11-item field verification with the contradictory-verdict rule, repeating-row editors for assets/debt/documents/visits, development-plan assignment. **Outstanding:** the address and extended-KYC capture sections (captured today through the existing KYC surfaces), real file upload wired to the S3 presign route (the row editor currently records a key), and offline tablet drafts | 🔵 |
 | P4 | **Done**: engine, configuration screens, and the farmer-facing `loanResult`, `developmentPlan` and `assessmentHistory`. **Outstanding:** the champion/challenger comparison view — `is_shadow` and a `shadow` model status exist, nothing renders the comparison | 🔵 |
 | P5 | **Adapter done, provider not connected.** `lib/mpoweru/adapter.ts` with a stub driver, session orchestration, idempotency, webhook + polling, pseudonymous respondent ids, factor-level role restriction and normalisation. **Blocked on EcoDev supplying a sandbox** — see 1.6. Mobile `mpowerUAssessment` screen not built, since there is nothing for a farmer to open yet | 🟠 |
-| P6 | **Done**: disbursement with snapshotted terms, schedule generation, oldest-first repayment allocation, arrears recomputation, collections with aging buckets and portfolio-at-risk, and the farmer's `loanAccount` screen. **Outstanding:** lender packs (PDF/CSV with Bangla fonts), lender submissions, and repayment notifications | 🟠 |
+| P6 | **Done**: disbursement with snapshotted terms, schedule generation, oldest-first repayment allocation, arrears recomputation, collections, the farmer's `loanAccount` screen, lender packs and submissions with consent gating and structured declines, and the notification queue. **Outstanding:** the pack is CSV + printable HTML rather than a generated binary PDF (see 1.7), and notifications are dispatched on demand rather than by a scheduler (see 5) | 🔵 |
 
 Mobile screens specified but not yet added: `mpowerUAssessment` (P5),
 `loanAccount` (P6), `loanConsentManage`, `loanReviewRequest`.
@@ -183,7 +200,15 @@ Still open, unrelated to the finance work:
   `.1.105` → `192.168.249.146`). `EXPO_PUBLIC_API_BASE_URL` in the mobile `.env`
   must be rechecked whenever the phone cannot connect.
 - 🟡 **`OTP_DEV_MODE=false`** means test runs send real SMS and spend credits.
-  Set it to `true` before running the E2E suites.
+  Set it to `true` before running the E2E suites. This now also governs repayment
+  reminders — `admin/loan/notifications/dispatch` sends real messages.
+- 🟠 **Nothing schedules the finance jobs.** `admin/loan/arrears/refresh`,
+  `admin/loan/notifications/queue`, `admin/loan/notifications/dispatch` and
+  `admin/loan/mpoweru/poll` are all endpoints an admin has to press. Days-past-due
+  is a function of the calendar and goes stale on its own, so until a scheduler
+  calls these nightly, arrears are only as current as the last person who
+  remembered. A cron on the EC2 box hitting the four endpoints with an admin
+  session is enough; the endpoints are idempotent and deduplicated by design.
 - 🟡 `expo@54.0.35` is installed; Expo expects `~54.0.36`.
 - 🔵 A React duplicate-key warning appears on some admin management tables.
   Cosmetic, but it means list rows are not uniquely keyed.

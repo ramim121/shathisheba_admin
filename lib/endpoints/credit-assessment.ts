@@ -400,6 +400,84 @@ export async function runAssessment(params: {
 // Read
 // ---------------------------------------------------------------------------
 
+/**
+ * Champion/challenger (ENG-34). Run the `shadow` model over applications that
+ * already have a live score and compare the grade distributions.
+ *
+ * Shadow assessments write to `credit_assessments` with `is_shadow = 1` and are
+ * never read by anything that makes a decision — `getAssessment`, the farmer's
+ * view and the lender pack all filter them out. That is the point: a challenger
+ * model has to be measurable without being able to affect anybody.
+ */
+export async function runShadowComparison(payload: Record<string, unknown>, adminId: number | null) {
+  const limit = Math.min(200, Math.max(1, Number(payload.limit ?? 50)));
+
+  const models = await queryRows<Row>(
+    "SELECT version FROM scorecard_models WHERE status = 'shadow' ORDER BY id DESC LIMIT 1"
+  );
+  if (!models[0]) {
+    throw new Error(
+      "No scorecard model is marked 'shadow'. Create a draft model, set its status to shadow, then run the comparison."
+    );
+  }
+
+  const candidates = await queryRows<Row>(
+    `SELECT ca.application_id, ca.grade AS champion_grade, ca.total_score AS champion_score
+     FROM credit_assessments ca
+     WHERE ca.is_shadow = 0 AND ca.status <> 'superseded'
+     ORDER BY ca.created_at DESC LIMIT ?`,
+    [limit]
+  );
+
+  const rows: { application_id: number; champion_grade: string; challenger_grade: string; delta: number }[] = [];
+  const failures: number[] = [];
+
+  for (const c of candidates) {
+    try {
+      const result = await runAssessment({
+        applicationId: Number(c.application_id),
+        adminId,
+        shadow: true,
+      });
+      rows.push({
+        application_id: Number(c.application_id),
+        champion_grade: String(c.champion_grade),
+        challenger_grade: result.grade,
+        delta: Math.round((result.total_score - Number(c.champion_score)) * 100) / 100,
+      });
+    } catch {
+      // One application the challenger cannot score must not stop the comparison
+      // — and is itself a finding about the challenger.
+      failures.push(Number(c.application_id));
+    }
+  }
+
+  const grades = ["A", "B", "C", "D"];
+  const distribution = grades.map((g) => ({
+    grade: g,
+    champion: rows.filter((r) => r.champion_grade === g).length,
+    challenger: rows.filter((r) => r.challenger_grade === g).length,
+  }));
+
+  const moved = rows.filter((r) => r.champion_grade !== r.challenger_grade);
+
+  return {
+    challenger_version: models[0].version,
+    compared: rows.length,
+    failed: failures.length,
+    distribution,
+    // The number anyone actually asks for: how many applicants would have been
+    // graded differently, and in which direction.
+    grade_changes: moved.length,
+    upgraded: moved.filter((r) => grades.indexOf(r.challenger_grade) < grades.indexOf(r.champion_grade)).length,
+    downgraded: moved.filter((r) => grades.indexOf(r.challenger_grade) > grades.indexOf(r.champion_grade)).length,
+    mean_delta: rows.length
+      ? Math.round((rows.reduce((s, r) => s + r.delta, 0) / rows.length) * 100) / 100
+      : 0,
+    changes: moved.slice(0, 50),
+  };
+}
+
 export async function getAssessment(applicationId: string) {
   const id = Number(applicationId);
   if (!Number.isFinite(id)) throw new Error("A numeric application id is required.");

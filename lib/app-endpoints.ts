@@ -21,6 +21,7 @@ export * from "./endpoints/learning";
 export * from "./endpoints/approvals";
 export * from "./endpoints/finance";
 export * from "./endpoints/admin-loan";
+export * from "./endpoints/admin-maintenance";
 
 import { getUserRoles, safeJson, type Row } from "./endpoints/shared";
 import { buildAppUser, buildKycSummary } from "./endpoints/auth";

@@ -30,6 +30,7 @@ import {
   Sparkles,
   Store,
   Tags,
+  Trash2,
   Trophy,
   UsersRound
 } from "lucide-react";
@@ -142,7 +143,8 @@ const sections: NavSection[] = [
       { label: "User Roles", href: "/users/roles", icon: ShieldCheck },
       { label: "Banking", href: "/users/banking", icon: CreditCard },
       { label: "Farm Info", href: "/users/farm", icon: Boxes },
-      { label: "KYC Documents", href: "/users/kyc", icon: ScrollText }
+      { label: "KYC Documents", href: "/users/kyc", icon: ScrollText },
+      { label: "Clear Records", href: "/users/clear-records", icon: Trash2 }
     ]
   },
   {

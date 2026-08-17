@@ -103,7 +103,9 @@ import {
   getLoanConsents,
   getLoanPurposes,
   getCreditDashboard,
-  getLoanQueue
+  getLoanQueue,
+  previewUserRecords,
+  clearUserRecords
 } from "@/lib/app-endpoints";
 
 // App-facing list reads. The mobile app hits these generic resource paths and
@@ -167,7 +169,8 @@ const appReadHandlers: Record<string, AppReadHandler> = {
 
   // Admin finance aggregates. Staff-only via ADMIN_ONLY in lib/api-access.ts.
   "admin/loan/dashboard": () => getCreditDashboard(),
-  "admin/loan/queue": (q) => getLoanQueue(q)
+  "admin/loan/queue": (q) => getLoanQueue(q),
+  "admin/users/clear-records/preview": (q) => previewUserRecords(q.get("identifier") ?? "")
 };
 
 type Params = {
@@ -454,6 +457,31 @@ export async function POST(request: NextRequest, { params }: Params) {
 
   // App action routes (composite writes that the mobile screens call directly).
   try {
+    // ---- Account maintenance ------------------------------------------------
+    // Destructive and irreversible, so it carries three guards beyond the normal
+    // admin check: super_admin only, the caller must echo back the exact phone
+    // number, and every run is audit-logged with per-table counts.
+    if (exact === "admin/users/clear-records") {
+      if (caller.kind !== "admin" || caller.admin.role !== "super_admin") {
+        return forbidden("Clearing account records is restricted to super administrators.");
+      }
+      const identifier = String((payload as Record<string, unknown>).identifier ?? "");
+      const confirm = String((payload as Record<string, unknown>).confirm ?? "");
+      if (!identifier) return dbError(new Error("Provide the account's phone number or id."));
+      if (confirm !== identifier) {
+        return dbError(new Error("Type the account's phone number exactly to confirm."));
+      }
+      const result = await clearUserRecords(
+        identifier,
+        {
+          resetOnboarding: (payload as Record<string, unknown>).reset_onboarding !== false,
+          resetRoles: (payload as Record<string, unknown>).reset_roles === true,
+        },
+        { adminId: caller.admin.id, ip: clientIp(request), userAgent: request.headers.get("user-agent") }
+      );
+      return NextResponse.json({ ok: true, source: "mysql", action: "records_cleared", result }, { status: 200 });
+    }
+
     // ---- Finance writes -----------------------------------------------------
     if (exact === "app/finance/readiness/submit") {
       return NextResponse.json({ ok: true, source: "mysql", action: "readiness_scored", result: await submitReadiness(payload) }, { status: 200 });

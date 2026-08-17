@@ -26,18 +26,27 @@ function n(v: unknown) {
 export function DashboardPage() {
   const [stats, setStats] = useState<Row | null>(null);
   const [counts, setCounts] = useState<Counts | null>(null);
+  const [loan, setLoan] = useState<Row | null>(null);
 
   useEffect(() => {
     fetch("/api/v1/app/admin/stats").then((r) => r.json()).then((j) => { if (j.ok) setStats(j.data); }).catch(() => {});
     fetch("/api/v1/app/admin/approvals").then((r) => r.json()).then((j) => { if (j.ok) setCounts(j.data.counts); }).catch(() => {});
+    // Loan pipeline for the finance stat card and its action card (ADM-LON-04).
+    fetch("/api/v1/admin/loan/dashboard").then((r) => r.json()).then((j) => { if (j.ok) setLoan(j.data); }).catch(() => {});
   }, []);
+
+  const pipeline = (loan?.pipeline ?? null) as Record<string, number> | null;
+  const loanOpen = pipeline
+    ? pipeline.submitted + pipeline.collecting + pipeline.assessing + pipeline.with_lender
+    : null;
 
   // Live top metrics — every card links to its management page.
   const metricCards = [
     { label: "Registered farmers", value: stats ? n(stats.farmers).toLocaleString() : "…", trend: stats ? `+${n(stats.farmers_30d)} in 30 days` : "loading", href: "/users" },
     { label: "Active sale listings", value: stats ? n(stats.listings_active).toLocaleString() : "…", trend: stats ? `${n(stats.listings_total)} total submitted` : "loading", href: "/sale" },
     { label: "Pending approvals", value: counts ? String(counts.total) : "…", trend: "KYC, listings, projects, orders", href: "/approvals" },
-    { label: "Buy orders", value: stats ? n(stats.orders_total).toLocaleString() : "…", trend: stats ? `${n(stats.orders_delivered)} delivered` : "loading", href: "/orders" }
+    { label: "Buy orders", value: stats ? n(stats.orders_total).toLocaleString() : "…", trend: stats ? `${n(stats.orders_delivered)} delivered` : "loading", href: "/orders" },
+    { label: "Loan pipeline", value: loanOpen === null ? "…" : String(loanOpen), trend: pipeline ? `${pipeline.with_lender} with a lender · ${pipeline.disbursed} disbursed` : "loading", href: "/loan/applications" }
   ];
 
   return (
@@ -132,6 +141,11 @@ export function DashboardPage() {
           <h3>Order fulfillment</h3>
           <p>Track payment status, delivery assignment, stock confirmation, and customer support notes.</p>
           <Link className="count-btn" href="/approvals">{counts ? counts.orders : "…"} orders awaiting stock check →</Link>
+        </article>
+        <article className="feature-card">
+          <h3>Loan applications</h3>
+          <p>Finance applications moving through screening, evidence collection, assessment and lender submission.</p>
+          <Link className="count-btn" href="/loan/applications">{loanOpen === null ? "…" : loanOpen} awaiting your action →</Link>
         </article>
         <article className="feature-card">
           <h3>KYC approvals</h3>

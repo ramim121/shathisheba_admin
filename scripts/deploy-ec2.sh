@@ -16,8 +16,14 @@ echo "==> current"
 sudo git log --oneline -1
 PREV=$(sudo git rev-parse HEAD)
 
-# A dirty tree means someone edited the server directly. Resetting over that
-# would destroy work with no copy anywhere, so stop and let a human look.
+# next-env.d.ts is written by `next build`, so it is dirty after every deploy
+# through no fault of anyone's. It is tracked because Next wants it committed, and
+# it must never be hand-edited — discarding local changes to it is always safe and
+# keeps the guard below meaningful instead of permanently tripped.
+sudo git checkout -- next-env.d.ts 2>/dev/null || true
+
+# Any other dirty file means someone edited the server directly. Resetting over
+# that would destroy work with no copy anywhere, so stop and let a human look.
 if [ -n "$(sudo git status --porcelain)" ]; then
   echo "ERROR: working tree is dirty. Commit, stash or discard before deploying." >&2
   sudo git status --porcelain >&2

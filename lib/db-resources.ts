@@ -1,6 +1,7 @@
 import type { ResultSetHeader } from "mysql2";
 import { executeQuery, queryRows, withTransaction, type Tx } from "@/lib/db";
 import { assertQuestionSetIntegrity } from "@/lib/finance/questionnaire-guard";
+import { assertScorecardIntegrity } from "@/lib/finance/scorecard-guard";
 
 type ResourceConfig = {
   table: string;
@@ -15,13 +16,19 @@ type ResourceConfig = {
   afterWrite?: (tx: Tx) => Promise<void>;
 };
 
-function simpleConfig(table: string, allowedFields: string[], defaults: Record<string, unknown> = {}): ResourceConfig {
+function simpleConfig(
+  table: string,
+  allowedFields: string[],
+  defaults: Record<string, unknown> = {},
+  afterWrite?: (tx: Tx) => Promise<void>
+): ResourceConfig {
   return {
     table,
     listSql: `SELECT CAST(id AS CHAR) AS id, ${allowedFields.map((field) => `\`${field}\``).join(", ")} FROM ${table} ORDER BY id DESC`,
     allowedInsert: allowedFields,
     allowedUpdate: allowedFields,
-    defaults
+    defaults,
+    afterWrite
   };
 }
 
@@ -525,6 +532,119 @@ const configs: Record<string, ResourceConfig> = {
     ["code","label_bn","label_en","icon","is_active","sort_order"],
     { is_active: 1 }
   ),
+
+  // ---- Finance: the 100-point scorecard (Feature 2, P4) ---------------------
+  "loan/scorecard-models": simpleConfig(
+    "scorecard_models",
+    ["version","status","notes","grade_a_min","grade_b_min","grade_c_min",
+     "confidence_high_pct","confidence_med_pct"],
+    { version: "sc-draft", status: "draft", grade_a_min: 80, grade_b_min: 70, grade_c_min: 60,
+      confidence_high_pct: 80, confidence_med_pct: 50 },
+    // A weight edit that unbalances a live model is rejected and rolled back, for
+    // the same reason as the readiness instrument: the engine normalises, so a
+    // wrong total scores every subsequent applicant plausibly and wrongly.
+    assertScorecardIntegrity
+  ),
+  "loan/scorecard-criteria": {
+    table: "scorecard_criteria",
+    listSql: `
+      SELECT
+        CAST(c.id AS CHAR) AS id,
+        m.version AS model,
+        c.sort_order AS num,
+        c.code,
+        c.label_en AS criterion,
+        c.label_bn AS bangla,
+        c.weight,
+        c.layer,
+        COALESCE(c.evidence_source, '—') AS evidence,
+        (SELECT COUNT(*) FROM scorecard_rating_rules r WHERE r.criterion_id = c.id) AS rules,
+        c.is_active
+      FROM scorecard_criteria c
+      JOIN scorecard_models m ON m.id = c.model_id
+      ORDER BY m.id, c.sort_order
+    `,
+    allowedInsert: ["model_id","code","sort_order","label_bn","label_en","weight","layer","evidence_source","is_active"],
+    allowedUpdate: ["code","sort_order","label_bn","label_en","weight","layer","evidence_source","is_active"],
+    defaults: { layer: "quantitative", weight: 0, is_active: 1 },
+    afterWrite: assertScorecardIntegrity
+  },
+  "loan/scorecard-rules": {
+    table: "scorecard_rating_rules",
+    listSql: `
+      SELECT
+        CAST(r.id AS CHAR) AS id,
+        c.code AS criterion,
+        r.metric,
+        r.sort_order AS num,
+        COALESCE(CAST(r.min_value AS CHAR), '—') AS min_value,
+        COALESCE(CAST(r.max_value AS CHAR), '—') AS max_value,
+        r.rating,
+        COALESCE(r.label_en, '—') AS meaning,
+        r.is_active
+      FROM scorecard_rating_rules r
+      JOIN scorecard_criteria c ON c.id = r.criterion_id
+      ORDER BY c.sort_order, r.sort_order
+    `,
+    allowedInsert: ["criterion_id","sort_order","metric","min_value","max_value","rating","label_bn","label_en","is_active"],
+    allowedUpdate: ["sort_order","metric","min_value","max_value","rating","label_bn","label_en","is_active"],
+    defaults: { rating: 0, sort_order: 0, is_active: 1 }
+  },
+  "loan/hard-stops": simpleConfig(
+    "credit_hard_stop_rules",
+    ["code","label_bn","label_en","explanation_bn","explanation_en","required_action_bn",
+     "required_action_en","check_key","overridable","sort_order","is_active"],
+    { check_key: "identity_unverified", overridable: 0, is_active: 1 }
+  ),
+  "loan/reason-codes": simpleConfig(
+    "credit_reason_codes",
+    ["code","polarity","label_bn","label_en","criterion_code","sort_order","is_active"],
+    { polarity: "negative", is_active: 1 }
+  ),
+  "loan/pathway-rules": simpleConfig(
+    "credit_pathway_rules",
+    ["sort_order","when_grade","when_confidence","when_hard_stop","when_safeguards",
+     "pathway_code","readiness_status","amount_factor","label_bn","label_en","is_active"],
+    { sort_order: 99, readiness_status: "development_required", is_active: 1 }
+  ),
+  "loan/verification-items": simpleConfig(
+    "loan_verification_items",
+    ["code","label_bn","label_en","guidance_bn","guidance_en","sort_order","is_active"],
+    { is_active: 1 }
+  ),
+  "loan/development-templates": simpleConfig(
+    "development_plan_templates",
+    ["code","title_bn","title_en","detail_bn","detail_en","criterion_code",
+     "action_deeplink","default_days","sort_order","is_active"],
+    { default_days: 30, is_active: 1 }
+  ),
+  "loan/assessments": {
+    table: "credit_assessments",
+    listSql: `
+      SELECT
+        CAST(ca.id AS CHAR) AS id,
+        a.application_code AS application,
+        u.full_name AS farmer,
+        ca.sequence_no AS seq,
+        ca.scorecard_model_version AS model,
+        ca.total_score AS score,
+        ca.grade,
+        ca.readiness_status AS readiness,
+        ca.data_confidence AS confidence,
+        IF(ca.hard_stop = 1, 'Yes', 'No') AS hard_stop,
+        COALESCE(ca.primary_pathway, '—') AS pathway,
+        ca.status,
+        ca.created_at
+      FROM credit_assessments ca
+      JOIN loan_applications a ON a.id = ca.application_id
+      JOIN app_users u ON u.id = ca.user_id
+      WHERE ca.is_shadow = 0
+      ORDER BY ca.created_at DESC
+    `,
+    // Immutable by design (ENG-32). A correction is a new assessment, not an edit.
+    allowedInsert: [],
+    allowedUpdate: []
+  },
   "loan/accounts": {
     table: "loan_accounts",
     listSql: `

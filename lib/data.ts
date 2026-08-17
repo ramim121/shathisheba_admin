@@ -331,6 +331,9 @@ export const apiCatalog = [
   { method: "GET", path: "/api/v1/admin/loan/dashboard", desc: "Credit portfolio dashboard: pipeline by status, readiness grade mix, conversion and disbursement — every figure queried, none seeded" },
   { method: "GET", path: "/api/v1/admin/loan/queue?status=submitted&limit=20", desc: "Paginated credit queue with the KPI band above it" },
   { method: "GET", path: "/api/v1/admin/loan/questionnaire/integrity", desc: "ADM-RDY-02: per-set weight totals, core/deep split and branch integrity for every active question set — check before editing the instrument" },
+  { method: "POST", path: "/api/v1/admin/loan/assess", desc: "Run the 100-point scorecard against an application { application_id, overrides?, shadow? }. Credit roles only; every override needs a 0–5 rating and a reason. Inserts a new immutable assessment and supersedes the previous one" },
+  { method: "GET", path: "/api/v1/admin/loan/assessment?application_id=1", desc: "The live assessment for an application, its eight criterion ratings and the full reassessment history" },
+  { method: "GET", path: "/api/v1/admin/loan/scorecard/integrity", desc: "Per-model criterion weight totals, the 60/40 quantitative-qualitative split and grade-threshold ordering — check before editing the scorecard" },
 
   // --- Admin maintenance ---
   { method: "GET", path: "/api/v1/admin/users/clear-records/preview?identifier=01966662633", desc: "Per-table count of what Clear Records would delete for an account, before anything is touched" },

@@ -105,6 +105,9 @@ import {
   getCreditDashboard,
   getLoanQueue,
   getQuestionnaireIntegrity,
+  getScorecardIntegrity,
+  getAssessment,
+  runAssessment,
   previewUserRecords,
   clearUserRecords
 } from "@/lib/app-endpoints";
@@ -172,6 +175,8 @@ const appReadHandlers: Record<string, AppReadHandler> = {
   "admin/loan/dashboard": () => getCreditDashboard(),
   "admin/loan/queue": (q) => getLoanQueue(q),
   "admin/loan/questionnaire/integrity": () => getQuestionnaireIntegrity(),
+  "admin/loan/scorecard/integrity": () => getScorecardIntegrity(),
+  "admin/loan/assessment": (q) => getAssessment(q.get("application_id") ?? ""),
   "admin/users/clear-records/preview": (q) => previewUserRecords(q.get("identifier") ?? "")
 };
 
@@ -482,6 +487,43 @@ export async function POST(request: NextRequest, { params }: Params) {
         { adminId: caller.admin.id, ip: clientIp(request), userAgent: request.headers.get("user-agent") }
       );
       return NextResponse.json({ ok: true, source: "mysql", action: "records_cleared", result }, { status: 200 });
+    }
+
+    // ---- Credit assessment (P4) ---------------------------------------------
+    // Scoring is a credit decision, so it is restricted to the credit roles and
+    // never available to the field officer who captured the evidence
+    // (separation of duties, ENG-24 / BLU §11.3). Criterion overrides carry the
+    // same restriction: an override is an analyst's judgement, recorded as such.
+    if (exact === "admin/loan/assess") {
+      const CREDIT_ROLES = ["super_admin", "hq_admin", "credit_analyst", "credit_approver"];
+      if (caller.kind !== "admin" || !CREDIT_ROLES.includes(caller.admin.role)) {
+        return forbidden("Running a credit assessment is restricted to credit staff.");
+      }
+      const body = payload as Record<string, unknown>;
+      const applicationId = Number(body.application_id);
+      if (!Number.isFinite(applicationId)) {
+        return dbError(new Error("A numeric application_id is required."));
+      }
+      const rawOverrides = (body.overrides ?? {}) as Record<string, { rating?: unknown; reason?: unknown }>;
+      const overrides: Record<string, { rating: number; reason: string }> = {};
+      for (const [code, value] of Object.entries(rawOverrides)) {
+        const rating = Number(value?.rating);
+        const reason = String(value?.reason ?? "").trim();
+        if (!Number.isInteger(rating) || rating < 0 || rating > 5) {
+          return dbError(new Error(`Override for "${code}" must be an integer rating from 0 to 5.`));
+        }
+        // ENG-17 requires a reason. An unexplained override is indistinguishable
+        // from a mistake when someone reviews the file later.
+        if (!reason) return dbError(new Error(`Override for "${code}" requires a reason.`));
+        overrides[code] = { rating, reason };
+      }
+      const result = await runAssessment({
+        applicationId,
+        adminId: caller.admin.id,
+        shadow: body.shadow === true,
+        overrides: Object.keys(overrides).length ? overrides : undefined,
+      });
+      return NextResponse.json({ ok: true, source: "mysql", action: "assessed", result }, { status: 200 });
     }
 
     // ---- Finance writes -----------------------------------------------------

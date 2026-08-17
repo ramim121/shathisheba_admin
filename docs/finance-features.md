@@ -20,12 +20,16 @@ Last updated: 2026-08-17.
 |---|---|
 | Readiness scoring | `lib/finance/readiness-engine.ts` |
 | Loan pricing and schedules | `lib/finance/pricing-engine.ts` |
-| Instrument invariants | `lib/finance/questionnaire-guard.ts` |
+| The 100-point scorecard | `lib/finance/scorecard-engine.ts` |
+| Instrument invariants | `lib/finance/questionnaire-guard.ts`, `lib/finance/scorecard-guard.ts` |
 | Farmer-facing endpoints | `lib/endpoints/finance.ts` |
 | Console aggregates | `lib/endpoints/admin-loan.ts` |
+| Assessment orchestration | `lib/endpoints/credit-assessment.ts` |
 | Schema — readiness | `database/migrations/021_finance_readiness.sql` |
 | Schema — loan | `database/migrations/022_loan_core.sql` |
-| Engine tests | `scripts/test-finance-engines.mjs` (46 cases) |
+| Schema — evidence | `database/migrations/023_loan_evidence.sql` |
+| Schema — scorecard | `database/migrations/024_credit_scorecard.sql` |
+| Engine tests | `scripts/test-finance-engines.mjs` (46), `scripts/test-scorecard-engine.mjs` (95) |
 | Demo data | `scripts/seed-finance-demo.cjs` (`--remove` reverses it) |
 | Mobile screens and helpers | `Shathi Sheba/App.tsx`, `Shathi Sheba/src/finance/helpers.ts` |
 
@@ -244,6 +248,74 @@ complete one.
 
 ---
 
+## 3A. The 100-point scorecard (P4)
+
+Eight weighted criteria, 60 quantitative + 40 qualitative, totalling exactly 100.
+
+| Criterion | Weight | Layer | Metric it reads |
+|---|---:|---|---|
+| Cash flow and repayment capacity | 25 | quant | `dscr` — (income − expenses) ÷ proposed instalment |
+| Existing debt and repayment history | 15 | quant | `debt_burden_ratio` — existing instalments ÷ income |
+| Enterprise economics | 10 | quant | `enterprise_years` |
+| Transaction and market evidence | 10 | quant | `platform_transactions` — **queried, never self-reported** |
+| mPowerU behavioural intelligence | 20 | qual | `mpoweru_score` |
+| Management and trainability | 8 | qual | `training_completed` — queried |
+| Cooperative and field validation | 7 | qual | `verification_ratio` — of the 11 items |
+| Documentation and compliance | 5 | qual | `document_ratio` |
+
+Each criterion is rated 0–5 by configurable bands in `scorecard_rating_rules`
+(min inclusive, max exclusive, first match wins), then
+`weighted_score = weight × rating ÷ 5`. Each criterion is rounded once and the
+total is the sum of those rounded parts, so the column on screen adds up to the
+headline number.
+
+Grades: A ≥ 80 · B ≥ 70 · C ≥ 60 · D < 60, configurable per model version.
+
+### What the engine refuses to do
+
+- **Missing data rates 0 and is flagged** (`had_data = false`), never skipped and
+  never averaged away. Averaging away an absent criterion rewards the incomplete
+  application over the complete one that answered honestly and scored badly.
+  A recorded zero is different: no debt with known income rates 5, but debt that
+  was never asked about rates 0 with the gap visible.
+- **Hard stops are evaluated before and independently of the score.** A
+  hard-stopped application still gets a full score, because "declined, and would
+  have been a B" is a different conversation from "declined, and was a D".
+  A hard stop overrides every readiness rule (ENG-21 R6) and cannot be cleared by
+  adding safeguards.
+- **An unrecognised `check_key` throws.** A configured hard stop the engine cannot
+  evaluate must not silently pass — that would approve on the strength of a
+  control that never ran.
+- **Safeguards never move the inherent grade.** They produce a second, parallel
+  result. A guarantee makes a loan safer to write; it does not make the borrower
+  stronger. Only a rule written *for* safeguards counts as a structured result —
+  otherwise the engine reports none rather than restating the inherent one.
+- **Overrides require a rating of 0–5 and a reason**, and the computed rating is
+  kept alongside. An unexplained override is indistinguishable from a mistake
+  when someone reviews the file a year later.
+
+### Immutability
+
+`POST admin/loan/assess` never updates. It marks the previous assessment
+`superseded` and inserts the next `sequence_no`, in one transaction, storing a
+verbatim snapshot of every input, the model thresholds, the criteria and the
+rules it used. Re-running that snapshot through that model version reproduces the
+score exactly, after the evidence has been edited and the model re-tuned.
+
+Scoring is restricted to `super_admin`, `hq_admin`, `credit_analyst` and
+`credit_approver`. A `field_officer` — who captures the evidence — cannot score
+it (ENG-24, separation of duties).
+
+### Instrument integrity
+
+`GET admin/loan/scorecard/integrity` reports each model's weight total, its
+60/40 split and its threshold ordering. Writes to `loan/scorecard-models` and
+`loan/scorecard-criteria` are rolled back unless an active or shadow model totals
+exactly 100.00 with descending thresholds — the same guard, and the same reason,
+as `ADM-RDY-02`.
+
+---
+
 ## 4. API surface
 
 All finance routes are bearer-authenticated. `app/finance/*` is ownership-scoped
@@ -288,6 +360,9 @@ loan intake screen.
 | GET | `admin/loan/dashboard` |
 | GET | `admin/loan/queue?status=&limit=&offset=` |
 | GET | `admin/loan/questionnaire/integrity` |
+| POST | `admin/loan/assess` |
+| GET | `admin/loan/assessment?application_id=` |
+| GET | `admin/loan/scorecard/integrity` |
 
 Every figure on the credit dashboard is queried. `ADM-LON-34` forbids seeded
 numbers on credit surfaces, and rightly — a plausible fake figure on a credit
@@ -341,7 +416,8 @@ Screens specified but not built: `mpowerUAssessment`, `loanResult`,
 ## 7. Testing
 
 ```bash
-node scripts/test-finance-engines.mjs        # 46 cases, no database needed
+node scripts/test-finance-engines.mjs        # 46 cases — readiness + pricing
+node scripts/test-scorecard-engine.mjs       # 95 cases — the 100-point scorecard
 node scripts/seed-finance-demo.cjs           # 7 readiness checks + 6 applications
 node scripts/seed-finance-demo.cjs --remove  # reverses it
 ```

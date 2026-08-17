@@ -118,10 +118,15 @@ Phases P1 (Readiness) and P2 (loan intake + pricing) are complete and documented
 in [`docs/finance-features.md`](docs/finance-features.md). What remains from
 `SRS-FIN-01 v1.2`:
 
+**P4 (the 100-point scorecard) is complete** — engine, configuration, hard stops,
+pathways, reason codes, overrides, immutable assessments and the shadow-mode
+flag, verified by 95 unit tests and 41 end-to-end checks. **P3's data model is
+complete**; what remains of P3 is the admin UI to capture into it.
+
 | Phase | Scope | Severity |
 |---|---|---|
-| P3 | The 17-section evidence workspace: extended KYC, address, documents, enterprise profile, productive assets, financial profile, existing debt, transaction evidence, field verification (11 items × 5 verdicts), offline tablet drafts | 🔴 for Feature 2 |
-| P4 | The 100-point scorecard engine: 8 criteria, configurable rating rules, hard stops, data confidence, pathway engine, reason codes, champion/challenger shadow mode, farmer result screen | 🔴 for Feature 2 |
+| P3 | Schema and scoring integration are done (`023_loan_evidence.sql`): evidence with per-field provenance, assets, existing debt, documents, the 11-item field verification, visits. **Outstanding: the console screens** for the 17 capture sections, and offline tablet drafts | 🟠 |
+| P4 | ~~The 100-point scorecard engine~~ **done**. Outstanding: the farmer-facing result screen (`loanResult`) and the champion/challenger comparison view — the `is_shadow` flag and a `shadow` model status exist, nothing renders the comparison yet | 🟡 |
 | P5 | mPowerU behind `lib/mpoweru/adapter.ts` with a stub driver, session orchestration, webhook + polling, band→rating normalisation, mobile assessment screen | 🟠 |
 | P6 | Development plans, reassessment, review-request queue, lender packs (PDF/CSV with Bangla fonts), lender submissions, disbursement, repayment tracking, home ticker, repayment notifications, admin collections with aging buckets | 🟠 |
 

@@ -341,6 +341,10 @@ is staff-only via `ADMIN_ONLY` in `lib/api-access.ts`.
 | POST | `app/finance/applications` |
 | POST | `app/finance/applications/{code}/withdraw` |
 | GET | `app/finance/consents?user_id=` |
+| GET | `app/finance/assessment?user_id=` |
+| GET | `app/finance/assessment/history?user_id=` |
+| GET | `app/finance/development-plan?user_id=` |
+| POST | `app/finance/reassessment-request` |
 
 A `part: 'deep'` submission merges the stored Part 1 answers, so the farmer
 answers ten questions and is scored against twenty.
@@ -402,14 +406,31 @@ financeHub
 loanApplyType → loanApplyDetails → loanApplySchedulePreview
               → loanApplyProfile → loanApplyConsent → loanApplyDone
 loanStatus
+loanResult → developmentPlan
+           → assessmentHistory
 ```
+
+Once an assessment exists, the home Finance Passport card opens `loanResult`
+rather than `loanStatus` — the grade printed on the card is what the tap is
+asking about.
+
+`loanResult` follows the prescribed section order (MOB-LON-24): outcome, then
+what to do about it, then strengths, then gaps. A screen that opens with the
+weaknesses reads as a verdict; this one reads as a next step. A blocked result
+leads with what would change it and never uses the word "rejected"
+(MOB-LON-27).
+
+The history screen carries a `kind` on each narrative item — `resolved`,
+`gained`, `appeared`, `lost` — because a reason code's label describes the
+finding, not the change. Printing "Low behavioural assessment result" under
+*What improved* tells the farmer the opposite of what happened, so the screen
+builds the sentence from how the item moved.
 
 Grade colours live in `src/finance/helpers.ts` (`GRADE_COLORS`) so the result
 screen, the passport card and the status screen cannot drift apart.
 
-Screens specified but not built: `mpowerUAssessment`, `loanResult`,
-`developmentPlan`, `assessmentHistory`, `loanAccount`, `loanConsentManage`,
-`loanReviewRequest`. All belong to P3–P6.
+Screens specified but not built: `mpowerUAssessment` (P5), `loanAccount` (P6),
+`loanConsentManage`, `loanReviewRequest`.
 
 ---
 

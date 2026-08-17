@@ -4,6 +4,19 @@
 # because the directory is root-owned and pm2 runs as root.
 #
 # Usage:  bash /tmp/deploy-ec2.sh [ref]      (ref defaults to origin/main)
+#
+# THIS BOX IS SHARED. Other production applications run here:
+#
+#   root's pm2 daemon    (/root/.pm2)        shathisheba-admin      <- ours, only entry
+#   ubuntu's pm2 daemon  (/home/ubuntu/.pm2) saathi-app
+#                                            saathi-app-production
+#                                            digigram-website
+#
+# Those are separate daemons: `sudo pm2` cannot see ubuntu's processes and vice
+# versa. Even so, every pm2 call here names our process explicitly. Never use
+# `pm2 restart all`, `pm2 kill`, `pm2 resurrect` or `pm2 update` on this box —
+# the first would be scoped to root's daemon today and silently wrong the day
+# something else is added to it.
 set -euo pipefail
 
 APP=/var/www/html/shathisheba-admin
@@ -11,6 +24,22 @@ REF=${1:-origin/main}
 PM2_APP=shathisheba-admin
 
 cd "$APP"
+
+# Belt and braces before anything destructive: prove we are where we think we
+# are, and that the pm2 process we are about to restart is this checkout and not
+# something that merely shares the name.
+[ "$(pwd -P)" = "$APP" ] || { echo "ERROR: refusing to run outside $APP (in $(pwd -P))" >&2; exit 1; }
+sudo test -d "$APP/.git" || { echo "ERROR: $APP is not a git checkout" >&2; exit 1; }
+
+PM2_CWD=$(sudo pm2 jlist 2>/dev/null | node -e "
+let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+  const p=JSON.parse(s).find(x=>x.name===process.argv[1]);
+  process.stdout.write(p ? p.pm2_env.pm_cwd : '');
+});" "$PM2_APP")
+if [ -n "$PM2_CWD" ] && [ "$PM2_CWD" != "$APP" ]; then
+  echo "ERROR: pm2 process '$PM2_APP' runs from $PM2_CWD, not $APP. Refusing." >&2
+  exit 1
+fi
 
 echo "==> current"
 sudo git log --oneline -1
@@ -41,12 +70,16 @@ sudo npm ci --no-audit --no-fund
 # Next reuses whatever is already in .next. A directory left from a different
 # Next major fails at page-data collection with PageNotFoundError, which reads
 # like a missing route rather than a stale cache.
+# Absolute path on purpose: an `rm -rf` that depends on the current directory is
+# one failed `cd` away from being a very different command.
 echo "==> clearing .next"
-sudo rm -rf .next
+sudo rm -rf "$APP/.next"
 
 echo "==> building"
 sudo npm run build
 
+# Named process only. `sudo pm2 save` rewrites /root/.pm2/dump.pm2, which lists
+# our app alone; ubuntu's dump is a different file and is not touched.
 echo "==> restarting pm2"
 sudo pm2 restart "$PM2_APP" --update-env
 sudo pm2 save

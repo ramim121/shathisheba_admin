@@ -18,6 +18,23 @@ until the RDS security group question in `OPEN-ISSUES.md` §1.1 is settled.
 
 ## EC2
 
+> ⚠️ **This box is shared with other production applications.** Two pm2 daemons
+> run on it, and only one entry in one of them is ours:
+>
+> | Daemon | Apps | Port |
+> |---|---|---|
+> | root — `/root/.pm2` | **`shathisheba-admin`** (ours, the only entry) | 3000 |
+> | ubuntu — `/home/ubuntu/.pm2` | `saathi-app`, `saathi-app-production`, `digigram-website` | 4200, 4100, static |
+>
+> They are separate daemons: `sudo pm2` cannot see ubuntu's processes and plain
+> `pm2` cannot see root's. **Never run `pm2 restart all`, `pm2 kill`,
+> `pm2 resurrect` or `pm2 update` here** — `all` is scoped to one daemon today and
+> would be silently wrong the day a second app joins it. Always name the process.
+>
+> Likewise, the only directory to modify is `/var/www/html/shathisheba-admin`.
+> `digigram-website-redesign`, `saathi-web-application*` and the backup folders
+> beside it belong to other deployments.
+
 ```
 host      ubuntu@18.143.126.210          (key: Resources/saathi-main-new.pem)
 app       /var/www/html/shathisheba-admin   (owned by root)

@@ -126,13 +126,12 @@ complete**; what remains of P3 is the admin UI to capture into it.
 | Phase | Scope | Severity |
 |---|---|---|
 | P3 | Schema and scoring integration are done (`023_loan_evidence.sql`): evidence with per-field provenance, assets, existing debt, documents, the 11-item field verification, visits. **Outstanding: the console screens** for the 17 capture sections, and offline tablet drafts | 🟠 |
-| P4 | ~~The 100-point scorecard engine~~ **done**. Outstanding: the farmer-facing result screen (`loanResult`) and the champion/challenger comparison view — the `is_shadow` flag and a `shadow` model status exist, nothing renders the comparison yet | 🟡 |
+| P4 | ~~The 100-point scorecard engine~~ **done**, and the farmer-facing `loanResult`, `developmentPlan` and `assessmentHistory` screens with it. Outstanding: the champion/challenger comparison view — the `is_shadow` flag and a `shadow` model status exist, nothing renders the comparison yet | 🔵 |
 | P5 | mPowerU behind `lib/mpoweru/adapter.ts` with a stub driver, session orchestration, webhook + polling, band→rating normalisation, mobile assessment screen | 🟠 |
 | P6 | Development plans, reassessment, review-request queue, lender packs (PDF/CSV with Bangla fonts), lender submissions, disbursement, repayment tracking, home ticker, repayment notifications, admin collections with aging buckets | 🟠 |
 
-Mobile screens specified but not yet added: `mpowerUAssessment`, `loanResult`,
-`developmentPlan`, `assessmentHistory`, `loanAccount`, `loanConsentManage`,
-`loanReviewRequest`.
+Mobile screens specified but not yet added: `mpowerUAssessment` (P5),
+`loanAccount` (P6), `loanConsentManage`, `loanReviewRequest`.
 
 Nothing else from this pass is outstanding — the API viewer regrouping, the
 dashboard loan-pipeline card and `ADM-RDY-02` are all in section 6.

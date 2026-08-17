@@ -327,6 +327,14 @@ export const apiCatalog = [
   { method: "POST", path: "/api/v1/app/finance/applications/SS-L-0001/withdraw", desc: "Withdraw an application the user has not yet had decided" },
   { method: "GET", path: "/api/v1/app/finance/consents?user_id=1", desc: "Consents the user has given, with version and timestamp" },
 
+  // --- Finance / assessment outcome (farmer-facing) ---
+  // These deliberately omit weights, per-criterion ratings, derived metrics and
+  // internal reason codes (MOB-LON-26) — the console holds all of that.
+  { method: "GET", path: "/api/v1/app/finance/assessment?user_id=1", desc: "The farmer's view of their live credit assessment: the three outputs, the pathway sentence, strengths and improvements as bilingual text. Never weights, ratings or model internals" },
+  { method: "GET", path: "/api/v1/app/finance/assessment/history?user_id=1", desc: "Every assessment plus an improvement narrative between the last two — score movement, what was resolved, what appeared, and how many development actions were completed" },
+  { method: "GET", path: "/api/v1/app/finance/development-plan?user_id=1", desc: "Assigned development tasks with status, due date and a route token to the screen that completes each. Reports whether reassessment can be requested yet" },
+  { method: "POST", path: "/api/v1/app/finance/reassessment-request", desc: "Farmer asks to be reassessed once their development plan is clear. Refused while tasks remain or if already asked this week; puts the application back in the queue with an event, never re-scores" },
+
   // --- Finance back-office (staff only) ---
   { method: "GET", path: "/api/v1/admin/loan/dashboard", desc: "Credit portfolio dashboard: pipeline by status, readiness grade mix, conversion and disbursement — every figure queried, none seeded" },
   { method: "GET", path: "/api/v1/admin/loan/queue?status=submitted&limit=20", desc: "Paginated credit queue with the KPI band above it" },

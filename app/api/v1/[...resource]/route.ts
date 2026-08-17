@@ -108,6 +108,10 @@ import {
   getScorecardIntegrity,
   getAssessment,
   runAssessment,
+  getFarmerAssessment,
+  getAssessmentHistory,
+  getDevelopmentPlan,
+  requestReassessment,
   previewUserRecords,
   clearUserRecords
 } from "@/lib/app-endpoints";
@@ -170,6 +174,11 @@ const appReadHandlers: Record<string, AppReadHandler> = {
   "app/finance/applications": (q) => getLoanApplications(q.get("user_id")!),
   "app/finance/consents": (q) => getLoanConsents(q.get("user_id")!),
   "app/finance/purposes": () => getLoanPurposes(),
+  // The farmer's own view of their assessment. Deliberately excludes weights,
+  // per-criterion ratings and raw reason codes (MOB-LON-26).
+  "app/finance/assessment": (q) => getFarmerAssessment(q.get("user_id")!),
+  "app/finance/assessment/history": (q) => getAssessmentHistory(q.get("user_id")!),
+  "app/finance/development-plan": (q) => getDevelopmentPlan(q.get("user_id")!),
 
   // Admin finance aggregates. Staff-only via ADMIN_ONLY in lib/api-access.ts.
   "admin/loan/dashboard": () => getCreditDashboard(),
@@ -527,6 +536,9 @@ export async function POST(request: NextRequest, { params }: Params) {
     }
 
     // ---- Finance writes -----------------------------------------------------
+    if (exact === "app/finance/reassessment-request") {
+      return NextResponse.json({ ok: true, source: "mysql", action: "reassessment_requested", result: await requestReassessment(payload) }, { status: 200 });
+    }
     if (exact === "app/finance/readiness/submit") {
       return NextResponse.json({ ok: true, source: "mysql", action: "readiness_scored", result: await submitReadiness(payload) }, { status: 200 });
     }

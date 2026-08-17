@@ -316,6 +316,71 @@ as `ADM-RDY-02`.
 
 ---
 
+## 3B. Disbursement, repayment and collections (P6)
+
+`POST admin/loan/disburse` is the only place money leaves, and it is the narrowest
+permission in the finance surface: `credit_approver` and above — never the analyst
+who scored the file, never the officer who collected the evidence.
+
+Four invariants:
+
+- **Terms are snapshotted onto `loan_accounts`.** A live loan reads its rate,
+  tenure and instalment from its own row, never from `loan_products`. Repricing a
+  product must not silently reprice somebody's outstanding loan (`DAT-04`).
+- **`SUM(schedule.amount_due) == total_payable`, exactly.** The pricing engine
+  asserts it before the rows are written; if it throws, the disbursement fails
+  rather than creating a loan whose instalments don't add up (`DAT-05`).
+- **A payment is allocated oldest-due-first and never over-allocated.** ৳5,000
+  against ৳3,000 of arrears and a ৳4,000 instalment clears the arrears and
+  part-pays the instalment. More than the outstanding balance is refused rather
+  than parked — an over-payment sitting in an account is a reconciliation problem
+  later.
+- **Aggregates are derived, not incremented.** `refreshAccount` recomputes from
+  the schedule every time. A running total that drifts from the rows it
+  summarises is worse than none, because every screen then shows a confident
+  wrong number.
+
+A part-paid instalment that is late reads `overdue`, not `partial` — reporting it
+as merely partial hides the lateness from collections.
+
+Dates leave these endpoints as plain `YYYY-MM-DD`. A MySQL `DATE` has no timezone
+and mysql2 hands it back at local midnight; passing it through would give either
+`"Sat Mar 14 2026 00:00:00 GMT+0600"` from `String()` or **the day before** from
+JSON's UTC serialisation at +06:00. A due date shown a day early is a farmer told
+the wrong deadline.
+
+Collections is at `/loan/collections`: aging buckets, portfolio at risk, and
+payment recording on the same page — the person chasing an arrear is the person
+who takes the payment, and making them navigate away loses the row.
+
+## 3C. mPowerU (P5) — adapter only, no live provider
+
+**EcoDev have not supplied a sandbox.** `lib/mpoweru/adapter.ts` is written
+against the contract the SRS describes, and the only driver that exists is a
+stub. When the real endpoint arrives, one file is added
+(`lib/mpoweru/drivers/…`), `MPOWERU_DRIVER` is changed, and nothing that calls
+the adapter moves.
+
+The seams that are already real:
+
+| Concern | How |
+|---|---|
+| Pseudonymity (`ADM-LON-22`) | The provider gets a salted SHA-256 of the user id, never the id and never a document. `respondentIdFor` throws if `MPOWERU_RESPONDENT_SALT` is unset rather than emitting a guessable hash of a small integer |
+| Idempotency (`ADM-LON-23`) | One live session per application; a repeat `start` returns the existing one. Field connectivity retries, and a second respondent means the farmer sits two assessments |
+| Webhook + polling (`ADM-LON-23`) | Both call the same `syncMpowerUSession`, which is a no-op once complete. Webhooks are lost; polling alone is slow |
+| Webhook authenticity | HMAC, constant-time compared. Even the stub verifies — a driver that returned `true` unconditionally would be inherited by whoever copies it as a starting point. An unauthenticated webhook that sets a behavioural score writes 20 points onto any application from the internet |
+| Factor restriction (`ADM-LON-24`) | Only the normalised band reaches `loan_evidence`. Factor output is **omitted from the payload entirely** for a field officer, not nulled, so nothing hints the field exists. Neither the respondent id nor the factors appear in audit rows |
+| Failure ≠ zero (`ADM-LON-25`) | A failed assessment writes no evidence. The criterion then reads as no-data, which the scorecard rates 0 **and flags** — a visible gap, not a silent penalty for the provider's outage |
+
+The stub is deterministic (a random stub makes every test flaky and shows a
+different grade on each demo refresh) and obviously fake: session ids start
+`stub_`, `is_stub` is on every result, and `assertDriverUsableHere` refuses it
+under `NODE_ENV=production` unless `MPOWERU_ALLOW_STUB_IN_PRODUCTION=true`.
+
+Environment: `MPOWERU_DRIVER`, `MPOWERU_RESPONDENT_SALT`, `MPOWERU_WEBHOOK_SECRET`.
+
+---
+
 ## 4. API surface
 
 All finance routes are bearer-authenticated. `app/finance/*` is ownership-scoped

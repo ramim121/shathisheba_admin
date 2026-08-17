@@ -57,7 +57,8 @@ const sections: NavSection[] = [
       { label: "Loan Applications", href: "/loan/applications", icon: ListChecks },
       { label: "Credit Dashboard", href: "/loan/dashboard", icon: LayoutDashboard },
       { label: "Readiness Checks", href: "/loan/readiness-checks", icon: ShieldCheck },
-      { label: "Loan Accounts", href: "/loan/accounts", icon: CreditCard }
+      { label: "Loan Accounts", href: "/loan/accounts", icon: CreditCard },
+      { label: "Collections", href: "/loan/collections", icon: HandCoins }
     ]
   },
   {
@@ -66,6 +67,12 @@ const sections: NavSection[] = [
     items: [
       { label: "Loan Products", href: "/loan/products", icon: HandCoins },
       { label: "Readiness Questionnaire", href: "/loan/questionnaire", icon: ScrollText },
+      { label: "Scorecard Criteria", href: "/loan/scorecard-criteria", icon: ListChecks },
+      { label: "Scorecard Rules", href: "/loan/scorecard-rules", icon: ScrollText },
+      { label: "Hard Stops", href: "/loan/hard-stops", icon: ShieldCheck },
+      { label: "Reason Codes", href: "/loan/reason-codes", icon: Tags },
+      { label: "Pathway Rules", href: "/loan/pathway-rules", icon: ListChecks },
+      { label: "Development Tasks", href: "/loan/development-templates", icon: BookOpen },
       { label: "Corroboration Signals", href: "/loan/confidence-signals", icon: ShieldCheck },
       { label: "Consent Types", href: "/loan/consent-types", icon: BookOpen },
       { label: "Loan Purposes", href: "/loan/purposes", icon: Tags }

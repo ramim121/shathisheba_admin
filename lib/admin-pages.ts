@@ -1032,6 +1032,192 @@ const financePages: Record<string, ManagementPageProps> = {
     ],
     rows: [],
     formFields: []
+  },
+
+  // ---- Scorecard configuration (P4) ---------------------------------------
+  // Editing these changes how every subsequent applicant is scored, so each page
+  // says what the field does rather than assuming the editor already knows.
+  "loan/scorecard-criteria": {
+    title: "Scorecard Criteria",
+    description:
+      "The eight weighted criteria. Weights must total exactly 100.00 for an active model — a save that breaks that is rejected and rolled back, because the engine normalises and would otherwise score everyone plausibly and wrongly.",
+    entityName: "Criterion",
+    endpoint: "/api/v1/loan/scorecard-criteria",
+    columns: [
+      { key: "model", label: "Model" },
+      { key: "num", label: "#" },
+      { key: "code", label: "Code" },
+      { key: "criterion", label: "Criterion" },
+      { key: "weight", label: "Weight" },
+      { key: "layer", label: "Layer" },
+      { key: "rules", label: "Bands" },
+      { key: "is_active", label: "Active" }
+    ],
+    rows: [],
+    formFields: [
+      { label: "Code", name: "code", value: "" },
+      { label: "Label (English)", name: "label_en", value: "" },
+      { label: "Label (Bangla)", name: "label_bn", value: "" },
+      { label: "Weight (points out of 100)", name: "weight", value: "10" },
+      { label: "Layer", name: "layer", type: "select", options: ["quantitative", "qualitative"] },
+      { label: "Evidence source", name: "evidence_source", value: "" },
+      { label: "Sort order", name: "sort_order", value: "9" },
+      { label: "Active", name: "is_active", type: "select", options: ["1", "0"] }
+    ]
+  },
+  "loan/scorecard-rules": {
+    title: "Scorecard Rating Bands",
+    description:
+      "How a measured value becomes a 0–5 rating. Bands are min-inclusive and max-exclusive, evaluated in order; the first match wins. Leave a bound empty for unbounded.",
+    entityName: "Rating Band",
+    endpoint: "/api/v1/loan/scorecard-rules",
+    columns: [
+      { key: "criterion", label: "Criterion" },
+      { key: "metric", label: "Metric" },
+      { key: "num", label: "Order" },
+      { key: "min_value", label: "From (incl.)" },
+      { key: "max_value", label: "To (excl.)" },
+      { key: "rating", label: "Rating" },
+      { key: "meaning", label: "Meaning" },
+      { key: "is_active", label: "Active" }
+    ],
+    rows: [],
+    formFields: [
+      { label: "Criterion id", name: "criterion_id", value: "" },
+      { label: "Metric", name: "metric", value: "dscr" },
+      { label: "From (inclusive, blank = unbounded)", name: "min_value", value: "" },
+      { label: "To (exclusive, blank = unbounded)", name: "max_value", value: "" },
+      { label: "Rating (0–5)", name: "rating", value: "3" },
+      { label: "Meaning (English)", name: "label_en", value: "" },
+      { label: "Order", name: "sort_order", value: "1" },
+      { label: "Active", name: "is_active", type: "select", options: ["1", "0"] }
+    ]
+  },
+  "loan/hard-stops": {
+    title: "Hard Stops",
+    description:
+      "Evaluated before and independently of the score. A hard stop forces 'currently ineligible' whatever the grade. The check key must name a predicate the engine implements — an unrecognised one makes the assessment fail rather than pass.",
+    entityName: "Hard Stop",
+    endpoint: "/api/v1/loan/hard-stops",
+    columns: [
+      { key: "code", label: "Code" },
+      { key: "label_en", label: "Rule" },
+      { key: "check_key", label: "Engine check" },
+      { key: "overridable", label: "Overridable" },
+      { key: "sort_order", label: "Order" },
+      { key: "is_active", label: "Active" }
+    ],
+    rows: [],
+    formFields: [
+      { label: "Code", name: "code", value: "" },
+      { label: "Rule (English)", name: "label_en", value: "" },
+      { label: "Rule (Bangla)", name: "label_bn", value: "" },
+      { label: "What it means (English)", name: "explanation_en", value: "" },
+      { label: "Required action (English)", name: "required_action_en", value: "" },
+      {
+        label: "Engine check",
+        name: "check_key",
+        type: "select",
+        options: [
+          "identity_unverified", "critical_kyc_missing", "consent_missing", "active_default",
+          "no_repayment_source", "contradictory_evidence", "prohibited_purpose"
+        ]
+      },
+      { label: "Overridable", name: "overridable", type: "select", options: ["0", "1"] },
+      { label: "Order", name: "sort_order", value: "8" },
+      { label: "Active", name: "is_active", type: "select", options: ["1", "0"] }
+    ]
+  },
+  "loan/reason-codes": {
+    title: "Reason Codes",
+    description:
+      "The bilingual sentences a farmer reads on their result screen. The app never sees the code itself — only this text — so a code with no active row here simply does not appear.",
+    entityName: "Reason Code",
+    endpoint: "/api/v1/loan/reason-codes",
+    columns: [
+      { key: "code", label: "Code" },
+      { key: "polarity", label: "Polarity" },
+      { key: "label_en", label: "English" },
+      { key: "label_bn", label: "Bangla" },
+      { key: "criterion_code", label: "Criterion" },
+      { key: "is_active", label: "Active" }
+    ],
+    rows: [],
+    formFields: [
+      { label: "Code", name: "code", value: "" },
+      { label: "Polarity", name: "polarity", type: "select", options: ["positive", "negative"] },
+      { label: "Sentence (English)", name: "label_en", value: "" },
+      { label: "Sentence (Bangla)", name: "label_bn", value: "" },
+      { label: "Criterion code", name: "criterion_code", value: "" },
+      { label: "Order", name: "sort_order", value: "30" },
+      { label: "Active", name: "is_active", type: "select", options: ["1", "0"] }
+    ]
+  },
+  "loan/pathway-rules": {
+    title: "Pathway Rules",
+    description:
+      "What happens next, given grade, confidence, hard stop and safeguards. Ordered; the first match wins. Leave a condition empty to mean 'any'. Only a rule that requires safeguards can produce the structured recommendation shown beside the inherent grade.",
+    entityName: "Pathway Rule",
+    endpoint: "/api/v1/loan/pathway-rules",
+    columns: [
+      { key: "sort_order", label: "Order" },
+      { key: "when_grade", label: "Grade" },
+      { key: "when_confidence", label: "Confidence" },
+      { key: "when_hard_stop", label: "Hard stop" },
+      { key: "when_safeguards", label: "Safeguards" },
+      { key: "pathway_code", label: "Pathway" },
+      { key: "readiness_status", label: "Readiness" },
+      { key: "amount_factor", label: "Amount ×" },
+      { key: "is_active", label: "Active" }
+    ],
+    rows: [],
+    formFields: [
+      { label: "Order", name: "sort_order", value: "11" },
+      { label: "When grade (blank = any)", name: "when_grade", value: "" },
+      { label: "When confidence (blank = any)", name: "when_confidence", value: "" },
+      { label: "When hard stop (blank = any)", name: "when_hard_stop", value: "" },
+      { label: "When safeguards (blank = any)", name: "when_safeguards", value: "" },
+      { label: "Pathway code", name: "pathway_code", value: "" },
+      {
+        label: "Readiness status",
+        name: "readiness_status",
+        type: "select",
+        options: ["bank_ready", "conditionally_ready", "project_ready", "development_required", "currently_ineligible"]
+      },
+      { label: "Amount factor (1.0 = full request)", name: "amount_factor", value: "" },
+      { label: "Label (English)", name: "label_en", value: "" },
+      { label: "Label (Bangla)", name: "label_bn", value: "" },
+      { label: "Active", name: "is_active", type: "select", options: ["1", "0"] }
+    ]
+  },
+  "loan/development-templates": {
+    title: "Development Tasks",
+    description:
+      "The task library an analyst assigns from when a farmer needs to improve before reassessment. The action link is a route token the app resolves (screen:… or sheet:…), never a URL.",
+    entityName: "Development Task",
+    endpoint: "/api/v1/loan/development-templates",
+    columns: [
+      { key: "code", label: "Code" },
+      { key: "title_en", label: "Task" },
+      { key: "title_bn", label: "Bangla" },
+      { key: "criterion_code", label: "Criterion" },
+      { key: "action_deeplink", label: "Opens" },
+      { key: "default_days", label: "Days" },
+      { key: "is_active", label: "Active" }
+    ],
+    rows: [],
+    formFields: [
+      { label: "Code", name: "code", value: "" },
+      { label: "Task (English)", name: "title_en", value: "" },
+      { label: "Task (Bangla)", name: "title_bn", value: "" },
+      { label: "Detail (English)", name: "detail_en", value: "" },
+      { label: "Detail (Bangla)", name: "detail_bn", value: "" },
+      { label: "Criterion code", name: "criterion_code", value: "" },
+      { label: "Action link (screen:… or sheet:…)", name: "action_deeplink", value: "" },
+      { label: "Days to complete", name: "default_days", value: "30" },
+      { label: "Order", name: "sort_order", value: "9" },
+      { label: "Active", name: "is_active", type: "select", options: ["1", "0"] }
+    ]
   }
 };
 

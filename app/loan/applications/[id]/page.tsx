@@ -28,6 +28,7 @@ type Workspace = {
   verifications: { code: string; label_en: string; label_bn: string; verdict: string | null; comment: string | null }[];
   documents: Record<string, string | number | null>[];
   safeguards: Record<string, string | number | null>[];
+  visits: Record<string, string | number | null>[];
   events: { to_status: string; actor_type: string; note_en: string | null; created_at: string }[];
   coverage: Record<string, number>;
 };
@@ -79,6 +80,78 @@ const CAPTURE = [
 function taka(v: string | number | null | undefined) {
   const n = Number(v ?? 0);
   return `৳${n.toLocaleString("en-BD", { maximumFractionDigits: 0 })}`;
+}
+
+type RowField = { name: string; label: string; type: string; options?: string[] };
+
+/**
+ * The add-a-row form for the repeating collections. One component rather than
+ * four: the fields differ, everything else — clear on submit, disable while
+ * saving, never submit an empty row — does not.
+ */
+function RowForm({
+  label, fields, busy, onSubmit,
+}: {
+  label: string;
+  fields: RowField[];
+  busy: boolean;
+  onSubmit: (values: Record<string, string>) => void;
+}) {
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [open, setOpen] = useState(false);
+
+  if (!open) {
+    return (
+      <button className="btn small add" onClick={() => setOpen(true)} disabled={busy}>
+        + {label}
+      </button>
+    );
+  }
+
+  return (
+    <div className="rowform">
+      {fields.map((f) => (
+        <label key={f.name}>
+          {f.label}
+          {f.type === "select" ? (
+            <select
+              value={values[f.name] ?? f.options?.[0] ?? ""}
+              onChange={(e) => setValues((v) => ({ ...v, [f.name]: e.target.value }))}
+            >
+              {(f.options ?? []).map((o) => <option key={o} value={o}>{o.replace(/_/g, " ")}</option>)}
+            </select>
+          ) : (
+            <input
+              type={f.type}
+              value={values[f.name] ?? ""}
+              onChange={(e) => setValues((v) => ({ ...v, [f.name]: e.target.value }))}
+            />
+          )}
+        </label>
+      ))}
+      <div className="rowform-actions">
+        <button
+          className="btn small primary"
+          disabled={busy}
+          onClick={() => {
+            const payload: Record<string, string> = {};
+            for (const f of fields) {
+              const v = values[f.name] ?? (f.type === "select" ? f.options?.[0] ?? "" : "");
+              if (v !== "") payload[f.name] = v;
+            }
+            onSubmit(payload);
+            setValues({});
+            setOpen(false);
+          }}
+        >
+          Save
+        </button>
+        <button className="btn small" onClick={() => { setValues({}); setOpen(false); }} disabled={busy}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
 }
 
 export default function LoanWorkspacePage({ params }: { params: Promise<{ id: string }> }) {
@@ -179,6 +252,16 @@ export default function LoanWorkspacePage({ params }: { params: Promise<{ id: st
     post("admin/loan/assess", { application_id: Number(id) }, "Assessment complete.");
   }
 
+  function addRow(collection: string, values: Record<string, string>) {
+    post(`admin/loan/rows/${collection}`, { application_id: Number(id), ...values }, "Saved.");
+  }
+  function patchRow(collection: string, rowId: string, values: Record<string, string>) {
+    post(`admin/loan/rows/${collection}`, { application_id: Number(id), id: rowId, ...values }, "Updated.");
+  }
+  function removeRow(collection: string, rowId: string) {
+    post(`admin/loan/rows/${collection}`, { application_id: Number(id), id: rowId, delete: true }, "Removed.");
+  }
+
   if (!data) {
     return (
       <AdminShell>
@@ -274,14 +357,17 @@ export default function LoanWorkspacePage({ params }: { params: Promise<{ id: st
             <h3 className="ws-h3">Existing debt</h3>
             <p className="muted ws-hint">
               Informal, family and supplier credit count here as much as bank debt. A borrower whose only
-              recorded obligations are formal looks safer than they are.
+              recorded obligations are formal looks safer than they are — and that is exactly the applicant
+              the scorecard must not over-rate.
             </p>
             {data.debts.length === 0 ? (
-              <p className="muted">No debts recorded. Saving the financial profile marks this section as
-                asked, so zero is scored as a genuine zero rather than a gap.</p>
+              <p className="muted">
+                None recorded. Saving the financial profile marks this section as asked, so zero is scored as
+                a genuine zero rather than a gap.
+              </p>
             ) : (
               <table className="table">
-                <thead><tr><th>Lender</th><th>Type</th><th>Outstanding</th><th>Instalment</th><th>Status</th></tr></thead>
+                <thead><tr><th>Lender</th><th>Type</th><th>Outstanding</th><th>Instalment</th><th>Status</th><th /></tr></thead>
                 <tbody>
                   {data.debts.map((d) => (
                     <tr key={String(d.id)}>
@@ -290,11 +376,153 @@ export default function LoanWorkspacePage({ params }: { params: Promise<{ id: st
                       <td>{taka(d.outstanding_amount)}</td>
                       <td>{taka(d.installment_amount)}</td>
                       <td>{String(d.payment_status).replace(/_/g, " ")}</td>
+                      <td>
+                        <button className="btn small" onClick={() => removeRow("debts", String(d.id))} disabled={busy}>
+                          Remove
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             )}
+            <RowForm
+              busy={busy}
+              label="Add a debt"
+              fields={[
+                { name: "lender_name", label: "Lender", type: "text" },
+                { name: "lender_type", label: "Type", type: "select", options: ["bank", "mfi", "cooperative", "supplier", "informal", "family", "other"] },
+                { name: "outstanding_amount", label: "Outstanding (৳)", type: "number" },
+                { name: "installment_amount", label: "Instalment (৳)", type: "number" },
+                { name: "installment_freq", label: "Frequency", type: "select", options: ["monthly", "weekly", "biweekly", "quarterly", "seasonal", "one_time"] },
+                { name: "payment_status", label: "Payment status", type: "select", options: ["current", "1_30_late", "31_60_late", "61_90_late", "over_90_late", "rescheduled", "defaulted"] },
+              ]}
+              onSubmit={(values) => addRow("debts", values)}
+            />
+          </section>
+
+          <section className="panel">
+            <h3 className="ws-h3">Productive assets</h3>
+            <p className="muted ws-hint">
+              Land, livestock, sheds and machinery. Feeds enterprise economics and gives the field visit
+              something specific to verify.
+            </p>
+            {data.assets.length === 0 ? <p className="muted">None recorded.</p> : (
+              <table className="table">
+                <thead><tr><th>Type</th><th>Description</th><th>Qty</th><th>Value</th><th>Ownership</th><th>Verified</th><th /></tr></thead>
+                <tbody>
+                  {data.assets.map((x) => (
+                    <tr key={String(x.id)}>
+                      <td>{String(x.asset_type)}</td>
+                      <td>{String(x.description ?? "—")}</td>
+                      <td>{String(x.quantity)} {String(x.unit ?? "")}</td>
+                      <td>{taka(x.estimated_value)}</td>
+                      <td>{String(x.ownership_status)}</td>
+                      <td>{String(x.verification_status).replace(/_/g, " ")}</td>
+                      <td>
+                        <button className="btn small" onClick={() => removeRow("assets", String(x.id))} disabled={busy}>
+                          Remove
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            <RowForm
+              busy={busy}
+              label="Add an asset"
+              fields={[
+                { name: "asset_type", label: "Type", type: "select", options: ["land", "cattle", "shed", "machinery", "equipment", "inventory", "premises", "other"] },
+                { name: "description", label: "Description", type: "text" },
+                { name: "quantity", label: "Quantity", type: "number" },
+                { name: "unit", label: "Unit", type: "text" },
+                { name: "estimated_value", label: "Value (৳)", type: "number" },
+                { name: "ownership_status", label: "Ownership", type: "select", options: ["owned", "leased", "shared", "mortgaged", "disputed", "unknown"] },
+                { name: "verification_status", label: "Verification", type: "select", options: ["unverified", "verified", "partially_verified", "unable_to_verify", "contradictory"] },
+              ]}
+              onSubmit={(values) => addRow("assets", values)}
+            />
+          </section>
+
+          <section className="panel">
+            <h3 className="ws-h3">Documents</h3>
+            <p className="muted ws-hint">
+              Files live in the private S3 folder and are served through the ownership-checked route; only the
+              key is stored. A required document that is not verified blocks the checklist.
+            </p>
+            {data.documents.length === 0 ? <p className="muted">None uploaded.</p> : (
+              <table className="table">
+                <thead><tr><th>Document</th><th>Required</th><th>Status</th><th /></tr></thead>
+                <tbody>
+                  {data.documents.map((d) => (
+                    <tr key={String(d.id)}>
+                      <td>{String(d.doc_type).replace(/_/g, " ")}</td>
+                      <td>{Number(d.is_required) === 1 ? "Yes" : "No"}</td>
+                      <td>{String(d.status)}</td>
+                      <td className="row-actions">
+                        {d.status !== "verified" ? (
+                          <button className="btn small" onClick={() => patchRow("documents", String(d.id), { status: "verified" })} disabled={busy}>
+                            Verify
+                          </button>
+                        ) : null}
+                        {d.status !== "rejected" ? (
+                          <button className="btn small" onClick={() => patchRow("documents", String(d.id), { status: "rejected", rejection_reason: "Illegible or incorrect" })} disabled={busy}>
+                            Reject
+                          </button>
+                        ) : null}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            <RowForm
+              busy={busy}
+              label="Record a document"
+              fields={[
+                { name: "doc_type", label: "Document type", type: "text" },
+                { name: "file_key", label: "S3 key", type: "text" },
+                { name: "is_required", label: "Required", type: "select", options: ["1", "0"] },
+                { name: "status", label: "Status", type: "select", options: ["uploaded", "verified", "rejected", "expired", "re_requested"] },
+              ]}
+              onSubmit={(values) => addRow("documents", values)}
+            />
+          </section>
+
+          <section className="panel">
+            <h3 className="ws-h3">Field visits</h3>
+            <p className="muted ws-hint">Propose a slot, then record the visit once it happens.</p>
+            {data.visits.length === 0 ? <p className="muted">No visits scheduled.</p> : (
+              <table className="table">
+                <thead><tr><th>Proposed</th><th>Status</th><th>Note</th><th /></tr></thead>
+                <tbody>
+                  {data.visits.map((v) => (
+                    <tr key={String(v.id)}>
+                      <td>{String(v.proposed_at).slice(0, 16).replace("T", " ")}</td>
+                      <td>{String(v.status)}</td>
+                      <td>{String(v.note ?? "—")}</td>
+                      <td className="row-actions">
+                        {v.status !== "completed" ? (
+                          <button className="btn small" onClick={() => patchRow("visits", String(v.id), { status: "completed", completed_at: new Date().toISOString().slice(0, 19).replace("T", " ") })} disabled={busy}>
+                            Mark done
+                          </button>
+                        ) : null}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            <RowForm
+              busy={busy}
+              label="Propose a visit"
+              fields={[
+                { name: "proposed_at", label: "Date and time", type: "datetime-local" },
+                { name: "note", label: "Note", type: "text" },
+              ]}
+              onSubmit={(values) => addRow("visits", values)}
+            />
           </section>
 
           <section className="panel">
@@ -425,7 +653,14 @@ export default function LoanWorkspacePage({ params }: { params: Promise<{ id: st
         .ws-blocked { color:#8A2F28; }
         .btn { padding:9px 16px; border-radius:8px; border:1px solid #EBDDE4; background:#fff; color:#871449; font-size:13.5px; font-weight:600; cursor:pointer; margin-top:12px; }
         .btn.primary { background:#871449; color:#fff; border-color:#871449; }
+        .btn.small { padding:5px 10px; font-size:12px; margin-top:0; white-space:nowrap; }
+        .btn.add { margin-top:12px; }
         .btn:disabled { opacity:.5; cursor:not-allowed; }
+        .row-actions { display:flex; gap:6px; }
+        .rowform { display:grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap:10px; margin-top:14px; padding-top:14px; border-top:1px solid #F4E8EE; }
+        .rowform label { display:flex; flex-direction:column; gap:4px; font-size:12px; color:#7A6570; }
+        .rowform input, .rowform select { padding:7px 9px; border:1px solid #EBDDE4; border-radius:8px; font-size:13px; min-width:0; }
+        .rowform-actions { display:flex; gap:8px; align-items:flex-end; }
         .ws-score { display:flex; align-items:center; gap:14px; margin:8px 0 14px; }
         .ws-grade { width:44px; height:44px; border-radius:22px; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:20px; color:#fff; }
         .gA { background:#1E9E5A; } .gB { background:#2563EB; } .gC { background:#D97706; } .gD { background:#B4443C; }

@@ -83,6 +83,28 @@ Affects `EXPO_PUBLIC_GEMINI_API_KEY` and `EXPO_PUBLIC_WEATHERAPI_KEY`.
 phone calls `/api/v1/...` with its session token. `src/ai/gemini.ts` was extracted
 partly to make this a single-file change.
 
+### 1.6 🟠 mPowerU has no sandbox, so the only driver is a stub
+
+EcoDev have not supplied API credentials or a test environment. The adapter,
+session store, idempotency, webhook verification, polling fallback, pseudonymous
+respondent ids and the factor-level role restriction are all built and tested —
+against a **stub driver that invents scores**.
+
+`assertDriverUsableHere` refuses the stub when `NODE_ENV=production` unless
+`MPOWERU_ALLOW_STUB_IN_PRODUCTION=true`, so it cannot reach real applicants by
+accident. That guard is the only thing standing between a pilot and a farmer
+being graded on a number derived from a hash of their session id.
+
+**Action (needs EcoDev):** obtain sandbox credentials, the real scale for
+`normaliseBand`, the webhook signature scheme, and written confirmation of what
+factor-level output the contract permits exporting (`ADM-LON-24`). Then add
+`lib/mpoweru/drivers/ecodev.ts` and set `MPOWERU_DRIVER`. Nothing that calls the
+adapter needs to change.
+
+Until then the behavioural criterion is worth 20 of the 100 points and will read
+as no-data on every real application — rated 0 and flagged, which is the correct
+behaviour but does cap everyone's achievable score at 80.
+
 ### 1.5 🟡 `middleware.ts` is deprecated in Next 16
 
 Next 16 renamed the convention to `proxy`. The build warns but still routes it
@@ -125,10 +147,10 @@ complete**; what remains of P3 is the admin UI to capture into it.
 
 | Phase | Scope | Severity |
 |---|---|---|
-| P3 | Schema, scoring integration and the **workspace at `/loan/applications/{id}`** are done: computed requirement checklist, evidence capture with provenance, the 11-item field verification with the contradictory-verdict rule, development-plan assignment. **Outstanding:** repeating-row editors for assets and existing debt (readable now, not yet editable in the UI), document upload/verify workflow, the address and extended-KYC sections, visit scheduling, and offline tablet drafts | 🟡 |
-| P4 | ~~The 100-point scorecard engine~~ **done**, and the farmer-facing `loanResult`, `developmentPlan` and `assessmentHistory` screens with it. Outstanding: the champion/challenger comparison view — the `is_shadow` flag and a `shadow` model status exist, nothing renders the comparison yet | 🔵 |
-| P5 | mPowerU behind `lib/mpoweru/adapter.ts` with a stub driver, session orchestration, webhook + polling, band→rating normalisation, mobile assessment screen | 🟠 |
-| P6 | Development plans, reassessment, review-request queue, lender packs (PDF/CSV with Bangla fonts), lender submissions, disbursement, repayment tracking, home ticker, repayment notifications, admin collections with aging buckets | 🟠 |
+| P3 | **Done**: workspace at `/loan/applications/{id}`, computed requirement checklist, evidence capture with provenance, the 11-item field verification with the contradictory-verdict rule, repeating-row editors for assets/debt/documents/visits, development-plan assignment. **Outstanding:** the address and extended-KYC capture sections (captured today through the existing KYC surfaces), real file upload wired to the S3 presign route (the row editor currently records a key), and offline tablet drafts | 🔵 |
+| P4 | **Done**: engine, configuration screens, and the farmer-facing `loanResult`, `developmentPlan` and `assessmentHistory`. **Outstanding:** the champion/challenger comparison view — `is_shadow` and a `shadow` model status exist, nothing renders the comparison | 🔵 |
+| P5 | **Adapter done, provider not connected.** `lib/mpoweru/adapter.ts` with a stub driver, session orchestration, idempotency, webhook + polling, pseudonymous respondent ids, factor-level role restriction and normalisation. **Blocked on EcoDev supplying a sandbox** — see 1.6. Mobile `mpowerUAssessment` screen not built, since there is nothing for a farmer to open yet | 🟠 |
+| P6 | **Done**: disbursement with snapshotted terms, schedule generation, oldest-first repayment allocation, arrears recomputation, collections with aging buckets and portfolio-at-risk, and the farmer's `loanAccount` screen. **Outstanding:** lender packs (PDF/CSV with Bangla fonts), lender submissions, and repayment notifications | 🟠 |
 
 Mobile screens specified but not yet added: `mpowerUAssessment` (P5),
 `loanAccount` (P6), `loanConsentManage`, `loanReviewRequest`.

@@ -116,6 +116,19 @@ import {
   saveLoanEvidence,
   saveFieldVerification,
   assignDevelopmentTasks,
+  saveWorkspaceRow,
+  isRowCollection,
+  disburseLoan,
+  recordRepayment,
+  refreshAllArrears,
+  getCollections,
+  getLoanAccount,
+  mayDisburse,
+  COLLECT_ROLES,
+  startMpowerUSession,
+  syncMpowerUSession,
+  pollPendingMpowerUSessions,
+  getMpowerUStatus,
   previewUserRecords,
   clearUserRecords
 } from "@/lib/app-endpoints";
@@ -183,6 +196,7 @@ const appReadHandlers: Record<string, AppReadHandler> = {
   "app/finance/assessment": (q) => getFarmerAssessment(q.get("user_id")!),
   "app/finance/assessment/history": (q) => getAssessmentHistory(q.get("user_id")!),
   "app/finance/development-plan": (q) => getDevelopmentPlan(q.get("user_id")!),
+  "app/finance/loan-account": (q) => getLoanAccount(q.get("user_id")!),
 
   // Admin finance aggregates. Staff-only via ADMIN_ONLY in lib/api-access.ts.
   "admin/loan/dashboard": () => getCreditDashboard(),
@@ -191,6 +205,10 @@ const appReadHandlers: Record<string, AppReadHandler> = {
   "admin/loan/scorecard/integrity": () => getScorecardIntegrity(),
   "admin/loan/assessment": (q) => getAssessment(q.get("application_id") ?? ""),
   "admin/loan/workspace": (q) => getLoanWorkspace(q.get("application_id") ?? ""),
+  "admin/loan/collections": (q) => getCollections(q),
+  // Role decides whether factor-level output is included at all (ADM-LON-24), so
+  // it is threaded through the query rather than read from the handler.
+  "admin/loan/mpoweru": (q) => getMpowerUStatus(q.get("application_id") ?? "", q.get("__role") ?? ""),
   "admin/users/clear-records/preview": (q) => previewUserRecords(q.get("identifier") ?? "")
 };
 
@@ -390,6 +408,10 @@ export async function GET(request: NextRequest, { params }: Params) {
 
   if (!id && appReadHandlers[resource] && !adminSurface) {
     try {
+      // A handler that filters its response by admin role reads it from here.
+      // Set rather than merged from the client: `__role` arriving in the query
+      // string must never be able to widen what a caller is shown.
+      searchParams.set("__role", caller.kind === "admin" ? caller.admin.role : "");
       const data = await appReadHandlers[resource](searchParams);
       return envelope(data ?? [], { source: "mysql", surface: "app", resource });
     } catch (error) {
@@ -503,9 +525,69 @@ export async function POST(request: NextRequest, { params }: Params) {
       return NextResponse.json({ ok: true, source: "mysql", action: "records_cleared", result }, { status: 200 });
     }
 
+    // ---- mPowerU (P5) — stub driver until EcoDev supply a sandbox -----------
+    if (exact === "admin/loan/mpoweru/start" || exact === "admin/loan/mpoweru/sync" || exact === "admin/loan/mpoweru/poll") {
+      const MPOWERU_ROLES = ["super_admin", "hq_admin", "credit_analyst", "credit_approver", "field_officer"];
+      if (caller.kind !== "admin" || !MPOWERU_ROLES.includes(caller.admin.role)) {
+        return forbidden("Behavioural assessments are restricted to staff.");
+      }
+      const ctx = {
+        adminId: caller.admin.id, ip: clientIp(request), userAgent: request.headers.get("user-agent"),
+      };
+      const body = payload as Record<string, unknown>;
+      const result =
+        exact === "admin/loan/mpoweru/start" ? await startMpowerUSession(body, ctx)
+        : exact === "admin/loan/mpoweru/sync" ? await syncMpowerUSession(String(body.provider_session_id ?? ""), ctx)
+        : await pollPendingMpowerUSessions(ctx);
+      return NextResponse.json({ ok: true, source: "mpoweru", action: "mpoweru", result }, { status: 200 });
+    }
+
+    // ---- Disbursement, repayment, collections (P6) --------------------------
+    // Disbursement is the moment money leaves, so it is the narrowest permission
+    // in the finance surface: approver and above, never the analyst who scored
+    // the file and never the officer who collected the evidence.
+    if (exact === "admin/loan/disburse") {
+      if (caller.kind !== "admin" || !mayDisburse(caller.admin.role)) {
+        return forbidden("Disbursing a loan is restricted to credit approvers.");
+      }
+      const result = await disburseLoan(payload as Record<string, unknown>, {
+        adminId: caller.admin.id, ip: clientIp(request), userAgent: request.headers.get("user-agent"),
+      });
+      return NextResponse.json({ ok: true, source: "mysql", action: "disbursed", result }, { status: 201 });
+    }
+
+    if (exact === "admin/loan/repayment" || exact === "admin/loan/arrears/refresh") {
+      if (caller.kind !== "admin" || !COLLECT_ROLES.includes(caller.admin.role)) {
+        return forbidden("Recording repayments is restricted to credit and field staff.");
+      }
+      const ctx = {
+        adminId: caller.admin.id, ip: clientIp(request), userAgent: request.headers.get("user-agent"),
+      };
+      const result = exact === "admin/loan/repayment"
+        ? await recordRepayment(payload as Record<string, unknown>, ctx)
+        : await refreshAllArrears(ctx);
+      return NextResponse.json({ ok: true, source: "mysql", action: "recorded", result }, { status: 200 });
+    }
+
     // ---- Loan workspace capture (P3) ----------------------------------------
     // Field officers own data capture (§18.3), so the write roles are wider than
     // scoring — but never wider than staff.
+    // Repeating rows: assets, existing debt, documents, field visits.
+    if (exact.startsWith("admin/loan/rows/")) {
+      const CAPTURE_ROLES = ["super_admin", "hq_admin", "credit_analyst", "credit_approver", "field_officer"];
+      if (caller.kind !== "admin" || !CAPTURE_ROLES.includes(caller.admin.role)) {
+        return forbidden("Capturing loan evidence is restricted to staff.");
+      }
+      const collection = exact.slice("admin/loan/rows/".length);
+      if (!isRowCollection(collection)) {
+        return dbError(new Error(`Unknown workspace collection "${collection}".`));
+      }
+      const result = await saveWorkspaceRow(collection, payload as Record<string, unknown>, {
+        adminId: caller.admin.id, ip: clientIp(request), userAgent: request.headers.get("user-agent"),
+      });
+      return NextResponse.json({ ok: true, source: "mysql", action: "saved", result }, { status: 200 });
+    }
+
     if (exact === "admin/loan/evidence" || exact === "admin/loan/verification" || exact === "admin/loan/development-plan") {
       const CAPTURE_ROLES = ["super_admin", "hq_admin", "credit_analyst", "credit_approver", "field_officer"];
       if (caller.kind !== "admin" || !CAPTURE_ROLES.includes(caller.admin.role)) {

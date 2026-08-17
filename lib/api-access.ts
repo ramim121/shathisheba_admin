@@ -65,6 +65,15 @@ export const ADMIN_ONLY = new Set<string>([
   "admin/loan/evidence",
   "admin/loan/verification",
   "admin/loan/development-plan",
+  "admin/loan/rows",
+  "admin/loan/collections",
+  "admin/loan/mpoweru",
+  "admin/loan/mpoweru/start",
+  "admin/loan/mpoweru/sync",
+  "admin/loan/mpoweru/poll",
+  "admin/loan/disburse",
+  "admin/loan/repayment",
+  "admin/loan/arrears/refresh",
   "loan/scorecard-models",
   "loan/scorecard-criteria",
   "loan/scorecard-rules",
@@ -119,6 +128,10 @@ export function policyKey(resource: string): string {
   if (financeApp) {
     return financeApp[1] ? `app/finance/applications/${financeApp[1]}` : "app/finance/applications";
   }
+  // The workspace's repeating-row editors share one policy: admin/loan/rows/*
+  // is judged as "admin/loan/rows" rather than each collection needing an entry,
+  // so adding a collection cannot accidentally arrive unlisted and default-open.
+  if (/^admin\/loan\/rows\/[a-z-]+$/.test(resource)) return "admin/loan/rows";
   return resource;
 }
 

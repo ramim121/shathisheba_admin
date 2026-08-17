@@ -346,6 +346,20 @@ export const apiCatalog = [
   { method: "POST", path: "/api/v1/admin/loan/evidence", desc: "Upsert a batch of evidence fields { application_id, fields[] }. Each field carries source type and verification status; the save is audited with the previous values. Field officers and above" },
   { method: "POST", path: "/api/v1/admin/loan/verification", desc: "Record field-verification verdicts { application_id, items[] }. A 'contradictory' verdict on any item raises mandatory manual review on the application; resolving it clears the flag" },
   { method: "POST", path: "/api/v1/admin/loan/development-plan", desc: "Assign development tasks from templates { application_id, template_codes[] }, with due dates from each template" },
+  { method: "POST", path: "/api/v1/admin/loan/rows/assets", desc: "Add, edit or delete a productive asset row { application_id, id?, delete?, ... }. Same handler serves rows/debts, rows/documents and rows/visits; enums are validated and every row is scoped to its application" },
+
+  // --- Finance / disbursement, repayment, collections (P6) ---
+  { method: "POST", path: "/api/v1/admin/loan/disburse", desc: "Disburse an approved application { application_id, amount?, disbursed_at? }. Snapshots the terms, generates the full schedule and asserts it reconciles to the total payable. Credit approvers only; refuses a second disbursement" },
+  { method: "POST", path: "/api/v1/admin/loan/repayment", desc: "Record a repayment { loan_account_id, amount, method?, reference? }. Allocated oldest instalment first, never over the outstanding balance; closes the loan when the balance reaches zero" },
+  { method: "POST", path: "/api/v1/admin/loan/arrears/refresh", desc: "Recompute days-past-due across every active loan. Days late is a function of the calendar, so it goes stale without anyone touching the data — this is what a nightly job calls" },
+  { method: "GET", path: "/api/v1/admin/loan/collections?district=Mymensingh", desc: "Aging buckets, portfolio at risk, and the accounts in arrears. Every figure queried" },
+  { method: "GET", path: "/api/v1/app/finance/loan-account?user_id=1", desc: "The farmer's loan: outstanding, next instalment, progress, the full schedule and payment history. Read-only — there is no in-app payment in v1" },
+
+  // --- Finance / mPowerU behavioural assessment (P5, stub driver) ---
+  { method: "POST", path: "/api/v1/admin/loan/mpoweru/start", desc: "Create a behavioural assessment session { application_id }. Idempotent — a repeat returns the live session rather than sitting the farmer a second assessment. The provider receives a salted pseudonymous respondent id, never the user id" },
+  { method: "POST", path: "/api/v1/admin/loan/mpoweru/sync", desc: "Fetch and apply a session result { provider_session_id }. Writes only the normalised 0–100 band into loan_evidence; a failure writes nothing, so the criterion reads as no-data rather than a bad score" },
+  { method: "POST", path: "/api/v1/admin/loan/mpoweru/poll", desc: "Poll every pending session — the fallback for a lost webhook" },
+  { method: "GET", path: "/api/v1/admin/loan/mpoweru?application_id=1", desc: "Session history and results. Factor-level output is included only for credit analysts and above; a field officer's payload omits the field entirely" },
 
   // --- Admin maintenance ---
   { method: "GET", path: "/api/v1/admin/users/clear-records/preview?identifier=01966662633", desc: "Per-table count of what Clear Records would delete for an account, before anything is touched" },

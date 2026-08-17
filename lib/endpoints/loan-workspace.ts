@@ -15,9 +15,14 @@
 //     changed the income figure after the field visit" is the first question
 //     anyone asks when an assessment looks wrong.
 
-import { queryRows, withTransaction, type Tx } from "@/lib/db";
+import { executeQuery, queryRows, withTransaction, type Tx } from "@/lib/db";
 import { recordAudit } from "@/lib/audit";
 import type { Row } from "./shared";
+
+// Table names in these statements come from ROW_SPECS below, never from a
+// request. Column names are filtered against the same allow-list. Values are
+// always bound — nothing user-supplied is ever concatenated into SQL.
+const executeScoped = executeQuery;
 
 // The evidence keys the scorecard actually reads. Anything not on this list is
 // still storable — the workspace captures more than the model uses — but these
@@ -363,6 +368,167 @@ export async function saveFieldVerification(payload: Record<string, unknown>, ct
   });
 
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// Repeating collections (§18.3.7, §18.3.9, §18.3.5, §18.4)
+//
+// These are rows rather than fields, so they get their own tables and their own
+// editors. One generic handler rather than four near-identical ones: the shape
+// differs, the rules — belongs to this application, validated enum, audited,
+// delete is by id and scoped — do not.
+// ---------------------------------------------------------------------------
+
+type RowSpec = {
+  table: string;
+  /** Columns an officer may write. Anything else in the payload is ignored. */
+  fields: string[];
+  /** Enum columns and their permitted values, checked before the write. */
+  enums?: Record<string, string[]>;
+  required?: string[];
+  numeric?: string[];
+};
+
+const ROW_SPECS: Record<string, RowSpec> = {
+  assets: {
+    table: "loan_assets",
+    fields: ["asset_type", "description", "quantity", "unit", "estimated_value",
+             "ownership_status", "verification_status", "evidence_url", "photo_url",
+             "gps_lat", "gps_lng", "note"],
+    enums: {
+      asset_type: ["land", "cattle", "shed", "machinery", "equipment", "inventory", "premises", "other"],
+      ownership_status: ["owned", "leased", "shared", "mortgaged", "disputed", "unknown"],
+      verification_status: [...VERIFICATION_STATUSES],
+    },
+    required: ["asset_type"],
+    numeric: ["quantity", "estimated_value", "gps_lat", "gps_lng"],
+  },
+  debts: {
+    table: "loan_existing_debts",
+    fields: ["lender_name", "lender_type", "loan_type", "original_amount", "outstanding_amount",
+             "installment_amount", "installment_freq", "remaining_tenure_months", "payment_status",
+             "late_payments_12m", "was_rescheduled", "had_default", "verification_status", "note"],
+    enums: {
+      lender_type: ["bank", "mfi", "cooperative", "supplier", "informal", "family", "other"],
+      installment_freq: ["weekly", "biweekly", "monthly", "quarterly", "seasonal", "one_time"],
+      payment_status: ["current", "1_30_late", "31_60_late", "61_90_late", "over_90_late", "rescheduled", "defaulted"],
+      verification_status: [...VERIFICATION_STATUSES],
+    },
+    required: ["lender_name"],
+    numeric: ["original_amount", "outstanding_amount", "installment_amount", "remaining_tenure_months", "late_payments_12m"],
+  },
+  documents: {
+    table: "loan_documents",
+    fields: ["doc_type", "file_key", "status", "rejection_reason", "expires_on", "is_required"],
+    enums: { status: ["uploaded", "verified", "rejected", "expired", "re_requested"] },
+    required: ["doc_type", "file_key"],
+  },
+  visits: {
+    table: "loan_field_visits",
+    fields: ["officer_id", "proposed_at", "status", "confirmed_at", "completed_at", "gps_lat", "gps_lng", "note"],
+    enums: { status: ["proposed", "confirmed", "declined", "completed", "cancelled"] },
+    required: ["proposed_at"],
+    numeric: ["gps_lat", "gps_lng"],
+  },
+};
+
+export function isRowCollection(name: string) {
+  return Object.hasOwn(ROW_SPECS, name);
+}
+
+export async function saveWorkspaceRow(
+  collection: string,
+  payload: Record<string, unknown>,
+  ctx: SaveContext
+) {
+  const spec = ROW_SPECS[collection];
+  if (!spec) throw new Error(`Unknown collection "${collection}".`);
+
+  const applicationId = Number(payload.application_id);
+  if (!Number.isFinite(applicationId)) throw new Error("A numeric application_id is required.");
+
+  const rowId = payload.id == null || payload.id === "" ? null : Number(payload.id);
+  if (rowId != null && !Number.isFinite(rowId)) throw new Error("id must be numeric.");
+
+  // Deletes are scoped by application as well as id, so a guessed id from another
+  // applicant's file cannot be removed through this endpoint.
+  if (payload.delete === true) {
+    if (rowId == null) throw new Error("An id is required to delete.");
+    const before = await queryRows<Row>(
+      `SELECT * FROM ${spec.table} WHERE id = ? AND application_id = ?`,
+      [rowId, applicationId]
+    );
+    if (before.length === 0) throw new Error("That row does not belong to this application.");
+    await executeScoped(`DELETE FROM ${spec.table} WHERE id = ? AND application_id = ?`, [rowId, applicationId]);
+    await recordAudit({
+      actorAdminId: ctx.adminId, action: `loan.${collection}.delete`,
+      entityType: spec.table, entityId: rowId, before: before[0],
+      ip: ctx.ip, userAgent: ctx.userAgent,
+    });
+    return { collection, deleted: rowId };
+  }
+
+  const data: Record<string, unknown> = {};
+  for (const field of spec.fields) {
+    if (!(field in payload)) continue;
+    let value = payload[field];
+    if (value === "") value = null;
+
+    if (value != null && spec.enums?.[field] && !spec.enums[field].includes(String(value))) {
+      throw new Error(`"${value}" is not a valid ${field.replace(/_/g, " ")}.`);
+    }
+    if (value != null && spec.numeric?.includes(field)) {
+      const n = Number(value);
+      if (!Number.isFinite(n)) throw new Error(`${field.replace(/_/g, " ")} must be a number.`);
+      value = n;
+    }
+    data[field] = value;
+  }
+
+  for (const field of spec.required ?? []) {
+    if (rowId == null && (data[field] == null || data[field] === "")) {
+      throw new Error(`${field.replace(/_/g, " ")} is required.`);
+    }
+  }
+  if (Object.keys(data).length === 0) throw new Error("Nothing to save.");
+
+  let savedId = rowId;
+  let before: Row | null = null;
+
+  if (rowId == null) {
+    const columns = ["application_id", ...Object.keys(data)];
+    const result = await executeScoped(
+      `INSERT INTO ${spec.table} (${columns.map((c) => `\`${c}\``).join(", ")})
+       VALUES (${columns.map(() => "?").join(", ")})`,
+      [applicationId, ...Object.values(data)]
+    );
+    savedId = Number(result.insertId);
+  } else {
+    const existing = await queryRows<Row>(
+      `SELECT * FROM ${spec.table} WHERE id = ? AND application_id = ?`,
+      [rowId, applicationId]
+    );
+    if (existing.length === 0) throw new Error("That row does not belong to this application.");
+    before = existing[0];
+    await executeScoped(
+      `UPDATE ${spec.table} SET ${Object.keys(data).map((c) => `\`${c}\` = ?`).join(", ")}
+       WHERE id = ? AND application_id = ?`,
+      [...Object.values(data), rowId, applicationId]
+    );
+  }
+
+  await recordAudit({
+    actorAdminId: ctx.adminId,
+    action: `loan.${collection}.save`,
+    entityType: spec.table,
+    entityId: savedId,
+    before,
+    after: data,
+    ip: ctx.ip,
+    userAgent: ctx.userAgent,
+  });
+
+  return { collection, id: savedId };
 }
 
 /** Assign development-plan tasks from templates or ad hoc (§18.3.15). */

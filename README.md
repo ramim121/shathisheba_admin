@@ -132,6 +132,14 @@ BULKSMSBD_API_KEY=your_api_key
 BULKSMSBD_SENDER_ID=your_sender_id
 OTP_BRAND=Shathi Sheba
 
+# mPowerU behavioural assessment (P5). No sandbox from EcoDev yet, so the only
+# driver is a stub that INVENTS scores. It is refused in production unless the
+# override below is set deliberately.
+MPOWERU_DRIVER=stub
+MPOWERU_RESPONDENT_SALT=generate_32_random_bytes
+MPOWERU_WEBHOOK_SECRET=generate_32_random_bytes
+# MPOWERU_ALLOW_STUB_IN_PRODUCTION=true
+
 # OTP behaviour
 # true  -> no SMS is sent and the code is returned in the response (use for testing)
 # false -> real SMS is delivered and costs credits

@@ -26,6 +26,8 @@ export { getScorecardIntegrity } from "./finance/scorecard-guard";
 export * from "./endpoints/credit-assessment";
 export * from "./endpoints/finance-result";
 export * from "./endpoints/loan-workspace";
+export * from "./endpoints/loan-servicing";
+export * from "./endpoints/mpoweru";
 export * from "./endpoints/admin-maintenance";
 
 import { getUserRoles, safeJson, type Row } from "./endpoints/shared";

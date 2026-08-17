@@ -491,6 +491,21 @@ loan intake screen.
 | POST | `admin/loan/evidence` |
 | POST | `admin/loan/verification` |
 | POST | `admin/loan/development-plan` |
+| POST | `admin/loan/rows/{assets\|debts\|documents\|visits}` |
+| POST | `admin/loan/disburse` |
+| POST | `admin/loan/repayment` |
+| POST | `admin/loan/arrears/refresh` |
+| GET | `admin/loan/collections?district=` |
+| GET | `admin/loan/lenders/pack?application_id=&format=csv` |
+| GET | `admin/loan/lenders/pipeline?lender_id=` |
+| POST | `admin/loan/lenders/submit` |
+| POST | `admin/loan/lenders/decision` |
+| POST | `admin/loan/scorecard/shadow-run` |
+| GET | `admin/loan/notifications?status=` |
+| POST | `admin/loan/notifications/queue` |
+| POST | `admin/loan/notifications/dispatch` |
+| GET | `admin/loan/mpoweru?application_id=` |
+| POST | `admin/loan/mpoweru/{start\|sync\|poll}` |
 
 ### The workspace (P3)
 

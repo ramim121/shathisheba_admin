@@ -355,6 +355,18 @@ export const apiCatalog = [
   { method: "GET", path: "/api/v1/admin/loan/collections?district=Mymensingh", desc: "Aging buckets, portfolio at risk, and the accounts in arrears. Every figure queried" },
   { method: "GET", path: "/api/v1/app/finance/loan-account?user_id=1", desc: "The farmer's loan: outstanding, next instalment, progress, the full schedule and payment history. Read-only — there is no in-app payment in v1" },
 
+  // --- Finance / lender packs and submissions ---
+  { method: "GET", path: "/api/v1/admin/loan/lenders/pack?application_id=1&lender_id=1", desc: "The lender decision-support pack: identity (NID masked), request, financial summary, existing debt, assets, score with per-criterion detail, risk factors, safeguards, field verification, documentation, behavioural band and repayment. Add format=csv for a UTF-8 CSV with a BOM. Every view and export is logged" },
+  { method: "GET", path: "/api/v1/admin/loan/lenders/pipeline?lender_id=1", desc: "Submissions and their status counts. Scoped to one lender when lender_id is given" },
+  { method: "POST", path: "/api/v1/admin/loan/lenders/submit", desc: "Share an application with a lender { application_id, lender_id, amount? }. Refused unless share_with_lender consent is granted right now, the application is assessed and not hard-stopped, and the lender's own grade/confidence/amount rules are met" },
+  { method: "POST", path: "/api/v1/admin/loan/lenders/decision", desc: "Record a lender's response { submission_id, status, approved_amount?, decline_reason_code?, conditions? }. Transitions are validated; approved and declined are terminal, and a decline needs a structured reason code" },
+  { method: "POST", path: "/api/v1/admin/loan/scorecard/shadow-run", desc: "Champion/challenger { limit? }: score recent applications with the shadow model and compare grade distributions. Shadow assessments never affect a live decision" },
+
+  // --- Finance / notifications ---
+  { method: "POST", path: "/api/v1/admin/loan/notifications/queue", desc: "Build today's repayment reminders — three days out, due today, and overdue. Lateness is computed from the due date rather than the cached days-past-due column, and reminders are deduplicated per instalment" },
+  { method: "POST", path: "/api/v1/admin/loan/notifications/dispatch", desc: "Send what is queued via SMS. A failure records the reason and increments attempts rather than throwing, so one unreachable number cannot stop the batch" },
+  { method: "GET", path: "/api/v1/admin/loan/notifications?status=queued", desc: "The notification queue with per-status counts" },
+
   // --- Finance / mPowerU behavioural assessment (P5, stub driver) ---
   { method: "POST", path: "/api/v1/admin/loan/mpoweru/start", desc: "Create a behavioural assessment session { application_id }. Idempotent — a repeat returns the live session rather than sitting the farmer a second assessment. The provider receives a salted pseudonymous respondent id, never the user id" },
   { method: "POST", path: "/api/v1/admin/loan/mpoweru/sync", desc: "Fetch and apply a session result { provider_session_id }. Writes only the normalised 0–100 band into loan_evidence; a failure writes nothing, so the criterion reads as no-data rather than a bad score" },

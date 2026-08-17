@@ -101,6 +101,7 @@ import {
   getLoanApplicationDetail,
   withdrawLoanApplication,
   getLoanConsents,
+  getLoanPurposes,
   getCreditDashboard,
   getLoanQueue
 } from "@/lib/app-endpoints";
@@ -162,6 +163,7 @@ const appReadHandlers: Record<string, AppReadHandler> = {
   "app/finance/loan-products": () => getLoanProducts(),
   "app/finance/applications": (q) => getLoanApplications(q.get("user_id")!),
   "app/finance/consents": (q) => getLoanConsents(q.get("user_id")!),
+  "app/finance/purposes": () => getLoanPurposes(),
 
   // Admin finance aggregates. Staff-only via ADMIN_ONLY in lib/api-access.ts.
   "admin/loan/dashboard": () => getCreditDashboard(),

@@ -724,6 +724,16 @@ export async function getFinanceSummary(userId: string | number) {
   };
 }
 
+// The purpose picker in the apply flow. The admin-side `loan/purposes` resource
+// is staff-only, so the app reads this app-shaped view instead of being granted
+// access to a back-office surface.
+export async function getLoanPurposes() {
+  return queryRows<Row>(
+    `SELECT code, label_bn, label_en, icon
+       FROM loan_purposes WHERE is_active = 1 ORDER BY sort_order, id`
+  );
+}
+
 export async function getLoanConsents(userId: string | number) {
   return queryRows<Row>(
     `SELECT t.consent_key, t.title_bn, t.title_en, t.description_bn, t.description_en,

@@ -120,6 +120,7 @@ export async function getSalePriceQuote(params: {
   sale_item_id?: string | null;
   district?: string | null;
   weight?: string | null;
+  meat_weight?: string | null;
 }) {
   const animalId = params.animal_id ?? null;
   const breedId = params.breed_id ?? null;
@@ -130,8 +131,8 @@ export async function getSalePriceQuote(params: {
       SELECT CAST(r.id AS CHAR) AS id, CAST(r.sale_item_id AS CHAR) AS sale_item_id,
              CAST(r.animal_id AS CHAR) AS animal_id, CAST(r.breed_id AS CHAR) AS breed_id,
              r.district, r.division, r.unit,
-             r.b2b_market_rate, r.farmer_rate,
-             r.platform_fee, r.logistics_fee, r.warehouse_vet_fee,
+             r.b2b_market_rate, r.b2b_meat_rate, r.dressing_pct, r.farmer_rate,
+             r.platform_fee, r.platform_fee_pct, r.logistics_fee, r.warehouse_vet_fee,
              (
                (r.animal_id IS NOT NULL AND r.animal_id = ?) * 8 +
                (r.breed_id IS NOT NULL AND r.breed_id = ?) * 4 +
@@ -140,36 +141,81 @@ export async function getSalePriceQuote(params: {
       FROM sale_pricing_rules r
       WHERE r.is_active = 1
         AND (? IS NULL OR r.sale_item_id = ?)
+        -- Without this the app, which sends an animal but no sale item, could
+        -- be priced off a crop rule: district alone outscored the national
+        -- cattle rule and a 200 kg bull came back at the tomato rate. An
+        -- animal pins the quote to that animal's sale category.
+        AND (
+          ? IS NULL
+          OR r.sale_item_id IN (
+            SELECT si.id FROM sale_items si
+            JOIN animals a ON a.sale_category_id = si.sale_category_id
+            WHERE a.id = ?
+          )
+        )
         AND (r.animal_id IS NULL OR r.animal_id = ?)
         AND (r.breed_id IS NULL OR r.breed_id = ?)
         AND (r.district IS NULL OR r.district = ?)
       ORDER BY match_score DESC, r.effective_from DESC, r.id DESC
       LIMIT 1
     `,
-    [animalId, breedId, district, saleItemId, saleItemId, animalId, breedId, district]
+    [animalId, breedId, district, saleItemId, saleItemId, animalId, animalId, animalId, breedId, district]
   );
   const rule = rows[0] ?? null;
   if (!rule) return { rule: null, breakdown: null };
-  const b2b = Number(rule.b2b_market_rate ?? 0);
-  const platform = Number(rule.platform_fee ?? 0);
+
+  // Everything on this quote is per kilo of LIVE weight. Traders buy live, so
+  // that is the basis the whole breakdown reconciles against; the meat figures
+  // are the same money re-expressed for farmers and beparis, who deal in meat.
+  const b2bLive = Number(rule.b2b_market_rate ?? 0);
+  const dressing = Number(rule.dressing_pct ?? 50) || 50;
+  const b2bMeat = Number(rule.b2b_meat_rate ?? 0) || (dressing > 0 ? (b2bLive * 100) / dressing : 0);
+
+  // A percentage beats the flat per-kg figure when one is configured: the
+  // platform's cut scales with the animal's value, a fixed ৳/kg does not.
+  const pct = rule.platform_fee_pct === null || rule.platform_fee_pct === undefined
+    ? null
+    : Number(rule.platform_fee_pct);
+  const platform = pct !== null && Number.isFinite(pct)
+    ? (b2bLive * pct) / 100
+    : Number(rule.platform_fee ?? 0);
+
   const logistics = Number(rule.logistics_fee ?? 0);
   const vet = Number(rule.warehouse_vet_fee ?? 0);
   const deductions = platform + logistics + vet;
-  const netFarmerRate = Number(rule.farmer_rate ?? b2b - deductions);
-  const weight = Number(params.weight ?? 0) || 0;
+  // farmer_rate is only trusted when the rule predates the percentage fee. Once
+  // a percentage is set the rate is derived, so a stale stored figure cannot
+  // drift away from the arithmetic the farmer can see on the screen.
+  const netFarmerRate = pct !== null && Number.isFinite(pct)
+    ? b2bLive - deductions
+    : Number(rule.farmer_rate ?? b2bLive - deductions);
+
+  // Either weight identifies the animal; whichever the caller sends, the other
+  // is derived so both sides of the trade see their own unit.
+  const liveIn = Number(params.weight ?? 0) || 0;
+  const meatIn = Number(params.meat_weight ?? 0) || 0;
+  const liveWeight = liveIn > 0 ? liveIn : meatIn > 0 ? (meatIn * 100) / dressing : 0;
+  const meatWeight = meatIn > 0 ? meatIn : (liveWeight * dressing) / 100;
+
   return {
     rule,
     breakdown: {
       unit: rule.unit ?? "kg",
       district: rule.district ?? null,
-      b2b_market_rate: b2b,
+      basis: "live_weight",
+      dressing_pct: dressing,
+      b2b_market_rate: b2bLive,
+      b2b_meat_rate: b2bMeat,
       platform_fee: platform,
+      platform_fee_pct: pct,
       logistics_fee: logistics,
       warehouse_vet_fee: vet,
       total_deductions: deductions,
       net_farmer_rate: netFarmerRate,
-      weight_kg: weight,
-      estimated_earning: weight > 0 ? weight * netFarmerRate : null
+      net_farmer_meat_rate: dressing > 0 ? (netFarmerRate * 100) / dressing : 0,
+      weight_kg: liveWeight,
+      meat_weight_kg: meatWeight,
+      estimated_earning: liveWeight > 0 ? liveWeight * netFarmerRate : null
     }
   };
 }

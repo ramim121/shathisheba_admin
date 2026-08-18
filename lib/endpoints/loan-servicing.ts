@@ -41,7 +41,7 @@ const taka = (p: number) => Math.round(p) / 100;
  * A due date that displays a day early is a farmer told the wrong deadline, so
  * every date leaving this file goes through here and keeps its calendar day.
  */
-function isoDay(value: unknown): string | null {
+export function isoDay(value: unknown): string | null {
   if (value == null) return null;
   const d = value instanceof Date ? value : new Date(String(value));
   if (Number.isNaN(d.getTime())) return null;
@@ -564,7 +564,8 @@ export async function getLoanAccount(userId: string) {
   if (!account) return { has_account: false, account: null, schedule: [], payments: [] };
 
   const schedule = await queryRows<Row>(
-    `SELECT installment_no, due_date, amount_due, amount_paid, status, days_overdue
+    `SELECT installment_no, due_date, amount_due, amount_paid, status, days_overdue,
+            penalty_accrued
      FROM loan_repayment_schedule WHERE loan_account_id = ? ORDER BY installment_no`,
     [account.id]
   );
@@ -578,8 +579,40 @@ export async function getLoanAccount(userId: string) {
 
   const paidCount = schedule.filter((s) => s.status === "paid").length;
 
+  // Everything an overdue borrower needs on one object, rather than left for
+  // the app to derive from thirty schedule rows: how many instalments are
+  // behind, how much penalty has accrued, and which arrears bucket the account
+  // has fallen into — the bucket is what decides who contacts them next.
+  const overdueRows = schedule.filter((s) => s.status === "overdue" || (s.status === "partial" && Number(s.days_overdue) > 0));
+  const penaltyAccrued = schedule.reduce((sum, s) => sum + Number(s.penalty_accrued ?? 0), 0);
+  const dpd = Number(account.days_past_due ?? 0);
+  const bucket = dpd <= 0 ? "current" : dpd <= 30 ? "1_30" : dpd <= 60 ? "31_60" : dpd <= 90 ? "61_90" : "90_plus";
+
+  // Who the farmer should actually talk to. Their own district's field officer,
+  // not a national hotline nobody answers.
+  const officers = await queryRows<Row>(
+    `SELECT o.name, o.phone, o.upazila, o.district
+       FROM zone_officers o
+       JOIN app_users u ON u.id = ?
+      WHERE o.is_active = 1 AND o.officer_role = 'field_officer' AND o.district = u.district
+      ORDER BY o.id LIMIT 1`,
+    [userId]
+  );
+
   return {
     has_account: true,
+    arrears: {
+      is_overdue: dpd > 0,
+      days_past_due: dpd,
+      bucket,
+      overdue_amount: Number(account.overdue_amount ?? 0),
+      overdue_installments: overdueRows.length,
+      penalty_accrued: penaltyAccrued,
+      oldest_due_date: overdueRows.length ? isoDay(overdueRows[0].due_date) : null,
+      officer: officers[0]
+        ? { name: String(officers[0].name), phone: String(officers[0].phone ?? ""), area: String(officers[0].upazila ?? officers[0].district ?? "") }
+        : null
+    },
     account: {
       ...account,
       next_due_date: isoDay(account.next_due_date),

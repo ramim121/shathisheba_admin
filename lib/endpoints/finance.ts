@@ -76,6 +76,13 @@ export async function getReadinessQuestions() {
       question_en: r.question_en,
       helper_bn: r.helper_bn,
       helper_en: r.helper_en,
+      // Category and flag ARE shown — the questionnaire design puts them on the
+      // screen as tags ("Phase 1 · KYC", "Gate"), so withholding them would mean
+      // building a screen the spec asks for out of data it cannot see. The
+      // weight stays hidden: that is the part that would let a client work
+      // backwards to the model (MOB-RDY-11).
+      category: r.category,
+      flag: r.flag ?? null,
       // Branching is server-declared; the client evaluates only this rule.
       branch_parent_id: r.branch_parent_order == null
         ? null
@@ -227,6 +234,24 @@ function shapeReadinessResult(assessmentId: number, questionRows: Row[], result:
   const byId = new Map(questionRows.map((r) => [Number(r.id), r]));
   const answered = result.answers.filter((a) => a.presented);
 
+  // How many part-2 questions this farmer will actually be shown.
+  //
+  // Q11-13 are presented only when Q9 ("have you ever borrowed?") was answered
+  // Yes, so the real number is ten for someone who has borrowed and seven for
+  // someone who has not. The app used to promise ten either way, which reads as
+  // a bug in the app rather than as the branching doing its job. Computed here
+  // because only the server holds the answers.
+  const answerByOrder = new Map(
+    result.answers.map((a) => [Number(byId.get(a.question_id)?.sort_order ?? 0), a.answer])
+  );
+  const deepRows = questionRows.filter((r) => r.part === "deep");
+  const part2Pending = deepRows.filter((r) => {
+    if (r.branch_parent_order == null || !r.branch_show_when) return true;
+    const parent = answerByOrder.get(Number(r.branch_parent_order));
+    if (parent === undefined) return false;
+    return parent === (r.branch_show_when === "yes");
+  }).length;
+
   const strengths = answered
     .filter((a) => a.answer === true)
     .map((a) => {
@@ -245,6 +270,8 @@ function shapeReadinessResult(assessmentId: number, questionRows: Row[], result:
 
   return {
     assessment_id: String(assessmentId),
+    /** Part-2 questions still to be asked, after branching. */
+    part2_pending: part2Pending,
     score: result.score,
     grade: result.grade,
     grade_label: gradeLabel(result.grade),
@@ -496,6 +523,9 @@ export async function createLoanApplication(payload: Row) {
     throw new Error(`Consent required: ${t?.title_en ?? missing[0]}`);
   }
 
+  const needsCorrection = payload.needs_correction === true || payload.needs_correction === 1;
+  const correctionNote = String(payload.needs_correction_note ?? "").trim().slice(0, 400) || null;
+
   const { row: product } = await productTerms(payload.product_id as string);
   const quote = await createQuote({ ...payload, user_id: userId }, true);
 
@@ -509,12 +539,19 @@ export async function createLoanApplication(payload: Row) {
       `INSERT INTO loan_applications
         (application_code, user_id, loan_product_id, linked_project_id, requested_amount,
          purpose_code, purpose_text, tenure_months, repayment_mode, quote_id, status,
-         division, district, upazila, submitted_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?, 'submitted', ?,?,?, NOW())`,
+         division, district, upazila, submitted_at,
+         manual_review_required, manual_review_reason, needs_correction_note)
+       VALUES (?,?,?,?,?,?,?,?,?,?, 'submitted', ?,?,?, NOW(), ?,?,?)`,
       [code, userId, product.id, payload.linked_project_id ?? null, quote.principal,
        payload.purpose_code ?? "other", payload.purpose_text ?? null,
        quote.tenure_months, quote.repayment_mode, quote.quote_id,
-       user?.division ?? null, user?.district ?? null, user?.upazila ?? null]
+       user?.division ?? null, user?.district ?? null, user?.upazila ?? null,
+       // The farmer said something on file is wrong. Flagging it here is what
+       // gets it onto the officer's queue; a note with no flag would be read by
+       // nobody until the visit, which is exactly when it is too late.
+       needsCorrection ? 1 : 0,
+       needsCorrection ? "The applicant reported that a detail on their profile is wrong." : null,
+       needsCorrection ? correctionNote : null]
     );
     const id = ins.insertId;
 
@@ -534,7 +571,11 @@ export async function createLoanApplication(payload: Row) {
     await tx.execute(
       `INSERT INTO loan_application_events (application_id, from_status, to_status, actor_type, actor_id, note_bn, note_en)
        VALUES (?, NULL, 'submitted', 'user', ?, ?, ?)`,
-      [id, userId, "আবেদন জমা হয়েছে", "Application submitted"]
+      [id, userId,
+       needsCorrection ? "আবেদন জমা হয়েছে — কৃষক তথ্য সংশোধনের অনুরোধ করেছেন।" : "আবেদন জমা হয়েছে",
+       needsCorrection
+         ? `Application submitted — the applicant flagged a detail as wrong${correctionNote ? `: ${correctionNote}` : "."}`
+         : "Application submitted"]
     );
     if (quote.quote_id) {
       await tx.execute("UPDATE loan_quotes SET application_id = ? WHERE id = ?", [id, quote.quote_id]);
@@ -614,9 +655,23 @@ export async function getLoanApplicationDetail(userId: string | number, code: st
   )[0] ?? null;
 
   const currentStage = stageForStatus(String(app.status));
+
+  // A stage is dated from the event that moved the application into it, so the
+  // timeline shows when each step actually happened rather than just its order.
+  const completedAt = new Map<number, string>();
+  for (const e of events) {
+    const idx = stageForStatus(String(e.to_status ?? ""));
+    if (idx > 0 && !completedAt.has(idx)) completedAt.set(idx, String(e.created_at));
+  }
+
   return {
     ...app,
     quote,
+    // Surfaced flat as well as inside `quote` — the status header reads them
+    // directly and should not have to know the quote's shape.
+    emi_amount: quote?.emi_amount ?? null,
+    installment_count: quote?.installment_count ?? null,
+    total_payable: quote?.total_payable ?? null,
     stage_index: currentStage,
     stage_total: 8,
     stages: STAGE_MAP.map((s) => ({
@@ -626,6 +681,7 @@ export async function getLoanApplicationDetail(userId: string | number, code: st
       owner_bn: s.owner_bn,
       owner_en: s.owner_en,
       state: s.index < currentStage ? "complete" : s.index === currentStage ? "active" : "pending",
+      completed_at: s.index < currentStage ? completedAt.get(s.index) ?? null : null,
     })),
     events,
   };

@@ -7,6 +7,7 @@ import { AdminShell } from "@/components/AdminShell";
 import { Status } from "@/components/Status";
 import type { ManagementPageProps } from "@/components/ManagementPage";
 import { getListRoute } from "@/lib/resource-routes";
+import type { LookupOption } from "@/lib/admin-lookups";
 
 type Props = {
   config: ManagementPageProps;
@@ -22,9 +23,32 @@ type DetailResponse = {
   };
 };
 
+// Options arrive already sorted by group; emit <optgroup> so a long list (every
+// district, every breed) stays scannable.
+function renderLookupOptions(options: LookupOption[]) {
+  const grouped = options.some((option) => option.group);
+  if (!grouped) {
+    return options.map((option) => <option key={option.id} value={option.id}>{option.label}</option>);
+  }
+  const groups: Array<{ name: string; items: LookupOption[] }> = [];
+  for (const option of options) {
+    const name = option.group ?? "Other";
+    const last = groups[groups.length - 1];
+    if (last && last.name === name) last.items.push(option);
+    else groups.push({ name, items: [option] });
+  }
+  return groups.map((group, index) => (
+    <optgroup key={`${group.name}-${index}`} label={group.name}>
+      {group.items.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+    </optgroup>
+  ));
+}
+
 export function ResourceFormPage({ config, resource, id }: Props) {
   const [record, setRecord] = useState<Record<string, unknown>>({});
   const [formValues, setFormValues] = useState<Record<string, string>>({});
+  // Named options for every foreign-key field on this form, keyed by lookup name.
+  const [lookups, setLookups] = useState<Record<string, LookupOption[]>>({});
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
   const isEdit = Boolean(id);
@@ -53,6 +77,31 @@ export function ResourceFormPage({ config, resource, id }: Props) {
     setMessage("");
     setFormValues(getBlankValues());
   }, [config.formFields, resource, id]);
+
+  const lookupKeys = useMemo(
+    () => Array.from(new Set(config.formFields.map((field) => field.lookup).filter(Boolean) as string[])),
+    [config.formFields]
+  );
+
+  useEffect(() => {
+    if (!lookupKeys.length) {
+      setLookups({});
+      return;
+    }
+    let alive = true;
+    void (async () => {
+      try {
+        const response = await fetch(`/api/admin/lookups?keys=${lookupKeys.join(",")}`, { cache: "no-store" });
+        const json = (await response.json()) as { ok: boolean; data?: Record<string, LookupOption[]> };
+        if (alive && json.ok && json.data) setLookups(json.data);
+      } catch {
+        // A failed lookup leaves the field as a plain box rather than blocking
+        // the whole form — the id can still be typed by hand.
+        if (alive) setLookups({});
+      }
+    })();
+    return () => { alive = false; };
+  }, [lookupKeys]);
 
   useEffect(() => {
     if (!id) return;
@@ -155,14 +204,33 @@ export function ResourceFormPage({ config, resource, id }: Props) {
                   </label>
                   {field.type === "textarea" ? (
                     <textarea name={field.name} onChange={(event) => setFormValues((current) => ({ ...current, [field.name]: event.target.value }))} placeholder={getPlaceholder(field.label, field.value ?? "")} required={required} value={value} />
+                  ) : field.lookup ? (
+                    <select name={field.name} onChange={(event) => setFormValues((current) => ({ ...current, [field.name]: event.target.value }))} required={required} value={value}>
+                      <option value="">{required ? `Select ${field.label.toLowerCase()}` : `— none —`}</option>
+                      {renderLookupOptions(lookups[field.lookup] ?? [])}
+                      {/* A stored id whose row has since gone (or fell outside the
+                          list's limit) would otherwise silently reset to blank on
+                          the next save. */}
+                      {value && !(lookups[field.lookup] ?? []).some((option) => option.id === value)
+                        ? <option value={value}>{`id ${value} (not in list)`}</option>
+                        : null}
+                    </select>
                   ) : field.type === "select" ? (
                     <select name={field.name} onChange={(event) => setFormValues((current) => ({ ...current, [field.name]: event.target.value }))} required={required} value={value}>
                       <option value="">Select {field.label.toLowerCase()}</option>
                       {field.options?.map((option) => <option key={option}>{option}</option>)}
                     </select>
                   ) : (
-                    <input name={field.name} onChange={(event) => setFormValues((current) => ({ ...current, [field.name]: event.target.value }))} placeholder={getPlaceholder(field.label, field.value ?? "")} required={required} value={value} />
+                    <input
+                      name={field.name}
+                      type={field.type === "date" ? "date" : field.type === "datetime" ? "datetime-local" : "text"}
+                      onChange={(event) => setFormValues((current) => ({ ...current, [field.name]: event.target.value }))}
+                      placeholder={field.type === "date" || field.type === "datetime" ? undefined : getPlaceholder(field.label, field.value ?? "")}
+                      required={required}
+                      value={value}
+                    />
                   )}
+                  {field.hint ? <small className="field-hint">{field.hint}</small> : null}
                 </div>
               );
             })}

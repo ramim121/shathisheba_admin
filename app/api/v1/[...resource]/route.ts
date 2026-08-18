@@ -140,8 +140,15 @@ import {
   dispatchFinanceNotifications,
   getNotificationQueue,
   previewUserRecords,
-  clearUserRecords
+  clearUserRecords,
+  DATASETS,
+  type DatasetKey
 } from "@/lib/app-endpoints";
+import {
+  getListingProgress,
+  getMyProjectApplications,
+  getProjectApplicationProgress
+} from "@/lib/endpoints/progress";
 
 // App-facing list reads. The mobile app hits these generic resource paths and
 // needs raw bilingual/detail columns; the admin panel reads lib/db-resources
@@ -170,6 +177,10 @@ const appReadHandlers: Record<string, AppReadHandler> = {
   "app/projects/prev-rates": (q) => getProjectPrevRates(q.get("animal_id"), q.get("breed_id"), q.get("district")),
   "app/sale/category-availability": (q) => getSaleCategoryAvailability(q.get("user_id"), q.get("division"), q.get("district")),
   "app/sale/my-listings": (q) => getMyListings(q.get("user_id")),
+  "app/sale/listing-progress": (q) => getListingProgress(q.get("listing_id"), q.get("user_id")),
+  "app/projects/applications": (q) => getMyProjectApplications(q.get("user_id")),
+  "app/projects/application-progress": (q) =>
+    getProjectApplicationProgress(q.get("application_id"), q.get("user_id")),
   "app/orders/mine": (q) => getMyOrders(q.get("user_id")),
   "app/admin/inventory": () => getInventoryOverview(),
   "app/admin/stats": () => getAdminStats(),
@@ -221,7 +232,11 @@ const appReadHandlers: Record<string, AppReadHandler> = {
   "admin/loan/mpoweru": (q) => getMpowerUStatus(q.get("application_id") ?? "", q.get("__role") ?? ""),
   "admin/loan/lenders/pipeline": (q) => getLenderPipeline(q),
   "admin/loan/notifications": (q) => getNotificationQueue(q),
-  "admin/users/clear-records/preview": (q) => previewUserRecords(q.get("identifier") ?? "")
+  "admin/users/clear-records/preview": (q) =>
+    previewUserRecords(
+      q.get("identifier") ?? "",
+      q.get("datasets") ? (q.get("datasets")!.split(",").filter(Boolean) as DatasetKey[]) : undefined
+    )
 };
 
 type Params = {
@@ -360,7 +375,8 @@ export async function GET(request: NextRequest, { params }: Params) {
         breed_id: searchParams.get("breed_id"),
         sale_item_id: searchParams.get("sale_item_id"),
         district: searchParams.get("district"),
-        weight: searchParams.get("weight")
+        weight: searchParams.get("weight"),
+        meat_weight: searchParams.get("meat_weight")
       });
       return envelope(quote, { source: "mysql", surface: "app", resource });
     } catch (error) {
@@ -452,7 +468,12 @@ export async function GET(request: NextRequest, { params }: Params) {
       // string must never be able to widen what a caller is shown.
       searchParams.set("__role", caller.kind === "admin" ? caller.admin.role : "");
       const data = await appReadHandlers[resource](searchParams);
-      return envelope(data ?? [], { source: "mysql", surface: "app", resource });
+      // `?? []` used to be the default here, which turned a handler's deliberate
+      // `null` — "this user has no readiness assessment" — into an empty array.
+      // An empty array is truthy, so the app read it as a result and rendered a
+      // result screen against it. Nullish stays nullish; list handlers already
+      // return arrays and are unaffected.
+      return envelope(data ?? null, { source: "mysql", surface: "app", resource });
     } catch (error) {
       return dbError(error);
     }
@@ -553,9 +574,22 @@ export async function POST(request: NextRequest, { params }: Params) {
       if (confirm !== identifier) {
         return dbError(new Error("Type the account's phone number exactly to confirm."));
       }
+      // Which datasets to clear is now the caller's choice. Defaulting to the
+      // two finance ones matches why this exists — re-running a loan or
+      // readiness flow against the same number — and means a careless call
+      // cannot take the whole account with it.
+      const rawDatasets = (payload as Record<string, unknown>).datasets;
+      const datasets = Array.isArray(rawDatasets)
+        ? (rawDatasets.map(String) as DatasetKey[])
+        : (["loan", "readiness", "sessions"] as DatasetKey[]);
+      const known = new Set(DATASETS.map((d) => d.key));
+      const unknown = datasets.filter((d) => !known.has(d));
+      if (unknown.length) return dbError(new Error(`Unknown dataset: ${unknown.join(", ")}`));
+
       const result = await clearUserRecords(
         identifier,
         {
+          datasets,
           resetOnboarding: (payload as Record<string, unknown>).reset_onboarding !== false,
           resetRoles: (payload as Record<string, unknown>).reset_roles === true,
         },

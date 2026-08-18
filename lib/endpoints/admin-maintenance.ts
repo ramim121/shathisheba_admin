@@ -21,12 +21,45 @@ import type { Row } from "./shared";
 //   * Every run is audit-logged with the per-table counts, since this is a
 //     destructive operation on real user data.
 
+/**
+ * Which datasets to clear. Selectable because the common case is not "wipe
+ * everything" — it is "let me run the loan flow again" while keeping the
+ * listings and training history that make the account realistic to test against.
+ */
+export type DatasetKey =
+  | "loan"
+  | "readiness"
+  | "orders"
+  | "listings"
+  | "projects"
+  | "community"
+  | "learning"
+  | "profile_modules"
+  | "preferences"
+  | "sessions";
+
 export type ClearScope = {
+  /** Datasets to clear. Empty means nothing is deleted. */
+  datasets: DatasetKey[];
   /** Also reset the onboarding gates so the app treats the account as new. */
   resetOnboarding: boolean;
   /** Also drop granted roles (login re-grants the buyer role automatically). */
   resetRoles: boolean;
 };
+
+/** What the console offers, in the order it shows them. */
+export const DATASETS: { key: DatasetKey; label: string; hint: string; defaultOn: boolean }[] = [
+  { key: "loan", label: "Loan applications & accounts", hint: "Applications, quotes, consents, assessments, disbursements and repayments", defaultOn: true },
+  { key: "readiness", label: "Readiness checks", hint: "Self-declared assessments and their answers", defaultOn: true },
+  { key: "orders", label: "Buy orders", hint: "Orders and their line items", defaultOn: false },
+  { key: "listings", label: "Sale listings", hint: "Listings and payment confirmations", defaultOn: false },
+  { key: "projects", label: "Partner projects", hint: "Project applications and ledgers", defaultOn: false },
+  { key: "community", label: "Community activity", hint: "Posts and comments", defaultOn: false },
+  { key: "learning", label: "Training progress", hint: "Completed content, points and quiz scores", defaultOn: false },
+  { key: "profile_modules", label: "Banking, farm & KYC documents", hint: "Profile modules — not the basic profile itself", defaultOn: false },
+  { key: "preferences", label: "Category preferences", hint: "Selected interests", defaultOn: false },
+  { key: "sessions", label: "Sessions & one-time codes", hint: "Logs the phone out and clears pending OTPs", defaultOn: true },
+];
 
 export type ClearResult = {
   user: { id: string; full_name: string | null; phone: string | null };
@@ -39,65 +72,69 @@ export type ClearResult = {
  * Ordered so children are removed before their parents. Each entry is either a
  * direct `user_id` match or a subquery through the owning record.
  */
-const WIPE_PLAN: { table: string; sql: string }[] = [
+const WIPE_PLAN: { dataset: DatasetKey; table: string; sql: string }[] = [
   // --- Finance: loan ---
-  { table: "loan_repayment_schedule", sql:
+  { dataset: "loan", table: "loan_repayment_schedule", sql:
     `DELETE FROM loan_repayment_schedule WHERE loan_account_id IN
        (SELECT id FROM loan_accounts WHERE user_id = ?)` },
-  { table: "loan_repayments", sql:
+  { dataset: "loan", table: "loan_repayments", sql:
     `DELETE FROM loan_repayments WHERE loan_account_id IN
        (SELECT id FROM loan_accounts WHERE user_id = ?)` },
-  { table: "loan_accounts", sql: `DELETE FROM loan_accounts WHERE user_id = ?` },
-  { table: "loan_application_events", sql:
+  { dataset: "loan", table: "loan_accounts", sql: `DELETE FROM loan_accounts WHERE user_id = ?` },
+  { dataset: "loan", table: "loan_application_events", sql:
     `DELETE FROM loan_application_events WHERE application_id IN
        (SELECT id FROM loan_applications WHERE user_id = ?)` },
-  { table: "loan_consents", sql: `DELETE FROM loan_consents WHERE user_id = ?` },
-  { table: "loan_quotes", sql: `DELETE FROM loan_quotes WHERE user_id = ?` },
-  { table: "loan_applications", sql: `DELETE FROM loan_applications WHERE user_id = ?` },
+  { dataset: "loan", table: "loan_consents", sql: `DELETE FROM loan_consents WHERE user_id = ?` },
+  { dataset: "loan", table: "loan_quotes", sql: `DELETE FROM loan_quotes WHERE user_id = ?` },
+  { dataset: "loan", table: "loan_applications", sql: `DELETE FROM loan_applications WHERE user_id = ?` },
 
   // --- Finance: readiness ---
-  { table: "readiness_answers", sql:
+  { dataset: "readiness", table: "readiness_answers", sql:
     `DELETE FROM readiness_answers WHERE assessment_id IN
        (SELECT id FROM readiness_assessments WHERE user_id = ?)` },
-  { table: "readiness_assessments", sql: `DELETE FROM readiness_assessments WHERE user_id = ?` },
+  { dataset: "readiness", table: "readiness_assessments", sql: `DELETE FROM readiness_assessments WHERE user_id = ?` },
 
   // --- Marketplace: buying ---
-  { table: "order_items", sql:
+  { dataset: "orders", table: "order_items", sql:
     `DELETE FROM order_items WHERE order_id IN (SELECT id FROM orders WHERE user_id = ?)` },
-  { table: "orders", sql: `DELETE FROM orders WHERE user_id = ?` },
+  { dataset: "orders", table: "orders", sql: `DELETE FROM orders WHERE user_id = ?` },
 
   // --- Marketplace: selling ---
-  { table: "payment_confirmations", sql:
+  { dataset: "listings", table: "payment_confirmations", sql:
     `DELETE FROM payment_confirmations WHERE sale_listing_id IN
        (SELECT id FROM sale_listings WHERE user_id = ?)` },
-  { table: "sale_listings", sql: `DELETE FROM sale_listings WHERE user_id = ?` },
+  { dataset: "listings", table: "sale_listings", sql: `DELETE FROM sale_listings WHERE user_id = ?` },
 
   // --- Partner projects ---
-  { table: "project_ledgers", sql:
+  { dataset: "projects", table: "project_ledgers", sql:
     `DELETE FROM project_ledgers WHERE partner_application_id IN
        (SELECT id FROM partner_applications WHERE user_id = ?)` },
-  { table: "partner_applications", sql: `DELETE FROM partner_applications WHERE user_id = ?` },
+  { dataset: "projects", table: "partner_applications", sql: `DELETE FROM partner_applications WHERE user_id = ?` },
 
   // --- Community ---
-  { table: "community_comments", sql: `DELETE FROM community_comments WHERE user_id = ?` },
-  { table: "community_posts", sql: `DELETE FROM community_posts WHERE user_id = ?` },
+  { dataset: "community", table: "community_comments", sql: `DELETE FROM community_comments WHERE user_id = ?` },
+  { dataset: "community", table: "community_posts", sql: `DELETE FROM community_posts WHERE user_id = ?` },
 
   // --- Learning ---
-  { table: "user_learning_progress", sql: `DELETE FROM user_learning_progress WHERE user_id = ?` },
+  { dataset: "learning", table: "user_learning_progress", sql: `DELETE FROM user_learning_progress WHERE user_id = ?` },
 
   // --- Profile modules and preferences ---
-  { table: "app_user_kyc_documents", sql: `DELETE FROM app_user_kyc_documents WHERE user_id = ?` },
-  { table: "app_user_banking", sql: `DELETE FROM app_user_banking WHERE user_id = ?` },
-  { table: "app_user_farm", sql: `DELETE FROM app_user_farm WHERE user_id = ?` },
-  { table: "user_interests", sql: `DELETE FROM user_interests WHERE user_id = ?` },
+  { dataset: "profile_modules", table: "app_user_kyc_documents", sql: `DELETE FROM app_user_kyc_documents WHERE user_id = ?` },
+  { dataset: "profile_modules", table: "app_user_banking", sql: `DELETE FROM app_user_banking WHERE user_id = ?` },
+  { dataset: "profile_modules", table: "app_user_farm", sql: `DELETE FROM app_user_farm WHERE user_id = ?` },
+  { dataset: "preferences", table: "user_interests", sql: `DELETE FROM user_interests WHERE user_id = ?` },
 ];
 
 /** Preview what a wipe would remove, without removing anything. */
-export async function previewUserRecords(identifier: string) {
+export async function previewUserRecords(identifier: string, datasets?: DatasetKey[]) {
   const user = await findUser(identifier);
   const counts: { table: string; rows: number }[] = [];
+  // No selection means "show me everything that exists", which is what the
+  // console wants before any box has been ticked.
+  const wanted = datasets && datasets.length ? new Set(datasets) : null;
 
   for (const step of WIPE_PLAN) {
+    if (wanted && !wanted.has(step.dataset)) continue;
     const countSql = step.sql.replace(/^DELETE FROM (\S+)/, "SELECT COUNT(*) AS n FROM $1");
     try {
       const rows = await queryRows<Row>(countSql, [user.id]);
@@ -107,8 +144,10 @@ export async function previewUserRecords(identifier: string) {
       // A table that does not exist in this environment is simply skipped.
     }
   }
-  const sessions = await queryRows<Row>("SELECT COUNT(*) AS n FROM app_sessions WHERE user_id = ?", [user.id]);
-  if (Number(sessions[0]?.n ?? 0) > 0) counts.push({ table: "app_sessions", rows: Number(sessions[0].n) });
+  if (!wanted || wanted.has("sessions")) {
+    const sessions = await queryRows<Row>("SELECT COUNT(*) AS n FROM app_sessions WHERE user_id = ?", [user.id]);
+    if (Number(sessions[0]?.n ?? 0) > 0) counts.push({ table: "app_sessions", rows: Number(sessions[0].n) });
+  }
 
   return {
     user: { id: String(user.id), full_name: user.full_name as string, phone: user.phone as string },
@@ -128,8 +167,14 @@ export async function clearUserRecords(
   const deleted: { table: string; rows: number }[] = [];
   const reset: string[] = [];
 
+  const wanted = new Set(scope.datasets ?? []);
+  if (wanted.size === 0 && !scope.resetOnboarding && !scope.resetRoles) {
+    throw new Error("Choose at least one dataset to clear.");
+  }
+
   await withTransaction(async (tx) => {
     for (const step of WIPE_PLAN) {
+      if (!wanted.has(step.dataset)) continue;
       try {
         const res = await tx.execute(step.sql, [user.id]);
         if (res.affectedRows > 0) deleted.push({ table: step.table, rows: res.affectedRows });
@@ -144,10 +189,12 @@ export async function clearUserRecords(
 
     // Sessions last, so the phone is logged out only once the wipe has
     // committed rather than mid-way through.
-    const sess = await tx.execute("DELETE FROM app_sessions WHERE user_id = ?", [user.id]);
-    if (sess.affectedRows > 0) deleted.push({ table: "app_sessions", rows: sess.affectedRows });
-    const otp = await tx.execute("DELETE FROM app_otps WHERE phone = ?", [user.phone]);
-    if (otp.affectedRows > 0) deleted.push({ table: "app_otps", rows: otp.affectedRows });
+    if (wanted.has("sessions")) {
+      const sess = await tx.execute("DELETE FROM app_sessions WHERE user_id = ?", [user.id]);
+      if (sess.affectedRows > 0) deleted.push({ table: "app_sessions", rows: sess.affectedRows });
+      const otp = await tx.execute("DELETE FROM app_otps WHERE phone = ?", [user.phone]);
+      if (otp.affectedRows > 0) deleted.push({ table: "app_otps", rows: otp.affectedRows });
+    }
 
     if (scope.resetOnboarding) {
       // Clears the gates the app routes on, so the next login walks the full

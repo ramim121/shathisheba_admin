@@ -24,7 +24,16 @@ export type ManagementPageProps = {
   endpoint: string;
   columns: ManagementColumn[];
   rows: ManagementRow[];
-  formFields: { label: string; name: string; type?: "text" | "textarea" | "select"; options?: string[]; value?: string }[];
+  formFields: {
+    label: string;
+    name: string;
+    type?: "text" | "textarea" | "select" | "date" | "datetime";
+    options?: string[];
+    /** Key into lib/admin-lookups — renders a name picker that submits the id. */
+    lookup?: string;
+    value?: string;
+    hint?: string;
+  }[];
 };
 
 const PAGE_SIZES = [10, 25, 50, 100];

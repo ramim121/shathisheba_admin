@@ -162,8 +162,8 @@ const configs: Record<string, ResourceConfig> = {
       LEFT JOIN animal_breeds b ON b.id = l.breed_id
       ORDER BY l.created_at DESC
     `,
-    allowedInsert: ["listing_code", "user_id", "sale_item_id", "animal_id", "breed_id", "title_en", "title_bn", "description", "age_months", "weight_kg", "quantity", "unit", "farmer_expected_price", "estimated_earning", "contact_phone", "contact_name", "contact_nid", "contact_is_self", "address_text", "division", "district", "upazila", "ai_analysis_json", "media_json", "status"],
-    allowedUpdate: ["sale_item_id", "animal_id", "breed_id", "title_en", "title_bn", "description", "age_months", "weight_kg", "quantity", "unit", "farmer_expected_price", "estimated_earning", "contact_phone", "contact_name", "contact_nid", "contact_is_self", "address_text", "division", "district", "upazila", "ai_analysis_json", "media_json", "status", "approved_by", "approved_at"],
+    allowedInsert: ["listing_code", "user_id", "sale_item_id", "animal_id", "breed_id", "title_en", "title_bn", "description", "age_months", "weight_kg", "meat_weight_kg", "dressing_pct", "quantity", "unit", "farmer_expected_price", "estimated_earning", "contact_phone", "contact_name", "contact_nid", "contact_is_self", "address_text", "division", "district", "upazila", "ai_analysis_json", "media_json", "status"],
+    allowedUpdate: ["sale_item_id", "animal_id", "breed_id", "title_en", "title_bn", "description", "age_months", "weight_kg", "meat_weight_kg", "dressing_pct", "quantity", "unit", "farmer_expected_price", "estimated_earning", "contact_phone", "contact_name", "contact_nid", "contact_is_self", "address_text", "division", "district", "upazila", "ai_analysis_json", "media_json", "status", "approved_by", "approved_at", "field_visit_date", "field_visit_note", "verified_weight_kg", "paid_at", "paid_amount", "payment_method", "payment_reference"],
     defaults: { listing_code: `SAL-${Date.now()}`, quantity: 1, unit: "piece", status: "submitted" }
   },
   "sale/items": {
@@ -214,9 +214,9 @@ const configs: Record<string, ResourceConfig> = {
       JOIN sale_items si ON si.id = r.sale_item_id
       ORDER BY r.effective_from DESC, r.id DESC
     `,
-    allowedInsert: ["sale_item_id", "partner_project_id", "animal_id", "breed_id", "district", "division", "effective_from", "effective_to", "b2b_market_rate", "farmer_rate", "platform_fee", "logistics_fee", "warehouse_vet_fee", "unit", "is_active"],
-    allowedUpdate: ["sale_item_id", "partner_project_id", "animal_id", "breed_id", "district", "division", "effective_from", "effective_to", "b2b_market_rate", "farmer_rate", "platform_fee", "logistics_fee", "warehouse_vet_fee", "unit", "is_active"],
-    defaults: { effective_from: new Date(), b2b_market_rate: 0, farmer_rate: 0, platform_fee: 0, logistics_fee: 0, warehouse_vet_fee: 0, unit: "kg", is_active: 1 }
+    allowedInsert: ["sale_item_id", "partner_project_id", "animal_id", "breed_id", "district", "division", "effective_from", "effective_to", "b2b_market_rate", "b2b_meat_rate", "dressing_pct", "farmer_rate", "platform_fee", "platform_fee_pct", "logistics_fee", "warehouse_vet_fee", "unit", "is_active"],
+    allowedUpdate: ["sale_item_id", "partner_project_id", "animal_id", "breed_id", "district", "division", "effective_from", "effective_to", "b2b_market_rate", "b2b_meat_rate", "dressing_pct", "farmer_rate", "platform_fee", "platform_fee_pct", "logistics_fee", "warehouse_vet_fee", "unit", "is_active"],
+    defaults: { effective_from: new Date(), b2b_market_rate: 0, b2b_meat_rate: 0, dressing_pct: 50, farmer_rate: 0, platform_fee: 0, logistics_fee: 0, warehouse_vet_fee: 0, unit: "kg", is_active: 1 }
   },
   "buy/categories": {
     table: "buy_categories",
@@ -352,8 +352,8 @@ const configs: Record<string, ResourceConfig> = {
       GROUP BY p.id
       ORDER BY p.created_at DESC
     `,
-    allowedInsert: ["project_code", "name_en", "name_bn", "interest_slug", "lender_name", "division", "district", "upazila", "image_url", "summary_en", "summary_bn", "market_overview_en", "market_overview_bn", "investment_amount", "duration_label", "region_based", "is_active", "platform_fee", "logistics_fee", "warehouse_vet_fee", "start_date", "end_date", "capacity", "max_credit_amount", "status", "steps_json"],
-    allowedUpdate: ["name_en", "name_bn", "interest_slug", "lender_name", "division", "district", "upazila", "image_url", "summary_en", "summary_bn", "market_overview_en", "market_overview_bn", "investment_amount", "duration_label", "region_based", "is_active", "platform_fee", "logistics_fee", "warehouse_vet_fee", "start_date", "end_date", "capacity", "max_credit_amount", "status", "steps_json"],
+    allowedInsert: ["project_code", "name_en", "name_bn", "interest_slug", "lender_name", "division", "district", "upazila", "image_url", "summary_en", "summary_bn", "market_overview_en", "market_overview_bn", "investment_amount", "income_amount", "income_label_en", "income_label_bn", "model_en", "model_bn", "loan_partners_en", "loan_partners_bn", "capacity_label_en", "capacity_label_bn", "terms_json", "duration_label", "region_based", "is_active", "platform_fee", "logistics_fee", "warehouse_vet_fee", "start_date", "end_date", "capacity", "max_credit_amount", "status", "steps_json"],
+    allowedUpdate: ["name_en", "name_bn", "interest_slug", "lender_name", "division", "district", "upazila", "image_url", "summary_en", "summary_bn", "market_overview_en", "market_overview_bn", "investment_amount", "income_amount", "income_label_en", "income_label_bn", "model_en", "model_bn", "loan_partners_en", "loan_partners_bn", "capacity_label_en", "capacity_label_bn", "terms_json", "duration_label", "region_based", "is_active", "platform_fee", "logistics_fee", "warehouse_vet_fee", "start_date", "end_date", "capacity", "max_credit_amount", "status", "steps_json"],
     defaults: { project_code: `PRJ-${Date.now()}`, name_en: "New partner project", capacity: 0, region_based: 1, is_active: 1, status: "draft" }
   },
   "partners/applications": {
@@ -371,8 +371,8 @@ const configs: Record<string, ResourceConfig> = {
       JOIN partner_projects p ON p.id = a.partner_project_id
       ORDER BY a.updated_at DESC
     `,
-    allowedInsert: ["application_code", "user_id", "partner_project_id", "current_step", "full_name_per_nid", "nid_number", "total_land_decimals", "livestock_count", "primary_income_source", "annual_household_income", "mobile_banking_provider", "banking_json", "farm_assessment_json", "verification_notes", "status", "assigned_officer_id"],
-    allowedUpdate: ["current_step", "full_name_per_nid", "nid_number", "total_land_decimals", "livestock_count", "primary_income_source", "annual_household_income", "mobile_banking_provider", "banking_json", "farm_assessment_json", "verification_notes", "status", "assigned_officer_id", "approved_by", "approved_at"],
+    allowedInsert: ["application_code", "user_id", "partner_project_id", "current_step", "full_name_per_nid", "nid_number", "total_land_decimals", "livestock_count", "primary_income_source", "annual_household_income", "mobile_banking_provider", "banking_json", "farm_assessment_json", "verification_notes", "status", "assigned_officer_id", "field_visit_date", "field_visit_note", "docs_verified_at", "contract_started_at", "progress_note"],
+    allowedUpdate: ["current_step", "full_name_per_nid", "nid_number", "total_land_decimals", "livestock_count", "primary_income_source", "annual_household_income", "mobile_banking_provider", "banking_json", "farm_assessment_json", "verification_notes", "status", "assigned_officer_id", "approved_by", "approved_at", "field_visit_date", "field_visit_note", "docs_verified_at", "contract_started_at", "progress_note"],
     defaults: { application_code: `KYC-${Date.now()}`, current_step: "project_selection", status: "draft" }
   },
   "partners/ledgers": simpleConfig(

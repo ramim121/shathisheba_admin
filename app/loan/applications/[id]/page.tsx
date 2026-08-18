@@ -82,6 +82,35 @@ function taka(v: string | number | null | undefined) {
   return `৳${n.toLocaleString("en-BD", { maximumFractionDigits: 0 })}`;
 }
 
+/** "2026-08-18T06:09:00.000Z" -> "18 Aug 2026, 12:09". */
+function when(v: unknown, withTime = true): string {
+  if (!v) return "—";
+  const d = new Date(String(v));
+  if (Number.isNaN(d.getTime())) return String(v).slice(0, 16).replace("T", " ");
+  const date = d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+  if (!withTime) return date;
+  return `${date}, ${d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}`;
+}
+
+function humanise(v: unknown): string {
+  return String(v ?? "").replace(/_/g, " ");
+}
+
+/** A labelled coverage meter. Two numbers in a sentence do not read as a gap. */
+function Meter({ label, done, total }: { label: string; done: number; total: number }) {
+  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+  const tone = pct === 100 ? "full" : pct >= 60 ? "part" : "low";
+  return (
+    <div className="meter">
+      <div className="meter-head">
+        <span>{label}</span>
+        <strong>{done}/{total}</strong>
+      </div>
+      <div className="meter-track"><div className={`meter-fill ${tone}`} style={{ width: `${pct}%` }} /></div>
+    </div>
+  );
+}
+
 type RowField = { name: string; label: string; type: string; options?: string[] };
 
 /**
@@ -305,12 +334,25 @@ export default function LoanWorkspacePage({ params }: { params: Promise<{ id: st
             </span>
           ))}
         </div>
-        <p className="muted ws-coverage">
-          {data.coverage.material_fields_verified} of {data.coverage.material_fields_total} material fields verified
-          ({data.coverage.verified_pct}%) · {data.coverage.verification_items_verified}/
-          {data.coverage.verification_items_total} field items verified
-          {data.coverage.contradictory_count > 0 ? ` · ${data.coverage.contradictory_count} contradictory` : ""}
-        </p>
+        <div className="ws-meters">
+          <Meter
+            label="Material fields verified"
+            done={data.coverage.material_fields_verified}
+            total={data.coverage.material_fields_total}
+          />
+          <Meter
+            label="Field verification items"
+            done={data.coverage.verification_items_verified}
+            total={data.coverage.verification_items_total}
+          />
+        </div>
+        {data.coverage.contradictory_count > 0 ? (
+          <p className="ws-contra">
+            {data.coverage.contradictory_count} contradictory verdict
+            {data.coverage.contradictory_count > 1 ? "s" : ""} — manual review is mandatory and progression is
+            blocked until they are resolved.
+          </p>
+        ) : null}
       </section>
 
       {message ? <section className="panel"><p className="ws-msg">{message}</p></section> : null}
@@ -457,9 +499,9 @@ export default function LoanWorkspacePage({ params }: { params: Promise<{ id: st
                 <tbody>
                   {data.documents.map((d) => (
                     <tr key={String(d.id)}>
-                      <td>{String(d.doc_type).replace(/_/g, " ")}</td>
+                      <td>{humanise(d.doc_type)}</td>
                       <td>{Number(d.is_required) === 1 ? "Yes" : "No"}</td>
-                      <td>{String(d.status)}</td>
+                      <td><span className={`docstat s-${String(d.status)}`}>{humanise(d.status)}</span></td>
                       <td className="row-actions">
                         {d.status !== "verified" ? (
                           <button className="btn small" onClick={() => patchRow("documents", String(d.id), { status: "verified" })} disabled={busy}>
@@ -499,8 +541,8 @@ export default function LoanWorkspacePage({ params }: { params: Promise<{ id: st
                 <tbody>
                   {data.visits.map((v) => (
                     <tr key={String(v.id)}>
-                      <td>{String(v.proposed_at).slice(0, 16).replace("T", " ")}</td>
-                      <td>{String(v.status)}</td>
+                      <td>{when(v.proposed_at)}</td>
+                      <td>{humanise(v.status)}</td>
                       <td>{String(v.note ?? "—")}</td>
                       <td className="row-actions">
                         {v.status !== "completed" ? (
@@ -546,20 +588,33 @@ export default function LoanWorkspacePage({ params }: { params: Promise<{ id: st
             <button className="btn" onClick={saveVerification} disabled={busy}>Save verification</button>
           </section>
 
-          <div className="ws-actions">
-            <button className="btn primary" onClick={saveEvidence} disabled={busy}>Save captured data</button>
-            <button className="btn primary" onClick={runAssessment} disabled={busy || !data.ready_to_score}>
-              Run assessment
-            </button>
-          </div>
-          {!data.ready_to_score ? (
-            <p className="muted ws-blocked">
-              Blocked on: {blocking.filter((c) => !c.done).map((c) => c.label).join(", ")}
-            </p>
-          ) : null}
         </div>
 
-        <div className="ws-col">
+        {/* The rail travels with the officer. Both actions used to sit at the
+            foot of a page tall enough to hold six capture sections, so the one
+            control the whole screen exists for was off-screen for most of the
+            time spent on it. */}
+        <div className="ws-col ws-rail">
+          <section className="panel">
+            <h3 className="ws-h3">Actions</h3>
+            <div className="ws-actions">
+              <button className="btn primary" onClick={saveEvidence} disabled={busy}>Save captured data</button>
+              <button className="btn primary" onClick={runAssessment} disabled={busy || !data.ready_to_score}>
+                Run assessment
+              </button>
+            </div>
+            {!data.ready_to_score ? (
+              <div className="ws-blocked">
+                <strong>Cannot score yet.</strong>
+                <ul>
+                  {blocking.filter((c) => !c.done).map((c) => <li key={c.key}>{c.label}</li>)}
+                </ul>
+              </div>
+            ) : (
+              <p className="muted">Every blocking requirement is met. Scoring will supersede any earlier run.</p>
+            )}
+          </section>
+
           <section className="panel">
             <h3 className="ws-h3">Assessment</h3>
             {!live ? (
@@ -568,35 +623,47 @@ export default function LoanWorkspacePage({ params }: { params: Promise<{ id: st
               <>
                 <div className="ws-score">
                   <span className={`ws-grade g${String(live.grade)}`}>{String(live.grade)}</span>
-                  <div>
-                    <strong>{String(live.total_score)} / 100</strong>
-                    <p className="muted">
-                      {String(live.readiness_status).replace(/_/g, " ")} · {String(live.data_confidence)} confidence
-                    </p>
+                  <div className="ws-score-body">
+                    <strong>{String(live.total_score)} <span className="ws-outof">/ 100</span></strong>
+                    <div className="ws-score-chips">
+                      <span className="ws-pill">{humanise(live.readiness_status)}</span>
+                      <span className="ws-pill">{humanise(live.data_confidence)} confidence</span>
+                    </div>
                   </div>
                 </div>
                 {Number(live.hard_stop) === 1 ? (
                   <div className="ws-alert">Hard stop — {String(live.hard_stop_codes_json ?? "")}</div>
                 ) : null}
-                <table className="table">
-                  <thead><tr><th>Criterion</th><th>Weight</th><th>Rating</th><th>Score</th></tr></thead>
-                  <tbody>
-                    {(assessment?.criteria ?? []).map((c) => (
-                      <tr key={String(c.criterion_code)}>
-                        <td>
-                          {String(c.criterion_code).replace(/_/g, " ")}
-                          {Number(c.had_data) === 0 ? <span className="ws-nodata"> no data</span> : null}
-                        </td>
-                        <td>{String(c.weight)}</td>
-                        <td>
-                          {String(c.effective_rating)}
-                          {c.override_rating != null ? <span className="ws-nodata"> (was {String(c.computed_rating)})</span> : null}
-                        </td>
-                        <td>{String(c.weighted_score)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                {/* One bar per criterion, scaled against its own weight. The
+                    numbers alone made it hard to see which criterion actually
+                    cost the applicant the grade. */}
+                <div className="crit">
+                  {(assessment?.criteria ?? []).map((c) => {
+                    const weight = Number(c.weight ?? 0);
+                    const got = Number(c.weighted_score ?? 0);
+                    const pct = weight > 0 ? Math.max(0, Math.min(100, Math.round((got / weight) * 100))) : 0;
+                    return (
+                      <div className="crit-row" key={String(c.criterion_code)}>
+                        <div className="crit-head">
+                          <span>
+                            {humanise(c.criterion_code)}
+                            {Number(c.had_data) === 0 ? <span className="ws-nodata"> no data</span> : null}
+                            {c.override_rating != null ? (
+                              <span className="ws-nodata"> overridden from {String(c.computed_rating)}</span>
+                            ) : null}
+                          </span>
+                          <strong>{got} <span className="ws-outof">/ {weight}</span></strong>
+                        </div>
+                        <div className="meter-track">
+                          <div
+                            className={`meter-fill ${pct >= 80 ? "full" : pct >= 50 ? "part" : "low"}`}
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
                 {(assessment?.history ?? []).length > 1 ? (
                   <p className="muted ws-hint">
                     {(assessment?.history ?? []).length} assessments. Each run supersedes the last; none are edited.
@@ -612,8 +679,8 @@ export default function LoanWorkspacePage({ params }: { params: Promise<{ id: st
               <ul className="ws-timeline">
                 {data.events.slice(0, 12).map((e, i) => (
                   <li key={i}>
-                    <strong>{String(e.to_status).replace(/_/g, " ")}</strong>
-                    <span className="muted"> · {e.actor_type} · {String(e.created_at).slice(0, 16).replace("T", " ")}</span>
+                    <strong>{humanise(e.to_status)}</strong>
+                    <span className="muted"> · {humanise(e.actor_type)} · {when(e.created_at)}</span>
                     {e.note_en ? <p className="muted">{e.note_en}</p> : null}
                   </li>
                 ))}
@@ -634,7 +701,8 @@ export default function LoanWorkspacePage({ params }: { params: Promise<{ id: st
         .ws-chip { font-size:12px; padding:4px 10px; border-radius:999px; border:1px solid #EBDDE4; color:#7A6570; }
         .ws-chip.on { background:#E6F5ED; border-color:#B7E0C9; color:#1E7A46; }
         .ws-chip.block { background:#FDECEA; border-color:#F0C4BF; color:#8A2F28; }
-        .ws-coverage { margin-top:10px; }
+        .ws-meters { display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:16px; margin-top:14px; }
+        .ws-contra { margin:12px 0 0; padding:10px 12px; border-radius:8px; background:#FDECEA; color:#8A2F28; font-size:13px; }
         .ws-msg { color:#871449; font-size:13.5px; margin:0; }
         .ws-grid { display:grid; grid-template-columns: 1.35fr 1fr; gap:16px; align-items:start; }
         @media (max-width: 1000px) { .ws-grid { grid-template-columns: 1fr; } }
@@ -650,7 +718,32 @@ export default function LoanWorkspacePage({ params }: { params: Promise<{ id: st
         .ws-verify:first-of-type { border-top:none; }
         .ws-verify select { padding:6px 8px; border:1px solid #EBDDE4; border-radius:8px; font-size:13px; }
         .ws-actions { display:flex; gap:10px; flex-wrap:wrap; }
-        .ws-blocked { color:#8A2F28; }
+        .ws-blocked { margin-top:12px; padding:10px 12px; border-radius:8px; background:#FDECEA; color:#8A2F28; font-size:13px; }
+        .ws-blocked ul { margin:6px 0 0; padding-left:18px; }
+        .ws-blocked li { margin-top:2px; }
+        /* Sticky only where there is room for it; on a narrow screen the rail
+           stacks under the capture column and pinning it would cover content. */
+        @media (min-width: 1001px) { .ws-rail { position:sticky; top:16px; } }
+        .ws-actions { flex-direction:column; align-items:stretch; }
+        .ws-actions .btn { width:100%; }
+        .meter { min-width:0; }
+        .meter-head { display:flex; justify-content:space-between; align-items:baseline; gap:10px; font-size:12.5px; color:#7A6570; }
+        .meter-head strong { color:#2B0B1E; font-size:13px; }
+        .meter-track { height:8px; border-radius:999px; background:#F0E4EA; margin-top:6px; overflow:hidden; }
+        .meter-fill { height:8px; border-radius:999px; background:#871449; }
+        .meter-fill.full { background:#1E9E5A; }
+        .meter-fill.part { background:#D97706; }
+        .meter-fill.low { background:#B4443C; }
+        .crit { display:flex; flex-direction:column; gap:12px; margin-top:12px; }
+        .crit-head { display:flex; justify-content:space-between; align-items:baseline; gap:10px; font-size:13px; color:#2B0B1E; }
+        .crit-head strong { white-space:nowrap; }
+        .ws-outof { color:#9B8792; font-weight:600; font-size:12px; }
+        .ws-score-body strong { font-size:26px; color:#2B0B1E; }
+        .ws-score-chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
+        .ws-pill { font-size:11.5px; padding:3px 9px; border-radius:999px; background:#F4E8EE; color:#7A2352; font-weight:600; }
+        .docstat { font-size:12px; padding:2px 8px; border-radius:999px; background:#F3EEF1; color:#7A6570; }
+        .docstat.s-verified { background:#E6F5ED; color:#1E7A46; }
+        .docstat.s-rejected { background:#FDECEA; color:#8A2F28; }
         .btn { padding:9px 16px; border-radius:8px; border:1px solid #EBDDE4; background:#fff; color:#871449; font-size:13.5px; font-weight:600; cursor:pointer; margin-top:12px; }
         .btn.primary { background:#871449; color:#fff; border-color:#871449; }
         .btn.small { padding:5px 10px; font-size:12px; margin-top:0; white-space:nowrap; }
@@ -662,7 +755,7 @@ export default function LoanWorkspacePage({ params }: { params: Promise<{ id: st
         .rowform input, .rowform select { padding:7px 9px; border:1px solid #EBDDE4; border-radius:8px; font-size:13px; min-width:0; }
         .rowform-actions { display:flex; gap:8px; align-items:flex-end; }
         .ws-score { display:flex; align-items:center; gap:14px; margin:8px 0 14px; }
-        .ws-grade { width:44px; height:44px; border-radius:22px; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:20px; color:#fff; }
+        .ws-grade { width:56px; height:56px; border-radius:28px; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:26px; color:#fff; flex:none; }
         .gA { background:#1E9E5A; } .gB { background:#2563EB; } .gC { background:#D97706; } .gD { background:#B4443C; }
         .ws-nodata { color:#B4443C; font-size:11.5px; }
         .table { width:100%; border-collapse:collapse; font-size:13px; margin-top:8px; }

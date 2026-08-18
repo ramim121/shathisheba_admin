@@ -242,6 +242,35 @@ export async function submitKycApplication(payload: Row) {
   if (!fullName) throw new Error("Full name (per NID) is required.");
   if (!nid) throw new Error("NID number is required.");
 
+  // A project withdrawn from the market keeps serving the farmers already in
+  // it but takes no new applications. Enforced here rather than only in the
+  // app, because the app's copy of `is_active` can be a cached page old.
+  const projectRows = await queryRows<Row>(
+    "SELECT is_active, status, name_en FROM partner_projects WHERE id = ? LIMIT 1",
+    [projectId]
+  );
+  const project = projectRows[0];
+  if (!project) throw new Error("That project no longer exists.");
+  if (Number(project.is_active ?? 0) !== 1 || String(project.status) !== "open") {
+    throw new Error("This project is not accepting new applications.");
+  }
+
+  // One live application per farmer per project — a second submission is a
+  // double tap, not a second enrolment.
+  const existing = await queryRows<Row>(
+    `SELECT CAST(id AS CHAR) AS id, application_code FROM partner_applications
+      WHERE user_id = ? AND partner_project_id = ? AND status <> 'rejected'
+      ORDER BY id DESC LIMIT 1`,
+    [userId, projectId]
+  );
+  if (existing[0]) {
+    return {
+      application_id: Number(existing[0].id),
+      application_code: String(existing[0].application_code),
+      status: "existing"
+    };
+  }
+
   // Record the NID on the user profile (best-effort; does not overwrite).
   await executeQuery(
     "UPDATE app_users SET nid_number = COALESCE(NULLIF(nid_number, ''), ?) WHERE id = ?",
@@ -407,6 +436,9 @@ export async function getAppPartnerProjects() {
              interest_slug, division, district, upazila, image_url,
              summary_en, summary_bn, market_overview_en, market_overview_bn,
              investment_amount, duration_label, region_based, is_active,
+             income_amount, income_label_en, income_label_bn,
+             model_en, model_bn, loan_partners_en, loan_partners_bn,
+             capacity_label_en, capacity_label_bn, terms_json,
              platform_fee, logistics_fee, warehouse_vet_fee,
              status, capacity, lender_name, max_credit_amount,
              start_date, end_date, steps_json
@@ -453,6 +485,9 @@ export async function getAppActiveProjects(userId?: string | null, division?: st
              p.interest_slug, p.division, p.district, p.upazila, p.image_url,
              p.summary_en, p.summary_bn, p.market_overview_en, p.market_overview_bn,
              p.investment_amount, p.duration_label, p.region_based, p.lender_name,
+             p.income_amount, p.income_label_en, p.income_label_bn,
+             p.model_en, p.model_bn, p.loan_partners_en, p.loan_partners_bn,
+             p.capacity_label_en, p.capacity_label_bn, p.terms_json, p.is_active,
              p.max_credit_amount, p.capacity, p.status, p.start_date, p.end_date,
              (p.interest_slug IN (${placeholders})) AS matches_interest,
              (SELECT COUNT(*) FROM partner_applications a WHERE a.partner_project_id = p.id) AS enrolled
@@ -476,6 +511,9 @@ export async function getAppMyProjects(userId?: string | null) {
       SELECT CAST(p.id AS CHAR) AS id, p.project_code, p.name_en, p.name_bn,
              p.interest_slug, p.division, p.district, p.upazila, p.image_url,
              p.summary_en, p.summary_bn, p.duration_label, p.investment_amount,
+             p.income_amount, p.income_label_en, p.income_label_bn,
+             p.model_en, p.model_bn, p.loan_partners_en, p.loan_partners_bn,
+             p.capacity_label_en, p.capacity_label_bn, p.is_active,
              p.status AS project_status, p.start_date, p.end_date, p.steps_json,
              CAST(a.id AS CHAR) AS application_id, a.application_code,
              a.current_step, a.status AS application_status,
@@ -687,9 +725,12 @@ export async function getMyListings(userId?: string | null) {
   return queryRows<Row>(
     `
       SELECT CAST(l.id AS CHAR) AS id, l.listing_code, l.title_en, l.title_bn,
-             l.description, l.quantity, l.unit, l.weight_kg,
+             l.description, l.quantity, l.unit, l.weight_kg, l.meat_weight_kg,
              l.farmer_expected_price, l.estimated_earning,
              l.status, l.approved_at, l.created_at, l.media_json,
+             -- Progress fields so the card can show the live stage without a
+             -- second round trip per listing.
+             l.field_visit_date, l.verified_weight_kg, l.paid_at, l.paid_amount,
              si.name_en AS item_name, si.name_bn AS item_name_bn,
              c.slug AS category_slug
       FROM sale_listings l

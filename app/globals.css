@@ -901,6 +901,22 @@ tbody tr:hover td {
   transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
 }
 
+/* Per-field guidance. Sits under the control rather than in the label so the
+   label row keeps its fixed height and the numbering stays aligned. */
+.resource-form .field .field-hint {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted, #7a6270);
+  font-size: 12px;
+  line-height: 1.45;
+  font-weight: 500;
+}
+
+.resource-form .field optgroup {
+  font-weight: 650;
+  color: var(--brand);
+}
+
 .resource-form .field textarea {
   min-height: 104px;
   line-height: 1.5;

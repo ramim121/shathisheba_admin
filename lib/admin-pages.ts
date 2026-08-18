@@ -126,20 +126,31 @@ export const pages: Record<string, ManagementPageProps> = {
     })),
     formFields: [
       { label: "Listing code", name: "listing_code", value: "SAL-1001" },
-      { label: "User id", name: "user_id", value: "1" },
-      { label: "Sale item id", name: "sale_item_id", value: "1" },
-      { label: "Breed id", name: "breed_id", value: "1" },
+      { label: "Farmer", name: "user_id", lookup: "users" },
+      { label: "Sale item", name: "sale_item_id", lookup: "sale-items" },
+      { label: "Breed", name: "breed_id", lookup: "breeds" },
       { label: "English title", name: "title_en", value: "Healthy cattle for sale" },
       { label: "Bangla title", name: "title_bn", value: "গরু বিক্রয়" },
+      { label: "Animal", name: "animal_id", lookup: "animals" },
       { label: "Age months", name: "age_months", value: "24" },
-      { label: "Weight kg", name: "weight_kg", value: "320" },
+      { label: "Tentative live weight (kg)", name: "weight_kg", value: "320", hint: "Traders quote live weight. At 50% dressing, meat weight is half of this." },
+      { label: "Tentative meat weight (kg)", name: "meat_weight_kg", value: "160", hint: "Farmers and beparis quote meat weight." },
       { label: "Quantity", name: "quantity", value: "1" },
       { label: "Unit", name: "unit", value: "piece" },
-      { label: "Farmer expected price", name: "farmer_expected_price", value: "75000" },
-      { label: "Estimated earning", name: "estimated_earning", value: "72000" },
+      { label: "Farmer rate (per kg live)", name: "farmer_expected_price", value: "378" },
+      { label: "Estimated earning", name: "estimated_earning", value: "120960" },
       { label: "Contact phone", name: "contact_phone", value: "01700000000" },
       { label: "Address", name: "address_text", type: "textarea", value: "Village, Upazila, District" },
-      { label: "Status", name: "status", type: "select", options: ["draft", "submitted", "field_verification", "active", "sold", "rejected", "cancelled"] }
+      // The four stages the farmer sees on their progress screen. Status decides
+      // which stage is lit; the dates and verified weight fill in the detail.
+      { label: "Status", name: "status", type: "select", options: ["draft", "submitted", "field_verification", "active", "sold", "paid", "rejected", "cancelled"], hint: "submitted -> field_verification -> active (approved) -> paid" },
+      { label: "Field visit date", name: "field_visit_date", type: "date", hint: "Set with status field_verification so the farmer sees a date, not a promise." },
+      { label: "Field visit note", name: "field_visit_note", type: "textarea", value: "" },
+      { label: "Verified weight (kg live)", name: "verified_weight_kg", value: "", hint: "From the portable scale. Final payment is set on this." },
+      { label: "Paid at", name: "paid_at", type: "datetime" },
+      { label: "Paid amount", name: "paid_amount", value: "" },
+      { label: "Payment method", name: "payment_method", type: "select", options: ["cash", "cheque", "bank_transfer", "bkash", "nagad"] },
+      { label: "Payment reference", name: "payment_reference", value: "" }
     ]
   },
   buy: {
@@ -162,7 +173,7 @@ export const pages: Record<string, ManagementPageProps> = {
       status: item.stock > 50 ? "In stock" : "Low stock"
     })),
     formFields: [
-      { label: "Buy category id", name: "buy_category_id", value: "1" },
+      { label: "Buy category", name: "buy_category_id", lookup: "buy-categories" },
       { label: "SKU", name: "sku", value: "BUY-FEED-01" },
       { label: "English name", name: "name_en", value: "Shadhin Cattle Feed" },
       { label: "Bangla name", name: "name_bn", value: "স্বাধীন ক্যাটল ফিড" },
@@ -196,7 +207,7 @@ export const pages: Record<string, ManagementPageProps> = {
     })),
     formFields: [
       { label: "Order code", name: "order_code", value: "ORD-1001" },
-      { label: "User id", name: "user_id", value: "1" },
+      { label: "Farmer", name: "user_id", lookup: "users" },
       { label: "Total amount", name: "total_amount", value: "1800" },
       { label: "Delivery fee", name: "delivery_fee", value: "80" },
       { label: "Payable amount", name: "payable_amount", value: "1880" },
@@ -227,7 +238,7 @@ export const pages: Record<string, ManagementPageProps> = {
       status: "Published"
     })),
     formFields: [
-      { label: "Learning category id", name: "learning_category_id", value: "1" },
+      { label: "Learning category", name: "learning_category_id", lookup: "learning-categories" },
       { label: "English title", name: "title_en", value: "Cattle care basics" },
       { label: "Bangla title", name: "title_bn", value: "গরু পালনের মৌলিক বিষয়" },
       { label: "English subtitle", name: "subtitle_en", value: "Short practical module" },
@@ -270,11 +281,24 @@ export const pages: Record<string, ManagementPageProps> = {
       { label: "Short summary (Bangla)", name: "summary_bn", type: "textarea", value: "প্রকল্পের সংক্ষিপ্ত বিবরণ।" },
       { label: "Market overview (English)", name: "market_overview_en", type: "textarea", value: "Market demand, rate trend, buyer linkage." },
       { label: "Market overview (Bangla)", name: "market_overview_bn", type: "textarea", value: "বাজার চাহিদা, দরের প্রবণতা।" },
-      { label: "Investment amount", name: "investment_amount", value: "150000" },
-      { label: "Duration / timeframe label", name: "duration_label", value: "6 months" },
-      { label: "Start date", name: "start_date", value: "2026-06-01" },
-      { label: "End date (auto-inactive after)", name: "end_date", value: "2026-12-31" },
-      { label: "Capacity", name: "capacity", value: "50" },
+      // Two ways to state the economics. A buy-back project has no investment
+      // from the farmer at all, so leading with an investment figure told them
+      // the wrong thing; income is what they actually want to know.
+      { label: "Investment amount (blank for buy-back projects)", name: "investment_amount", value: "" },
+      { label: "Income amount", name: "income_amount", value: "14000", hint: "What the farmer earns. Shown on the card in place of investment." },
+      { label: "Income label (English)", name: "income_label_en", value: "Up to BDT 14,000 income" },
+      { label: "Income label (Bangla)", name: "income_label_bn", value: "সর্বোচ্চ ৳১৪,০০০ আয়" },
+      { label: "Model line (English)", name: "model_en", value: "Buy back offer + profit share model", hint: "One line shown directly under the project name." },
+      { label: "Model line (Bangla)", name: "model_bn", value: "বাই-ব্যাক অফার + লাভ ভাগাভাগি মডেল" },
+      { label: "Loan partners (English)", name: "loan_partners_en", value: "Loan provided by BRAC Bank & DigiGram Ventures" },
+      { label: "Loan partners (Bangla)", name: "loan_partners_bn", value: "ঋণ প্রদান করছে ব্র্যাক ব্যাংক ও ডিজিগ্রাম ভেঞ্চারস" },
+      { label: "Capacity label (English)", name: "capacity_label_en", value: "100 farmers in your upazila" },
+      { label: "Capacity label (Bangla)", name: "capacity_label_bn", value: "আপনার উপজেলায় ১০০ জন কৃষক" },
+      { label: "Terms (JSON)", name: "terms_json", type: "textarea", value: "", hint: "Buy-back rate and profit-share split. Keys: buyback.guaranteed_rate_per_kg, profit_share.farmer_pct." },
+      { label: "Duration / timeframe label", name: "duration_label", value: "4 months" },
+      { label: "Start date", name: "start_date", type: "date" },
+      { label: "End date (auto-inactive after)", name: "end_date", type: "date" },
+      { label: "Capacity", name: "capacity", value: "100" },
       { label: "Maximum credit amount", name: "max_credit_amount", value: "100000" },
       { label: "Opex — platform fee /kg", name: "platform_fee", value: "50" },
       { label: "Opex — logistics fee /kg", name: "logistics_fee", value: "15" },
@@ -305,8 +329,8 @@ export const pages: Record<string, ManagementPageProps> = {
     })),
     formFields: [
       { label: "Application code", name: "application_code", value: "KYC-1001" },
-      { label: "User id", name: "user_id", value: "1" },
-      { label: "Partner project id", name: "partner_project_id", value: "1" },
+      { label: "Farmer", name: "user_id", lookup: "users" },
+      { label: "Project", name: "partner_project_id", lookup: "partner-projects" },
       { label: "Current step", name: "current_step", type: "select", options: ["project_selection", "personal_kyc", "banking_info", "farm_assessment", "field_verification", "approval", "rejected"] },
       { label: "Full name per NID", name: "full_name_per_nid", value: "Md. Rahim" },
       { label: "NID number", name: "nid_number", value: "1234567890" },
@@ -316,8 +340,14 @@ export const pages: Record<string, ManagementPageProps> = {
       { label: "Annual household income", name: "annual_household_income", value: "360000" },
       { label: "Mobile banking provider", name: "mobile_banking_provider", value: "bkash" },
       { label: "Verification status", name: "status", type: "select", options: ["draft", "submitted", "needs_document", "officer_verification", "ready_to_approve", "approved", "rejected"] },
-      { label: "Assigned officer id", name: "assigned_officer_id", value: "1" },
-      { label: "Verification notes", name: "verification_notes", type: "textarea", value: "Check NID, land, banking, and farm assessment." }
+      { label: "Assigned field officer", name: "assigned_officer_id", lookup: "zone-officers" },
+      { label: "Verification notes", name: "verification_notes", type: "textarea", value: "Check NID, land, banking, and farm assessment." },
+      // Drives the farmer-facing project progress screen (4 steps).
+      { label: "Field visit date", name: "field_visit_date", type: "date", hint: "Step 2 - set with status officer_verification." },
+      { label: "Field visit note", name: "field_visit_note", type: "textarea", value: "" },
+      { label: "Documents verified at", name: "docs_verified_at", type: "datetime", hint: "Step 3." },
+      { label: "Contract started at", name: "contract_started_at", type: "datetime", hint: "Step 4 - contract signed, input supply begins." },
+      { label: "Progress note (shown to farmer)", name: "progress_note", type: "textarea", value: "" }
     ]
   },
   community: {
@@ -340,7 +370,7 @@ export const pages: Record<string, ManagementPageProps> = {
       status: item.status
     })),
     formFields: [
-      { label: "User id", name: "user_id", value: "1" },
+      { label: "Farmer", name: "user_id", lookup: "users" },
       { label: "Scope", name: "scope", type: "select", options: ["upazila", "district", "bangladesh"] },
       { label: "Post type", name: "post_type", type: "select", options: ["general", "question", "livestock", "crop", "complaint", "notice"] },
       { label: "Post body", name: "body", type: "textarea", value: "Write community post" },
@@ -500,7 +530,7 @@ export const nestedPages: Record<string, ManagementPageProps> = {
       { label: "Bangla name", name: "name_bn", value: "গাভী" },
       { label: "Species (matches breed animal_type)", name: "species", type: "select", options: ["cattle", "buffalo", "goat", "sheep", "poultry"] },
       { label: "Emoji", name: "emoji", value: "🐄" },
-      { label: "Sale category id", name: "sale_category_id", value: "2" },
+      { label: "Sale category", name: "sale_category_id", lookup: "sale-categories" },
       { label: "Sort order", name: "sort_order", value: "1" },
       { label: "Active", name: "is_active", type: "select", options: ["1", "0"] }
     ]
@@ -534,7 +564,7 @@ export const nestedPages: Record<string, ManagementPageProps> = {
     ],
     rows: [],
     formFields: [
-      { label: "Division id", name: "division_id", value: "1" },
+      { label: "Division", name: "division_id", lookup: "geo-divisions" },
       { label: "English name", name: "name_en", value: "Mymensingh" },
       { label: "Bangla name", name: "name_bn", value: "ময়মনসিংহ" }
     ]
@@ -551,7 +581,7 @@ export const nestedPages: Record<string, ManagementPageProps> = {
     ],
     rows: [],
     formFields: [
-      { label: "District id", name: "district_id", value: "1" },
+      { label: "District", name: "district_id", lookup: "geo-districts" },
       { label: "English name", name: "name_en", value: "Mymensingh Sadar" },
       { label: "Bangla name", name: "name_bn", value: "ময়মনসিংহ সদর" }
     ]
@@ -569,7 +599,7 @@ export const nestedPages: Record<string, ManagementPageProps> = {
     ],
     rows: [],
     formFields: [
-      { label: "Sale category id", name: "sale_category_id", value: "2" },
+      { label: "Sale category", name: "sale_category_id", lookup: "sale-categories" },
       { label: "Slug", name: "slug", value: "cattle" },
       { label: "English name", name: "name_en", value: "Cattle" },
       { label: "Bangla name", name: "name_bn", value: "গরু" },
@@ -607,18 +637,23 @@ export const nestedPages: Record<string, ManagementPageProps> = {
     ],
     rows: [],
     formFields: [
-      { label: "Sale item id", name: "sale_item_id", value: "1" },
-      { label: "Partner project id (optional)", name: "partner_project_id", value: "" },
-      { label: "Animal id (blank = any)", name: "animal_id", value: "1" },
-      { label: "Breed id (blank = any)", name: "breed_id", value: "" },
-      { label: "Division (blank = any)", name: "division", value: "Mymensingh" },
-      { label: "District (blank = any)", name: "district", value: "Mymensingh" },
-      { label: "Effective from", name: "effective_from", value: "2026-06-01" },
-      { label: "B2B market rate", name: "b2b_market_rate", value: "750" },
-      { label: "Farmer rate", name: "farmer_rate", value: "670" },
-      { label: "Platform fee", name: "platform_fee", value: "50" },
-      { label: "Logistics fee", name: "logistics_fee", value: "15" },
-      { label: "Warehouse and vet fee", name: "warehouse_vet_fee", value: "15" },
+      { label: "Sale item", name: "sale_item_id", lookup: "sale-items" },
+      { label: "Project (optional)", name: "partner_project_id", lookup: "partner-projects" },
+      { label: "Animal (blank = any)", name: "animal_id", lookup: "animals" },
+      { label: "Breed (blank = any)", name: "breed_id", lookup: "breeds" },
+      { label: "Division (blank = any)", name: "division", value: "" },
+      { label: "District (blank = any)", name: "district", value: "" },
+      { label: "Effective from", name: "effective_from", type: "date" },
+      // Every figure below is per kg of LIVE weight - that is the basis the whole
+      // breakdown reconciles against. The meat rate is the same money restated.
+      { label: "B2B market rate (per kg live)", name: "b2b_market_rate", value: "400" },
+      { label: "B2B meat rate (per kg meat)", name: "b2b_meat_rate", value: "800" },
+      { label: "Dressing %", name: "dressing_pct", value: "50", hint: "live weight = meat weight / (dressing % / 100). 50% means live = 2 x meat." },
+      { label: "Platform fee %", name: "platform_fee_pct", value: "2", hint: "Percentage of the live amount. Set this and it overrides the flat fee below." },
+      { label: "Platform fee (flat, per kg)", name: "platform_fee", value: "0", hint: "Only used when Platform fee % is blank." },
+      { label: "Logistics fee (per kg live)", name: "logistics_fee", value: "7" },
+      { label: "Warehouse and vet fee (per kg live)", name: "warehouse_vet_fee", value: "7" },
+      { label: "Farmer rate (per kg live)", name: "farmer_rate", value: "378", hint: "Derived automatically when Platform fee % is set." },
       { label: "Unit", name: "unit", value: "kg" }
     ]
   },
@@ -654,7 +689,7 @@ export const nestedPages: Record<string, ManagementPageProps> = {
     ],
     rows: [],
     formFields: [
-      { label: "Buy category id", name: "buy_category_id", value: "1" },
+      { label: "Buy category", name: "buy_category_id", lookup: "buy-categories" },
       { label: "SKU", name: "sku", value: "BUY-FEED-01" },
       { label: "English name", name: "name_en", value: "Shadhin Cattle Feed" },
       { label: "Unit", name: "unit", value: "sack" },
@@ -693,7 +728,7 @@ export const nestedPages: Record<string, ManagementPageProps> = {
     ],
     rows: [],
     formFields: [
-      { label: "Sale listing id", name: "sale_listing_id", value: "1" },
+      { label: "Listing", name: "sale_listing_id", lookup: "sale-listings" },
       { label: "Actual weight (kg)", name: "actual_weight_kg", value: "210" },
       { label: "Final amount", name: "final_amount", value: "140700" },
       { label: "Status", name: "status", type: "select", options: ["pending", "confirmed", "expired", "cancelled"] }
@@ -732,7 +767,7 @@ export const nestedPages: Record<string, ManagementPageProps> = {
     ],
     rows: [],
     formFields: [
-      { label: "App user id", name: "user_id", value: "1" },
+      { label: "Farmer", name: "user_id", lookup: "users" },
       { label: "Role", name: "role", type: "select", options: ["shathisheba_buyer", "shathisheba_seller", "field_officer"] }
     ]
   },
@@ -749,7 +784,7 @@ export const nestedPages: Record<string, ManagementPageProps> = {
     ],
     rows: [],
     formFields: [
-      { label: "App user id", name: "user_id", value: "1" },
+      { label: "Farmer", name: "user_id", lookup: "users" },
       { label: "Bank name", name: "bank_name", value: "" },
       { label: "Branch", name: "branch_name", value: "" },
       { label: "Account name", name: "account_name", value: "" },
@@ -771,7 +806,7 @@ export const nestedPages: Record<string, ManagementPageProps> = {
     ],
     rows: [],
     formFields: [
-      { label: "App user id", name: "user_id", value: "1" },
+      { label: "Farmer", name: "user_id", lookup: "users" },
       { label: "Total land (decimals)", name: "total_land_decimals", value: "0" },
       { label: "Primary focus", name: "primary_focus", value: "" },
       { label: "Crop types", name: "crop_types", value: "" },
@@ -793,7 +828,7 @@ export const nestedPages: Record<string, ManagementPageProps> = {
     ],
     rows: [],
     formFields: [
-      { label: "App user id", name: "user_id", value: "1" },
+      { label: "Farmer", name: "user_id", lookup: "users" },
       { label: "Document type", name: "doc_type", type: "select", options: ["nid_front", "nid_back", "selfie", "trade_license", "passbook", "other"] },
       { label: "Document URL", name: "document_url", value: "" },
       { label: "Status", name: "status", type: "select", options: ["pending", "verified", "rejected"] },
@@ -1083,7 +1118,7 @@ const financePages: Record<string, ManagementPageProps> = {
     ],
     rows: [],
     formFields: [
-      { label: "Criterion id", name: "criterion_id", value: "" },
+      { label: "Criterion", name: "criterion_id", lookup: "scorecard-criteria" },
       { label: "Metric", name: "metric", value: "dscr" },
       { label: "From (inclusive, blank = unbounded)", name: "min_value", value: "" },
       { label: "To (exclusive, blank = unbounded)", name: "max_value", value: "" },

@@ -17,6 +17,42 @@ type Result = {
   reset: string[];
 };
 
+/**
+ * Mirrors DATASETS in lib/endpoints/admin-maintenance.ts. Loan and readiness are
+ * on by default because that is what this screen exists for — running the same
+ * phone number through the finance flow again — while listings, orders and
+ * training history are usually worth keeping so the account still looks real.
+ */
+const DATASETS: { key: string; label: string; hint: string; defaultOn: boolean }[] = [
+  { key: "loan", label: "Loan applications & accounts", hint: "Applications, quotes, consents, assessments, disbursements, repayments", defaultOn: true },
+  { key: "readiness", label: "Readiness checks", hint: "Self-declared assessments and answers", defaultOn: true },
+  { key: "sessions", label: "Sessions & one-time codes", hint: "Logs the phone out and clears pending OTPs", defaultOn: true },
+  { key: "orders", label: "Buy orders", hint: "Orders and line items", defaultOn: false },
+  { key: "listings", label: "Sale listings", hint: "Listings and payment confirmations", defaultOn: false },
+  { key: "projects", label: "Partner projects", hint: "Project applications and ledgers", defaultOn: false },
+  { key: "community", label: "Community activity", hint: "Posts and comments", defaultOn: false },
+  { key: "learning", label: "Training progress", hint: "Completed content, points, quiz scores", defaultOn: false },
+  { key: "profile_modules", label: "Banking, farm & KYC documents", hint: "Profile modules — not the basic profile", defaultOn: false },
+  { key: "preferences", label: "Category preferences", hint: "Selected interests", defaultOn: false },
+];
+
+/** Which dataset each table belongs to — mirrors WIPE_PLAN's tags. */
+const TABLE_DATASET: Record<string, string> = {
+  loan_repayment_schedule: "loan", loan_repayments: "loan", loan_accounts: "loan",
+  loan_application_events: "loan", loan_consents: "loan", loan_quotes: "loan",
+  loan_applications: "loan",
+  readiness_answers: "readiness", readiness_assessments: "readiness",
+  order_items: "orders", orders: "orders",
+  payment_confirmations: "listings", sale_listings: "listings",
+  project_ledgers: "projects", partner_applications: "projects",
+  community_comments: "community", community_posts: "community",
+  user_learning_progress: "learning",
+  app_user_kyc_documents: "profile_modules", app_user_banking: "profile_modules",
+  app_user_farm: "profile_modules",
+  user_interests: "preferences",
+  app_sessions: "sessions", app_otps: "sessions",
+};
+
 const TABLE_LABEL: Record<string, string> = {
   loan_repayment_schedule: "Repayment schedule",
   loan_repayments: "Repayments",
@@ -48,6 +84,9 @@ export default function ClearRecordsPage() {
   const [identifier, setIdentifier] = useState("01966662633");
   const [preview, setPreview] = useState<Result | null>(null);
   const [confirmText, setConfirmText] = useState("");
+  const [datasets, setDatasets] = useState<string[]>(
+    DATASETS.filter((d) => d.defaultOn).map((d) => d.key)
+  );
   const [resetOnboarding, setResetOnboarding] = useState(true);
   const [resetRoles, setResetRoles] = useState(false);
   const [done, setDone] = useState<Result | null>(null);
@@ -57,7 +96,9 @@ export default function ClearRecordsPage() {
   async function lookUp() {
     setBusy(true); setError(null); setDone(null); setPreview(null); setConfirmText("");
     try {
-      const res = await fetch(`/api/v1/admin/users/clear-records/preview?identifier=${encodeURIComponent(identifier)}`,
+      const res = await fetch(
+        `/api/v1/admin/users/clear-records/preview?identifier=${encodeURIComponent(identifier)}` +
+          `&datasets=${encodeURIComponent(datasets.join(","))}`,
         { cache: "no-store" });
       const json = await res.json();
       if (!res.ok || json.ok === false) throw new Error(json.message || `HTTP ${res.status}`);
@@ -76,6 +117,7 @@ export default function ClearRecordsPage() {
         body: JSON.stringify({
           identifier,
           confirm: confirmText,
+          datasets,
           reset_onboarding: resetOnboarding,
           reset_roles: resetRoles,
         }),
@@ -90,7 +132,22 @@ export default function ClearRecordsPage() {
     } finally { setBusy(false); }
   }
 
-  const armed = !!preview && confirmText.trim() === identifier.trim();
+  // Only the rows belonging to a still-selected dataset are actually going to
+  // be deleted, so the confirmation must count those rather than everything the
+  // preview found.
+  const selectedTables = new Set(
+    preview?.deleted
+      .filter((r) => datasets.some((k) => TABLE_DATASET[r.table] === k))
+      .map((r) => r.table) ?? []
+  );
+  const selectedTotal = (preview?.deleted ?? [])
+    .filter((r) => selectedTables.has(r.table))
+    .reduce((sum, r) => sum + r.rows, 0);
+
+  const armed =
+    !!preview &&
+    confirmText.trim() === identifier.trim() &&
+    (datasets.length > 0 || resetOnboarding || resetRoles);
 
   return (
     <AdminShell>
@@ -135,15 +192,38 @@ export default function ClearRecordsPage() {
                 {preview.deleted.length === 1 ? "" : "s"} will be permanently deleted.
               </p>
               <ul className="rows">
-                {preview.deleted.map((r) => (
-                  <li key={r.table}>
-                    <span>{TABLE_LABEL[r.table] ?? r.table}</span>
-                    <strong>{r.rows}</strong>
-                  </li>
-                ))}
+                {preview.deleted.map((r) => {
+                  const inScope = selectedTables.has(r.table);
+                  return (
+                    <li key={r.table} className={inScope ? "" : "out"}>
+                      <span>{TABLE_LABEL[r.table] ?? r.table}</span>
+                      <strong>{inScope ? r.rows : "kept"}</strong>
+                    </li>
+                  );
+                })}
               </ul>
 
               <div className="opts">
+                <p className="optsHead">What to clear</p>
+                {DATASETS.map((d) => (
+                  <label key={d.key}>
+                    <input
+                      type="checkbox"
+                      checked={datasets.includes(d.key)}
+                      onChange={(e) =>
+                        setDatasets((cur) =>
+                          e.target.checked ? [...cur, d.key] : cur.filter((k) => k !== d.key)
+                        )
+                      }
+                    />
+                    <span>
+                      <strong>{d.label}</strong>
+                      <em>{d.hint}</em>
+                    </span>
+                  </label>
+                ))}
+
+                <p className="optsHead">Also reset</p>
                 <label>
                   <input type="checkbox" checked={resetOnboarding} onChange={(e) => setResetOnboarding(e.target.checked)} />
                   <span>
@@ -170,8 +250,11 @@ export default function ClearRecordsPage() {
                   aria-label="Type the phone number to confirm"
                 />
                 <button className="btn destructive" onClick={clearNow} disabled={!armed || busy}>
-                  {busy ? "Clearing…" : `Clear ${preview.total} record${preview.total === 1 ? "" : "s"}`}
+                  {busy ? "Clearing…" : `Clear ${selectedTotal} record${selectedTotal === 1 ? "" : "s"}`}
                 </button>
+                {datasets.length === 0 && !resetOnboarding && !resetRoles ? (
+                  <p className="muted">Nothing is selected, so there is nothing to clear.</p>
+                ) : null}
               </div>
             </>
           )}
@@ -217,6 +300,9 @@ export default function ClearRecordsPage() {
         .opts label { display:flex; gap:10px; align-items:flex-start; cursor:pointer; }
         .opts span { display:block; font-size:14px; }
         .opts em { display:block; font-style:normal; color:#6b6b6b; font-size:12.5px; margin-top:2px; line-height:1.5; }
+        .optsHead { margin:6px 0 0; font-size:12px; font-weight:700; letter-spacing:.4px; text-transform:uppercase; color:#9B5173; }
+        .rows li.out { opacity:.45; }
+        .rows li.out strong { font-weight:500; font-style:italic; }
         .danger { background:#FEF2F2; border:1px solid #F3C7C4; border-radius:12px; padding:14px; margin-top:14px; }
         .danger p { margin:0 0 10px; color:#8A2F28; font-size:14px; }
         code { background:#fff; padding:1px 6px; border-radius:5px; border:1px solid #F3C7C4; }

@@ -204,7 +204,7 @@ const appReadHandlers: Record<string, AppReadHandler> = {
   // Finance — Feature 1 (readiness) and Feature 2 (loan) reads. user_id is
   // already pinned to the session by scopedParams() before these run.
   "app/finance/summary": (q) => getFinanceSummary(q.get("user_id")!),
-  "app/finance/readiness/questions": () => getReadinessQuestions(),
+  "app/finance/readiness/questions": (q) => getReadinessQuestions(q.get("user_id")),
   "app/finance/readiness/latest": (q) => getReadinessLatest(q.get("user_id")!),
   "app/finance/readiness/signals": (q) => getReadinessSignals(q.get("user_id")!),
   "app/finance/readiness/history": (q) => getReadinessHistory(q.get("user_id")!),

@@ -42,6 +42,8 @@ export const PUBLIC_WRITES = new Set<string>(["app/auth/request-otp", "app/auth/
 
 export const ADMIN_ONLY = new Set<string>([
   "admin/users",
+  // Platform switches. Readable state, but only staff decide it.
+  "settings/app",
   "audit/logs",
   "reports",
   // Finance back-office. The farmer's own finance data is reached through

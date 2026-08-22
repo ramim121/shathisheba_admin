@@ -57,11 +57,42 @@ function toEngineQuestions(rows: Row[]): Question[] {
 // GET app/finance/readiness/questions
 // Deliberately omits weight, flag and category — a client that cannot see the
 // weights cannot reverse-engineer the model (P6 / MOB-RDY-11).
-export async function getReadinessQuestions() {
+export async function getReadinessQuestions(userId?: string | number | null) {
   const set = await activeSet();
   if (!set) return { set_version: null, questions: [] };
   const rows = await loadQuestions(set.id as number);
   const byOrder = new Map(rows.map((r) => [Number(r.sort_order), r]));
+
+  // Part 2's branch parents live in Part 1, which the client answered in an
+  // earlier session and does not hold any more. Left to itself the client saw
+  // an undefined parent, suppressed Q11-13 and offered seven questions, while
+  // the server — which does still hold the answers — required ten and refused
+  // the submission. The client keeps evaluating the rule; this is the answer it
+  // cannot look up for itself. Only the derived visibility crosses the wire,
+  // never the stored answer.
+  const priorAnswers = new Map<number, boolean>();
+  if (userId) {
+    const last = await queryRows<Row>(
+      `SELECT a.question_id, a.answer FROM readiness_answers a
+         JOIN readiness_assessments s ON s.id = a.assessment_id
+        WHERE s.user_id = ? AND a.presented = 1
+        ORDER BY s.created_at DESC, s.id DESC LIMIT 60`,
+      [userId]
+    );
+    last.forEach((r) => {
+      const qid = Number(r.question_id);
+      if (!priorAnswers.has(qid) && r.answer != null) priorAnswers.set(qid, Number(r.answer) === 1);
+    });
+  }
+
+  function defaultVisible(parentOrder: unknown, showWhen: unknown): boolean | null {
+    if (parentOrder == null || !showWhen) return null;
+    const parentId = Number(byOrder.get(Number(parentOrder))?.id ?? 0);
+    const answer = priorAnswers.get(parentId);
+    if (answer === undefined) return false;
+    return answer === (showWhen === "yes");
+  }
+
   return {
     set_version: set.version,
     parts: [
@@ -88,6 +119,14 @@ export async function getReadinessQuestions() {
         ? null
         : String(byOrder.get(Number(r.branch_parent_order))?.id ?? ""),
       branch_show_when: r.branch_show_when,
+      /**
+       * Whether this branching question is presented to *this* user, judged
+       * from answers they have already given. Null for a question that does not
+       * branch. The client uses it only when it has no local answer for the
+       * parent — within one part, the parent is on screen and the client's own
+       * state is authoritative.
+       */
+      branch_default_visible: defaultVisible(r.branch_parent_order, r.branch_show_when),
     })),
   };
 }

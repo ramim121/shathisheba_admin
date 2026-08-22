@@ -1128,6 +1128,30 @@ const financePages: Record<string, ManagementPageProps> = {
       { label: "Active", name: "is_active", type: "select", options: ["1", "0"] }
     ]
   },
+  "settings/app": {
+    title: "Platform Settings",
+    description:
+      "Switches that change how the app behaves for every farmer. Values are read live, so a change takes effect on the next request — no deploy, no restart. A key nothing in the code reads does nothing at all, so add rows only alongside the code that consults them.",
+    entityName: "Setting",
+    endpoint: "/api/v1/settings/app",
+    columns: [
+      { key: "setting_key", label: "Key" },
+      { key: "value_text", label: "Value" },
+      { key: "description", label: "What it does" }
+    ],
+    rows: [],
+    formFields: [
+      { label: "Key", name: "setting_key", value: "", hint: "Must match the key the code looks up. Changing it silently disables the setting." },
+      {
+        label: "Value",
+        name: "value_text",
+        type: "select",
+        options: ["0", "1"],
+        hint: "For on/off switches: 1 is on, 0 is off. Other settings may take free text."
+      },
+      { label: "What it does", name: "description", type: "textarea", value: "" }
+    ]
+  },
   "loan/hard-stops": {
     title: "Hard Stops",
     description:

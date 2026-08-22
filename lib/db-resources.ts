@@ -590,6 +590,13 @@ const configs: Record<string, ResourceConfig> = {
     allowedUpdate: ["sort_order","metric","min_value","max_value","rating","label_bn","label_en","is_active"],
     defaults: { rating: 0, sort_order: 0, is_active: 1 }
   },
+  // Platform switches. Deliberately not free-form key creation from the app —
+  // a key nothing reads is a setting that silently does nothing.
+  "settings/app": simpleConfig(
+    "app_settings",
+    ["setting_key", "value_text", "description"],
+    { value_text: "0" }
+  ),
   "loan/hard-stops": simpleConfig(
     "credit_hard_stop_rules",
     ["code","label_bn","label_en","explanation_bn","explanation_en","required_action_bn",

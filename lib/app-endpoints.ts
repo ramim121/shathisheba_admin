@@ -34,6 +34,7 @@ export * from "./endpoints/admin-maintenance";
 
 import { getUserRoles, safeJson, type Row } from "./endpoints/shared";
 import { buildAppUser, buildKycSummary } from "./endpoints/auth";
+import { getBoolSetting } from "@/lib/settings";
 
 
 export async function getOnboardingTree() {
@@ -539,6 +540,22 @@ export async function getAppMyProjects(userId?: string | null) {
 // user's region (or open) — used to enable/disable List-for-Sale categories.
 export async function getSaleCategoryAvailability(userId?: string | null, division?: string | null, district?: string | null) {
   const region = await resolveUserRegion(userId, division, district);
+
+  // The project gate is a coverage decision, not a law. With it off, every
+  // category the app has actually built is open everywhere — a farmer in an
+  // uncovered upazila saw a screen of greyed-out tiles reading "no project in
+  // your area", which is indistinguishable from a broken app. Which categories
+  // are genuinely sellable is decided by sale_categories.is_active and by what
+  // the app has screens for, not by this.
+  const gated = await getBoolSetting("sale_require_project", false);
+
+  if (!gated) {
+    const categories = await queryRows<Row>(
+      `SELECT COALESCE(interest_slug, slug) AS slug FROM sale_categories WHERE is_active = 1`
+    );
+    return { region, available: categories.map((r) => String(r.slug)), gated: false };
+  }
+
   const rows = await queryRows<Row>(
     `
       SELECT DISTINCT p.interest_slug
@@ -552,7 +569,7 @@ export async function getSaleCategoryAvailability(userId?: string | null, divisi
     [region.division, region.district]
   );
   const available = rows.map((r) => String(r.interest_slug));
-  return { region, available };
+  return { region, available, gated: true };
 }
 
 // GET /api/v1/app/projects/prev-rates?animal_id=&breed_id=&district=

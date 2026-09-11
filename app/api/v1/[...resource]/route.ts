@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { resolveCaller, unauthorized, forbidden, type Caller } from "@/lib/app-auth";
 import { checkAccess } from "@/lib/api-access";
 import { RateLimitError, isDatabaseError } from "@/lib/errors";
+import { resolveGeoNames, searchUpazilas } from "@/lib/geo";
+import { GEO_FEATURES, getAllGeoScopes, inheritUserGeo, type GeoFeature } from "@/lib/geo-scope";
+import { getMyChangeRequest, listProfileChangeRequests, reviewProfileChangeRequest } from "@/lib/endpoints/profile-changes";
+import { recordAudit } from "@/lib/audit";
 import {
   apiCatalog,
   buyOrders,
@@ -79,6 +83,10 @@ import {
   setUserRoles,
   likePost,
   placeOrder,
+  getOrderQuote,
+  getAppOrderDetail,
+  getAppManufacturer,
+  getAppDistributor,
   requestOtp,
   addUserKycDocument,
   savePersonalInfo,
@@ -144,11 +152,30 @@ import {
   DATASETS,
   type DatasetKey
 } from "@/lib/app-endpoints";
+import { assertOperational, getOperationalStatus, getOperationalZones } from "@/lib/operational";
 import {
   getListingProgress,
   getMyProjectApplications,
   getProjectApplicationProgress
 } from "@/lib/endpoints/progress";
+import { getListingWorkflow, saveListingWorkflow } from "@/lib/endpoints/listing-workflow";
+import { getPricingOverlaps, pricingWarningsFor } from "@/lib/endpoints/pricing-overlaps";
+import { getPromotionStatus } from "@/lib/promotions";
+import {
+  audienceSummary,
+  getInbox,
+  markRead,
+  notificationStatus,
+  previewTemplate,
+  registerDevice,
+  sendBroadcast,
+  setAppLang,
+  testTemplate,
+  unregisterDevice,
+  type BroadcastInput
+} from "@/lib/notify";
+import { notifyListing } from "@/lib/notices";
+import { getAppMarketOverview, getAppPartners, reorderPartners } from "@/lib/endpoints/engagement";
 
 // App-facing list reads. The mobile app hits these generic resource paths and
 // needs raw bilingual/detail columns; the admin panel reads lib/db-resources
@@ -156,8 +183,8 @@ import {
 type AppReadHandler = (searchParams: URLSearchParams) => Promise<unknown>;
 
 const appReadHandlers: Record<string, AppReadHandler> = {
-  "market-updates": (q) => getAppMarketUpdates(q.get("district")),
-  weather: (q) => getAppWeatherAlerts(q.get("district")),
+  "market-updates": (q) => getAppMarketUpdates(q.get("user_id")),
+  weather: (q) => getAppWeatherAlerts(q.get("user_id"), q.get("gps_district_id"), q.get("gps_upazila_id")),
   "sale/categories": () => getAppSaleCategories(),
   "sale/items": () => getAppSaleItems(),
   "sale/breeds": (q) => getAppBreeds(q.get("species")),
@@ -166,26 +193,57 @@ const appReadHandlers: Record<string, AppReadHandler> = {
   "geo/divisions": () => getAppGeoDivisions(),
   "geo/districts": (q) => getAppGeoDistricts(q.get("division_id")),
   "geo/upazilas": (q) => getAppGeoUpazilas(q.get("district_id")),
-  "buy/categories": () => getAppBuyCategories(),
-  "buy/products": (q) => getAppProducts(q.get("category"), q.get("interest")),
+  "geo/search": (q) => searchUpazilas(q.get("q") ?? "", Number(q.get("limit") ?? 20)),
+  "geo/resolve": (q) => resolveGeoNames({ division: q.get("division"), district: q.get("district"), upazila: q.get("upazila") }),
+  "app/geo/scopes": () => getAllGeoScopes(),
+  // Which offerings the farmer can use where they are, and why not if not.
+  "app/operational-status": (q) => getOperationalStatus(q.get("user_id")),
+  "admin/geo/zones": () => getOperationalZones(),
+  "app/profile/change-request": (q) => getMyChangeRequest(q.get("user_id")),
+  "admin/geo/scopes": async () => {
+    const values = await getAllGeoScopes();
+    return GEO_FEATURES.map((feature) => ({ ...feature, value: values[feature.key] }));
+  },
+  "admin/profile-requests": (q) => listProfileChangeRequests(q.get("status")),
+  // Only products sold where the buyer is (per-product area, set in Product setup).
+  "buy/categories": (q) => getAppBuyCategories(q.get("user_id")),
+  "buy/products": (q) => getAppProducts(q.get("category"), q.get("interest"), q.get("user_id"), q.get("manufacturer_id")),
+  // "Made by" / "Distributed by" detail modals. Not ?id= — that means a
+  // single-record read of a CRUD resource to this route.
+  "app/brands/manufacturer": (q) => getAppManufacturer(q.get("manufacturer_id")),
+  "app/brands/distributor": (q) => getAppDistributor(q.get("distributor_id")),
   "learning/modules": () => getAppLearningModules(),
   "learning/contents": () => getAppLearningContents(),
   "partners/projects": () => getAppPartnerProjects(),
   "partners/ledgers": () => getAppPartnerLedgers(),
-  "app/projects/active": (q) => getAppActiveProjects(q.get("user_id"), q.get("division"), q.get("district")),
+  "app/projects/active": (q) => getAppActiveProjects(q.get("user_id")),
   "app/projects/mine": (q) => getAppMyProjects(q.get("user_id")),
   "app/projects/prev-rates": (q) => getProjectPrevRates(q.get("animal_id"), q.get("breed_id"), q.get("district")),
-  "app/sale/category-availability": (q) => getSaleCategoryAvailability(q.get("user_id"), q.get("division"), q.get("district")),
+  "app/sale/category-availability": (q) => getSaleCategoryAvailability(q.get("user_id")),
   "app/sale/my-listings": (q) => getMyListings(q.get("user_id")),
   "app/sale/listing-progress": (q) => getListingProgress(q.get("listing_id"), q.get("user_id")),
   "app/projects/applications": (q) => getMyProjectApplications(q.get("user_id")),
   "app/projects/application-progress": (q) =>
     getProjectApplicationProgress(q.get("application_id"), q.get("user_id")),
   "app/orders/mine": (q) => getMyOrders(q.get("user_id")),
+  // Order screen: subtotal, discount and why, and whether the address is deliverable.
+  "app/orders/quote": (q) => getOrderQuote(q),
+  "app/orders/detail": (q) => getAppOrderDetail(q.get("order_id"), q.get("user_id")),
+  // Notifications inbox, home partner strip, market overview.
+  "app/notifications": (q) => getInbox(q.get("user_id")),
+  "app/partners": () => getAppPartners(),
+  "app/market/overview": (q) => getAppMarketOverview(q.get("user_id")),
+  "admin/notifications/status": () => notificationStatus(),
+  "admin/notifications/audience": (q) =>
+    audienceSummary(q.get("target") ?? "all", (q.get("roles") ?? "").split(",").filter(Boolean), (q.get("user_ids") ?? "").split(",").filter(Boolean)),
+  // Catalogue sticker: is the first-purchase offer still this buyer's.
+  "app/promotions/status": (q) => getPromotionStatus(q.get("user_id")),
+  "admin/sale/listing-workflow": (q) => getListingWorkflow(q.get("listing_id")),
+  "admin/sale/pricing/overlaps": () => getPricingOverlaps(),
   "app/admin/inventory": () => getInventoryOverview(),
   "app/admin/stats": () => getAdminStats(),
   "community/posts": (q) => getAppCommunityPosts(q.get("scope"), q.get("district"), q.get("filter"), q.get("user_id")),
-  "community/officers": (q) => getAppOfficers(q.get("district")),
+  "community/officers": (q) => getAppOfficers(q.get("user_id")),
   users: (q) => getAppProfileUsers(q.get("user_id")),
   "app/users": (q) => getAppProfileUsers(q.get("user_id")),
   "app/me": (q) => getAppMe(q.get("user_id")),
@@ -269,6 +327,23 @@ function unknownResource(method: string, resource: string) {
   );
 }
 
+const CODED_STATUS: Record<string, number> = {
+  geo_locked: 403,
+  change_pending: 409,
+  location_required: 422,
+  zone_inactive: 403,
+  invalid_geo: 400,
+  promo_invalid: 422
+};
+
+// Creations a farmer makes inherit the farmer's approved location, at the
+// feature's geo scope. The client's own location fields are discarded.
+const GEO_INHERIT: Record<string, GeoFeature> = {
+  "sale/listings": "sale_listings",
+  "community/posts": "community_posts",
+  "community/reports": "community_posts"
+};
+
 function dbError(error: unknown) {
   // A deliberate refusal is not a database failure — surface it as 429 so the
   // client can back off instead of treating it as a server fault and retrying.
@@ -283,6 +358,13 @@ function dbError(error: unknown) {
   // and does not leak the driver's message to the client.
   if (!isDatabaseError(error)) {
     const message = error instanceof Error ? error.message : "Invalid request.";
+    // A refusal the app handles specifically keeps its code: geo_locked opens
+    // the "outside your area" screen, change_pending the "under review" state,
+    // location_required the prompt to finish the profile.
+    const code = (error as { code?: unknown } | null)?.code;
+    if (typeof code === "string" && CODED_STATUS[code]) {
+      return NextResponse.json({ ok: false, message, code }, { status: CODED_STATUS[code] });
+    }
     return NextResponse.json({ ok: false, message, code: "invalid_request" }, { status: 400 });
   }
   console.error("database error", error);
@@ -374,6 +456,7 @@ export async function GET(request: NextRequest, { params }: Params) {
         animal_id: searchParams.get("animal_id"),
         breed_id: searchParams.get("breed_id"),
         sale_item_id: searchParams.get("sale_item_id"),
+        user_id: searchParams.get("user_id"),
         district: searchParams.get("district"),
         weight: searchParams.get("weight"),
         meat_weight: searchParams.get("meat_weight")
@@ -446,7 +529,7 @@ export async function GET(request: NextRequest, { params }: Params) {
       if (id) {
         return envelope(await getAppMarketUpdate(id), { source: "mysql", surface: "app", resource, id });
       }
-      return envelope(await getAppMarketUpdates(searchParams.get("district")), { source: "mysql", surface: "app", resource });
+      return envelope(await getAppMarketUpdates(searchParams.get("user_id")), { source: "mysql", surface: "app", resource });
     } catch (error) {
       return dbError(error);
     }
@@ -510,7 +593,7 @@ export async function GET(request: NextRequest, { params }: Params) {
     case "app/home":
       try {
         return envelope(
-          await getHomeFeed(searchParams.get("user_id"), searchParams.get("district")),
+          await getHomeFeed(searchParams.get("user_id"), searchParams.get("gps_district_id"), searchParams.get("gps_upazila_id")),
           { source: "mysql", surface: "mobile-home" }
         );
       } catch (error) {
@@ -779,6 +862,81 @@ export async function POST(request: NextRequest, { params }: Params) {
     if (exact === "app/auth/verify-otp") {
       return NextResponse.json({ ok: true, source: "mysql", action: "authenticated", result: await verifyOtpLogin(payload) }, { status: 200 });
     }
+    // ---- Notifications ------------------------------------------------------
+    if (exact === "app/notifications/read") {
+      const p = payload as Record<string, unknown>;
+      return NextResponse.json({ ok: true, action: "notifications_read", result: await markRead(p.user_id, p.id) });
+    }
+    if (exact === "app/push/register") {
+      const p = payload as Record<string, unknown>;
+      return NextResponse.json({ ok: true, action: "push_registered", result: await registerDevice(p.user_id, p) });
+    }
+    if (exact === "app/push/unregister") {
+      const p = payload as Record<string, unknown>;
+      return NextResponse.json({ ok: true, action: "push_unregistered", result: await unregisterDevice(p.user_id, p.token) });
+    }
+    if (exact === "app/me/lang") {
+      const p = payload as Record<string, unknown>;
+      return NextResponse.json({ ok: true, action: "lang_saved", result: await setAppLang(p.user_id, p.lang) });
+    }
+    if (exact === "admin/notifications/preview") {
+      if (caller.kind !== "admin") return forbidden();
+      const p = payload as Record<string, unknown>;
+      return NextResponse.json({ ok: true, result: previewTemplate((p.template ?? {}) as Record<string, unknown>, p.lang === "en" ? "en" : "bn") });
+    }
+    if (exact === "admin/notifications/test") {
+      if (caller.kind !== "admin") return forbidden();
+      const p = payload as Record<string, unknown>;
+      return NextResponse.json({ ok: true, result: await testTemplate(String(p.event_key ?? ""), p.user_id) });
+    }
+    if (exact === "admin/notifications/broadcast") {
+      if (caller.kind !== "admin") return forbidden("Only staff can send notifications.");
+      const result = await sendBroadcast(payload as unknown as BroadcastInput, caller.admin.id);
+      await recordAudit({
+        actorAdminId: caller.admin.id,
+        action: "broadcast_sent",
+        entityType: "broadcast",
+        entityId: result.broadcast_id,
+        after: result,
+        ip: clientIp(request),
+        userAgent: request.headers.get("user-agent")
+      });
+      return NextResponse.json({ ok: true, action: "broadcast_sent", result });
+    }
+    if (exact === "admin/partners/reorder") {
+      if (caller.kind !== "admin") return forbidden();
+      return NextResponse.json({ ok: true, result: await reorderPartners((payload as Record<string, unknown>).ids) });
+    }
+    if (exact === "admin/sale/listing-workflow") {
+      if (caller.kind !== "admin") return forbidden("Only staff can move a listing through its steps.");
+      const p = payload as Record<string, unknown>;
+      const result = await saveListingWorkflow(p, caller.admin.id);
+      await recordAudit({
+        actorAdminId: caller.admin.id,
+        action: `listing_${String(p.action ?? "update")}`,
+        entityType: "sale_listing",
+        entityId: String(p.listing_id ?? ""),
+        after: { status: result?.listing?.status ?? null },
+        ip: clientIp(request),
+        userAgent: request.headers.get("user-agent")
+      });
+      return NextResponse.json({ ok: true, source: "mysql", action: "listing_workflow", result });
+    }
+    if (exact === "admin/profile-requests/review") {
+      if (caller.kind !== "admin") return forbidden("Only staff can review profile changes.");
+      const p = payload as Record<string, unknown>;
+      const result = await reviewProfileChangeRequest(p.id, p.decision, p.note, caller.admin.id);
+      await recordAudit({
+        actorAdminId: caller.admin.id,
+        action: `profile_change_${result.status}`,
+        entityType: "profile_change_request",
+        entityId: result.id,
+        after: { user_id: result.user_id, note: p.note ?? null },
+        ip: clientIp(request),
+        userAgent: request.headers.get("user-agent")
+      });
+      return NextResponse.json({ ok: true, source: "mysql", action: "profile_change_reviewed", result }, { status: 200 });
+    }
     if (exact === "app/profile") {
       return NextResponse.json({ ok: true, source: "mysql", action: "profile_saved", result: await savePersonalInfo(payload) }, { status: 200 });
     }
@@ -846,8 +1004,31 @@ export async function POST(request: NextRequest, { params }: Params) {
   const { resource } = await resolveResourceContext(params, request);
   if (hasDbResource(resource)) {
     try {
-      const result = await createResource(resource, payload);
-      return NextResponse.json({ ok: true, source: "mysql", action: "created", resource, result }, { status: 201 });
+      // Listing needs field coverage at the listing scope's level.
+      if (caller.kind === "app" && resource === "sale/listings") {
+        await assertOperational(caller.user.id, "sale_listings");
+      }
+      const input: Record<string, unknown> = caller.kind === "app" && GEO_INHERIT[resource]
+        ? { ...(await inheritUserGeo(GEO_INHERIT[resource], payload as Record<string, unknown>, caller.user.id)) }
+        : { ...(payload as Record<string, unknown>) };
+      if (resource === "sale/listings" && !input.pricing_rule_id) {
+        // Record the rule the farmer was quoted on, so the console can show
+        // which price rule a listing is attached to.
+        const str = (v: unknown) => (v === undefined || v === null || v === "" ? null : String(v));
+        const quote = await getSalePriceQuote({
+          animal_id: str(input.animal_id),
+          breed_id: str(input.breed_id),
+          sale_item_id: str(input.sale_item_id),
+          user_id: caller.kind === "app" ? String(caller.user.id) : str(input.user_id)
+        });
+        if (quote.rule) input.pricing_rule_id = quote.rule.id;
+      }
+      const result = await createResource(resource, input);
+      if (resource === "sale/listings" && caller.kind === "app" && result?.insertId) {
+        await notifyListing(result.insertId, "listing_submitted");
+      }
+      const warnings = resource === "sale/pricing" && result?.insertId ? await pricingWarningsFor(result.insertId) : [];
+      return NextResponse.json({ ok: true, source: "mysql", action: "created", resource, result, warnings }, { status: 201 });
     } catch (error) {
       return dbError(error);
     }
@@ -868,7 +1049,9 @@ export async function PUT(request: NextRequest, { params }: Params) {
     }
     try {
       const result = await updateResource(resource, id, payload);
-      return NextResponse.json({ ok: true, source: "mysql", action: "updated", resource, id, result });
+      // A price rule save reports any active rule it now overlaps.
+      const warnings = resource === "sale/pricing" ? await pricingWarningsFor(id) : [];
+      return NextResponse.json({ ok: true, source: "mysql", action: "updated", resource, id, result, warnings });
     } catch (error) {
       return dbError(error);
     }
@@ -889,7 +1072,9 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     }
     try {
       const result = await updateResource(resource, id, payload);
-      return NextResponse.json({ ok: true, source: "mysql", action: "updated", resource, id, result });
+      // A price rule save reports any active rule it now overlaps.
+      const warnings = resource === "sale/pricing" ? await pricingWarningsFor(id) : [];
+      return NextResponse.json({ ok: true, source: "mysql", action: "updated", resource, id, result, warnings });
     } catch (error) {
       return dbError(error);
     }

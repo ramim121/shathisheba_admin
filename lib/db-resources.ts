@@ -2,6 +2,20 @@ import type { ResultSetHeader } from "mysql2";
 import { executeQuery, queryRows, withTransaction, type Tx } from "@/lib/db";
 import { assertQuestionSetIntegrity } from "@/lib/finance/questionnaire-guard";
 import { assertScorecardIntegrity } from "@/lib/finance/scorecard-guard";
+import { normaliseGeoPayload, type GeoLevel } from "@/lib/geo";
+import { invalidateSettings } from "@/lib/settings";
+import { syncOrderPromotion } from "@/lib/promotions";
+import { recordOrderEvent } from "@/lib/order-events";
+import { notifyOrder } from "@/lib/notices";
+
+const ORDER_STATUS_EVENT: Record<string, string> = {
+  confirmed: "order_confirmed",
+  assigned: "order_on_the_way",
+  in_transit: "order_on_the_way",
+  delivered: "order_delivered",
+  cancelled: "order_cancelled"
+};
+import { FARMER_RATE_SQL } from "@/lib/pricing";
 
 type ResourceConfig = {
   table: string;
@@ -10,10 +24,22 @@ type ResourceConfig = {
   allowedInsert: string[];
   allowedUpdate: string[];
   defaults?: Record<string, unknown>;
+  /**
+   * Columns where a blank form value means "clear it" (to null or 0) rather
+   * than "leave it unchanged" — e.g. the unused half of a %/flat fee pair.
+   */
+  blankAs?: Record<string, null | number>;
+  /** After a create/update: join tables and derived columns. */
+  afterSave?: (id: string, payload: Record<string, unknown>) => Promise<void>;
+  /** Extra fields for a single-record read (e.g. a join table as "1,2"). */
+  loadRow?: (row: Record<string, unknown>) => Promise<Record<string, unknown>>;
   // Run after the write, on the same connection, before the commit. Throwing
   // rolls the write back — the place to enforce an invariant that spans rows and
   // therefore cannot be expressed as a column constraint.
   afterWrite?: (tx: Tx) => Promise<void>;
+  // Legacy location text columns this table has. Set automatically below; a
+  // resource with any of them stores ids and has its names written from them.
+  geo?: GeoLevel[];
 };
 
 function simpleConfig(
@@ -162,8 +188,8 @@ const configs: Record<string, ResourceConfig> = {
       LEFT JOIN animal_breeds b ON b.id = l.breed_id
       ORDER BY l.created_at DESC
     `,
-    allowedInsert: ["listing_code", "user_id", "sale_item_id", "animal_id", "breed_id", "title_en", "title_bn", "description", "age_months", "weight_kg", "meat_weight_kg", "dressing_pct", "quantity", "unit", "farmer_expected_price", "estimated_earning", "contact_phone", "contact_name", "contact_nid", "contact_is_self", "address_text", "division", "district", "upazila", "ai_analysis_json", "media_json", "status"],
-    allowedUpdate: ["sale_item_id", "animal_id", "breed_id", "title_en", "title_bn", "description", "age_months", "weight_kg", "meat_weight_kg", "dressing_pct", "quantity", "unit", "farmer_expected_price", "estimated_earning", "contact_phone", "contact_name", "contact_nid", "contact_is_self", "address_text", "division", "district", "upazila", "ai_analysis_json", "media_json", "status", "approved_by", "approved_at", "field_visit_date", "field_visit_note", "verified_weight_kg", "paid_at", "paid_amount", "payment_method", "payment_reference"],
+    allowedInsert: ["listing_code", "user_id", "sale_item_id", "animal_id", "breed_id", "title_en", "title_bn", "description", "age_months", "weight_kg", "meat_weight_kg", "dressing_pct", "quantity", "unit", "farmer_expected_price", "estimated_earning", "contact_phone", "contact_name", "contact_nid", "contact_is_self", "address_text", "division", "district", "upazila", "ai_analysis_json", "media_json", "status", "pricing_rule_id"],
+    allowedUpdate: ["sale_item_id", "animal_id", "breed_id", "title_en", "title_bn", "description", "age_months", "weight_kg", "meat_weight_kg", "dressing_pct", "quantity", "unit", "farmer_expected_price", "estimated_earning", "contact_phone", "contact_name", "contact_nid", "contact_is_self", "address_text", "division", "district", "upazila", "ai_analysis_json", "media_json", "status", "approved_by", "approved_at", "field_visit_date", "field_visit_note", "verified_weight_kg", "paid_at", "paid_amount", "payment_method", "payment_reference", "pricing_rule_id"],
     defaults: { listing_code: `SAL-${Date.now()}`, quantity: 1, unit: "piece", status: "submitted" }
   },
   "sale/items": {
@@ -205,18 +231,224 @@ const configs: Record<string, ResourceConfig> = {
     listSql: `
       SELECT
         CAST(r.id AS CHAR) AS id,
+        COALESCE(r.rule_name, CONCAT('Rule #', r.id)) AS rule,
         si.name_en AS item,
-        COALESCE(r.district, 'All districts') AS district,
-        CONCAT('Market ', r.b2b_market_rate, ' / Farmer ', r.farmer_rate) AS rates,
-        CONCAT('Fees ', r.platform_fee + r.logistics_fee + r.warehouse_vet_fee, ' per ', r.unit) AS fees,
-        IF(r.is_active = 1, 'Active', 'Inactive') AS status
+        COALESCE(gu.name_en, gd.name_en, gv.name_en, 'All districts') AS district,
+        CONCAT('B2B ৳', r.b2b_market_rate, '/kg live · ৳', COALESCE(r.b2b_meat_rate, 0), '/kg meat · Farmer ৳', r.farmer_rate) AS rates,
+        CONCAT_WS(' · ',
+          CONCAT('Platform ', IF(COALESCE(r.platform_fee, 0) > 0, CONCAT('৳', r.platform_fee + 0, '/kg'), CONCAT(COALESCE(r.platform_fee_pct, 0) + 0, '%'))),
+          CONCAT('Logistics ', IF(COALESCE(r.logistics_fee, 0) > 0, CONCAT('৳', r.logistics_fee + 0, '/kg'), CONCAT(COALESCE(r.logistics_fee_pct, 0) + 0, '%'))),
+          CONCAT('Care ', IF(COALESCE(r.warehouse_vet_fee, 0) > 0, CONCAT('৳', r.warehouse_vet_fee + 0, '/kg'), CONCAT(COALESCE(r.warehouse_vet_fee_pct, 0) + 0, '%')))) AS fees,
+        (SELECT COUNT(*) FROM sale_listings l WHERE l.pricing_rule_id = r.id) AS listings,
+        IF(r.is_active = 1, 'Active', 'Retired') AS status
       FROM sale_pricing_rules r
       JOIN sale_items si ON si.id = r.sale_item_id
-      ORDER BY r.effective_from DESC, r.id DESC
+      LEFT JOIN geo_upazilas gu ON gu.id = r.upazila_id
+      LEFT JOIN geo_districts gd ON gd.id = r.district_id
+      LEFT JOIN geo_divisions gv ON gv.id = r.division_id
+      -- Every rule, the ones that price listings today first. Retired rules
+      -- stay visible (and re-activatable); listings keep pointing at the rule
+      -- they were priced on.
+      ORDER BY r.is_active DESC, r.effective_from DESC, r.id DESC
     `,
-    allowedInsert: ["sale_item_id", "partner_project_id", "animal_id", "breed_id", "district", "division", "effective_from", "effective_to", "b2b_market_rate", "b2b_meat_rate", "dressing_pct", "farmer_rate", "platform_fee", "platform_fee_pct", "logistics_fee", "warehouse_vet_fee", "unit", "is_active"],
-    allowedUpdate: ["sale_item_id", "partner_project_id", "animal_id", "breed_id", "district", "division", "effective_from", "effective_to", "b2b_market_rate", "b2b_meat_rate", "dressing_pct", "farmer_rate", "platform_fee", "platform_fee_pct", "logistics_fee", "warehouse_vet_fee", "unit", "is_active"],
-    defaults: { effective_from: new Date(), b2b_market_rate: 0, b2b_meat_rate: 0, dressing_pct: 50, farmer_rate: 0, platform_fee: 0, logistics_fee: 0, warehouse_vet_fee: 0, unit: "kg", is_active: 1 }
+    allowedInsert: ["sale_item_id", "partner_project_id", "animal_id", "breed_id", "district", "division", "effective_from", "effective_to", "b2b_market_rate", "b2b_meat_rate", "dressing_pct", "farmer_rate", "platform_fee", "platform_fee_pct", "logistics_fee", "warehouse_vet_fee", "unit", "is_active", "rule_name", "logistics_fee_pct", "warehouse_vet_fee_pct"],
+    allowedUpdate: ["sale_item_id", "partner_project_id", "animal_id", "breed_id", "district", "division", "effective_from", "effective_to", "b2b_market_rate", "b2b_meat_rate", "dressing_pct", "farmer_rate", "platform_fee", "platform_fee_pct", "logistics_fee", "warehouse_vet_fee", "unit", "is_active", "rule_name", "logistics_fee_pct", "warehouse_vet_fee_pct"],
+    defaults: { effective_from: new Date(), b2b_market_rate: 0, b2b_meat_rate: 0, dressing_pct: 50, farmer_rate: 0, platform_fee: 0, logistics_fee: 0, warehouse_vet_fee: 0, unit: "kg", is_active: 1 },
+    // Each fee is % or flat; the form blanks the unused half.
+    blankAs: {
+      platform_fee: 0, logistics_fee: 0, warehouse_vet_fee: 0,
+      platform_fee_pct: null, logistics_fee_pct: null, warehouse_vet_fee_pct: null,
+      effective_to: null, animal_id: null, breed_id: null, partner_project_id: null
+    },
+    // The stored farmer rate is always the arithmetic, never a typed figure.
+    afterSave: async (id) => { await executeQuery(FARMER_RATE_SQL, [id]); }
+  },
+  // Buyers and partners in the app's home-screen strip, in sort_order.
+  "home/partners": {
+    table: "business_partners",
+    listSql: `
+      SELECT
+        CAST(p.id AS CHAR) AS id,
+        p.name_en AS name,
+        COALESCE(p.name_bn, '') AS bangla,
+        p.kind,
+        COALESCE(p.badge_en, '') AS badge,
+        p.logo_url,
+        p.sort_order,
+        IF(p.is_active = 1, 'Active', 'Inactive') AS status
+      FROM business_partners p
+      ORDER BY p.sort_order, p.id
+    `,
+    allowedInsert: ["name_en", "name_bn", "kind", "badge_en", "badge_bn", "tagline_en", "tagline_bn", "description_en", "description_bn", "logo_url", "website", "phone", "sort_order", "is_active", "starts_at", "ends_at"],
+    allowedUpdate: ["name_en", "name_bn", "kind", "badge_en", "badge_bn", "tagline_en", "tagline_bn", "description_en", "description_bn", "logo_url", "website", "phone", "sort_order", "is_active", "starts_at", "ends_at"],
+    defaults: { kind: "buyer", sort_order: 99, is_active: 1 },
+    blankAs: { starts_at: null, ends_at: null }
+  },
+  // Notifications (lib/notify.ts sends them).
+  "notifications/templates": {
+    table: "notification_templates",
+    listSql: `
+      SELECT
+        CAST(t.id AS CHAR) AS id,
+        t.event_key,
+        t.name,
+        t.category,
+        CONCAT_WS(' · ', IF(t.send_push = 1, 'Push', NULL), IF(t.send_inapp = 1, 'In-app', NULL), IF(t.send_email = 1, 'Email', NULL)) AS channels,
+        IF(t.is_active = 1, 'Active', 'Inactive') AS status
+      FROM notification_templates t
+      ORDER BY FIELD(t.category, 'order', 'listing', 'enrollment', 'promotion', 'account', 'general'), t.id
+    `,
+    // New events come from code, so templates are edited, not created here.
+    allowedInsert: [],
+    allowedUpdate: ["name", "category", "send_push", "send_inapp", "send_email", "title_en", "title_bn", "body_en", "body_bn", "email_subject_en", "email_subject_bn", "email_body_en", "email_body_bn", "cta_label_en", "cta_label_bn", "is_active"],
+    defaults: {}
+  },
+  "notifications/broadcasts": {
+    table: "broadcasts",
+    listSql: `
+      SELECT
+        CAST(b.id AS CHAR) AS id,
+        b.title_en AS title,
+        CASE b.target WHEN 'all' THEN 'Everyone' WHEN 'roles' THEN CONCAT('Groups: ', COALESCE(JSON_UNQUOTE(b.target_roles), '')) ELSE CONCAT(JSON_LENGTH(b.target_user_ids), ' user(s)') END AS target,
+        b.recipients,
+        CONCAT('Push ', b.push_sent, IF(b.push_skipped > 0, CONCAT(' (', b.push_skipped, ' not delivered)'), ''), IF(b.send_email = 1, CONCAT(' · Email ', b.emails_queued), '')) AS delivered,
+        DATE_FORMAT(COALESCE(b.sent_at, b.created_at), '%d %b %Y %H:%i') AS sent,
+        IF(b.sent_at IS NULL, 'Draft', 'Sent') AS status
+      FROM broadcasts b
+      ORDER BY b.id DESC
+    `,
+    allowedInsert: [],
+    allowedUpdate: [],
+    defaults: {}
+  },
+  "notifications/outbox": {
+    table: "notification_outbox",
+    listSql: `
+      SELECT
+        CAST(o.id AS CHAR) AS id,
+        o.channel,
+        COALESCE(o.recipient, '') AS recipient,
+        COALESCE(o.subject, '') AS subject,
+        COALESCE(o.event_key, '') AS event,
+        COALESCE(o.error, '') AS error,
+        DATE_FORMAT(o.created_at, '%d %b %Y %H:%i') AS created,
+        o.status
+      FROM notification_outbox o
+      ORDER BY o.id DESC
+    `,
+    allowedInsert: [],
+    allowedUpdate: [],
+    defaults: {}
+  },
+  // Buy from Shathi: who makes products and who delivers them. A distributor's
+  // area decides who can buy and where the order can go (lib/distribution.ts).
+  "brands/manufacturers": {
+    table: "manufacturers",
+    listSql: `
+      SELECT
+        CAST(m.id AS CHAR) AS id,
+        COALESCE(m.code, '') AS code,
+        m.name_en AS name,
+        COALESCE(m.name_bn, '') AS bangla,
+        COALESCE(m.phone, m.email, '—') AS contact,
+        (SELECT COUNT(*) FROM products p WHERE p.manufacturer_id = m.id) AS products,
+        IF(m.is_active = 1, 'Active', 'Inactive') AS status
+      FROM manufacturers m
+      ORDER BY m.is_active DESC, m.name_en
+    `,
+    allowedInsert: ["code", "name_en", "name_bn", "short_name_en", "short_name_bn", "logo_url", "description_en", "description_bn", "address_en", "address_bn", "factory_address_en", "factory_address_bn", "phone", "email", "website", "registration_no", "contact_person", "established_year", "is_active"],
+    allowedUpdate: ["code", "name_en", "name_bn", "short_name_en", "short_name_bn", "logo_url", "description_en", "description_bn", "address_en", "address_bn", "factory_address_en", "factory_address_bn", "phone", "email", "website", "registration_no", "contact_person", "established_year", "is_active"],
+    defaults: { is_active: 1 }
+  },
+  "brands/distributors": {
+    table: "distributors",
+    listSql: `
+      SELECT
+        CAST(d.id AS CHAR) AS id,
+        COALESCE(d.code, '') AS code,
+        d.name_en AS name,
+        COALESCE(CONCAT(gu.name_en, ', ', gd.name_en), CONCAT(gd.name_en, ' district'), CONCAT(gv.name_en, ' division'), 'Nationwide') AS area,
+        COALESCE(d.phone, d.email, '—') AS contact,
+        (SELECT COUNT(*) FROM product_distributors pd WHERE pd.distributor_id = d.id AND pd.is_active = 1) AS products,
+        IF(d.is_active = 1, 'Active', 'Inactive') AS status
+      FROM distributors d
+      LEFT JOIN geo_upazilas gu ON gu.id = d.upazila_id
+      LEFT JOIN geo_districts gd ON gd.id = d.district_id
+      LEFT JOIN geo_divisions gv ON gv.id = d.division_id
+      ORDER BY d.is_active DESC, d.name_en
+    `,
+    allowedInsert: ["code", "name_en", "name_bn", "short_name_en", "short_name_bn", "logo_url", "description_en", "description_bn", "services_en", "services_bn", "address_en", "address_bn", "phone", "email", "website", "registration_no", "contact_person", "established_year", "is_active"],
+    allowedUpdate: ["code", "name_en", "name_bn", "short_name_en", "short_name_bn", "logo_url", "description_en", "description_bn", "services_en", "services_bn", "address_en", "address_bn", "phone", "email", "website", "registration_no", "contact_person", "established_year", "is_active"],
+    defaults: { is_active: 1 }
+  },
+  // Buy from Shathi promotions (lib/promotions.ts applies them).
+  "promotions/codes": {
+    table: "promotions",
+    listSql: `
+      SELECT
+        CAST(p.id AS CHAR) AS id,
+        COALESCE(p.code, 'Automatic') AS code,
+        p.name_en AS name,
+        IF(p.discount_type = 'flat', CONCAT('৳', p.discount_value),
+           CONCAT(p.discount_value + 0, '%', IF(p.max_discount IS NULL, '', CONCAT(' up to ৳', p.max_discount)))) AS discount,
+        CONCAT('Over ৳', p.min_order_amount) AS minimum,
+        CONCAT(COALESCE(DATE_FORMAT(p.starts_at, '%d %b %Y'), 'Now'), ' – ', COALESCE(DATE_FORMAT(p.ends_at, '%d %b %Y'), 'No end')) AS validity,
+        COALESCE(gu.name_en, gd.name_en, gv.name_en, 'Everywhere') AS area,
+        (SELECT COUNT(*) FROM order_promotions op WHERE op.promotion_id = p.id AND op.status IN ('applied','approved')) AS uses,
+        IF(p.is_active = 1, 'Active', 'Inactive') AS status
+      FROM promotions p
+      LEFT JOIN geo_upazilas gu ON gu.id = p.upazila_id
+      LEFT JOIN geo_districts gd ON gd.id = p.district_id
+      LEFT JOIN geo_divisions gv ON gv.id = p.division_id
+      ORDER BY p.kind = 'first_purchase' DESC, p.is_active DESC, p.id DESC
+    `,
+    allowedInsert: ["code", "kind", "name_en", "name_bn", "description_en", "discount_type", "discount_value", "max_discount", "min_order_amount", "starts_at", "ends_at", "usage_limit_total", "usage_limit_per_user", "voucher_on_failure", "is_active"],
+    allowedUpdate: ["code", "kind", "name_en", "name_bn", "description_en", "discount_type", "discount_value", "max_discount", "min_order_amount", "starts_at", "ends_at", "usage_limit_total", "usage_limit_per_user", "voucher_on_failure", "is_active"],
+    defaults: { kind: "promo_code", discount_type: "flat", usage_limit_per_user: 1, voucher_on_failure: 0, is_active: 1 }
+  },
+  "promotions/redemptions": {
+    table: "order_promotions",
+    listSql: `
+      SELECT
+        CAST(op.id AS CHAR) AS id,
+        o.order_code AS order_code,
+        u.full_name AS buyer,
+        CASE op.source WHEN 'first_purchase' THEN 'First purchase' WHEN 'voucher' THEN 'Voucher' ELSE CONCAT('Code ', op.code) END AS promotion,
+        CONCAT('−৳', op.discount_amount, ' of ৳', op.order_subtotal) AS discount,
+        o.fulfillment_status AS order_status,
+        DATE_FORMAT(op.created_at, '%d %b %Y %H:%i') AS placed,
+        op.status
+      FROM order_promotions op
+      JOIN orders o ON o.id = op.order_id
+      JOIN app_users u ON u.id = op.user_id
+      ORDER BY op.id DESC
+    `,
+    // Written only by order placement and order status changes.
+    allowedInsert: [],
+    allowedUpdate: ["note"],
+    defaults: {}
+  },
+  "promotions/vouchers": {
+    table: "user_vouchers",
+    listSql: `
+      SELECT
+        CAST(v.id AS CHAR) AS id,
+        u.full_name AS buyer,
+        u.phone,
+        CONCAT('৳', v.amount, IF(v.min_order_amount > 0, CONCAT(' (orders over ৳', v.min_order_amount, ')'), '')) AS amount,
+        REPLACE(v.reason, '_', ' ') AS reason,
+        COALESCE(so.order_code, '—') AS from_order,
+        COALESCE(ro.order_code, '—') AS used_on,
+        v.status
+      FROM user_vouchers v
+      JOIN app_users u ON u.id = v.user_id
+      LEFT JOIN orders so ON so.id = v.source_order_id
+      LEFT JOIN orders ro ON ro.id = v.reserved_order_id
+      ORDER BY v.id DESC
+    `,
+    allowedInsert: ["user_id", "amount", "min_order_amount", "reason", "expires_at", "note", "status"],
+    allowedUpdate: ["amount", "min_order_amount", "expires_at", "note", "status"],
+    defaults: { reason: "manual", status: "available", min_order_amount: 0 }
   },
   "buy/categories": {
     table: "buy_categories",
@@ -234,14 +466,39 @@ const configs: Record<string, ResourceConfig> = {
         p.name_en AS name,
         c.name_en AS category,
         CONCAT(p.stock_qty, ' ', p.unit, ' · ৳', p.price) AS stock,
+        COALESCE(m.short_name_en, m.name_en, '—') AS manufacturer,
+        COALESCE((SELECT GROUP_CONCAT(COALESCE(d.short_name_en, d.name_en) ORDER BY d.name_en SEPARATOR ', ')
+                    FROM product_distributors pd JOIN distributors d ON d.id = pd.distributor_id
+                   WHERE pd.product_id = p.id AND pd.is_active = 1), 'Direct · everywhere') AS area,
         p.status
       FROM products p
       JOIN buy_categories c ON c.id = p.buy_category_id
+      LEFT JOIN manufacturers m ON m.id = p.manufacturer_id
       ORDER BY p.updated_at DESC
     `,
-    allowedInsert: ["buy_category_id", "sku", "name_en", "name_bn", "short_description_en", "short_description_bn", "unit", "package_size", "price", "stock_qty", "low_stock_threshold", "delivery_window", "status", "metadata"],
-    allowedUpdate: ["buy_category_id", "sku", "name_en", "name_bn", "short_description_en", "short_description_bn", "unit", "package_size", "price", "stock_qty", "low_stock_threshold", "delivery_window", "status", "metadata"],
-    defaults: { sku: `SKU-${Date.now()}`, name_en: "New product", unit: "piece", price: 0, stock_qty: 0, status: "draft" }
+    allowedInsert: ["buy_category_id", "sku", "name_en", "name_bn", "short_description_en", "short_description_bn", "unit", "package_size", "price", "stock_qty", "low_stock_threshold", "delivery_window", "status", "metadata", "manufacturer_id", "package_size_bn", "delivery_window_bn"],
+    allowedUpdate: ["buy_category_id", "sku", "name_en", "name_bn", "short_description_en", "short_description_bn", "unit", "package_size", "price", "stock_qty", "low_stock_threshold", "delivery_window", "status", "metadata", "manufacturer_id", "package_size_bn", "delivery_window_bn"],
+    defaults: { sku: `SKU-${Date.now()}`, name_en: "New product", unit: "piece", price: 0, stock_qty: 0, status: "draft" },
+    blankAs: { manufacturer_id: null },
+    // Distributors live in a join table; the form sends them as "1,2".
+    afterSave: async (id, payload) => {
+      if (!("distributor_ids" in payload)) return;
+      const ids = String(payload.distributor_ids ?? "")
+        .split(",")
+        .map((s) => Number(s.trim()))
+        .filter((n) => Number.isInteger(n) && n > 0);
+      await withTransaction(async (tx) => {
+        await tx.execute("DELETE FROM product_distributors WHERE product_id = ?", [id]);
+        for (const d of ids) await tx.execute("INSERT INTO product_distributors (product_id, distributor_id) VALUES (?, ?)", [id, d]);
+      });
+    },
+    loadRow: async (row) => {
+      const links = await queryRows<Record<string, unknown>>(
+        "SELECT distributor_id FROM product_distributors WHERE product_id = ? AND is_active = 1 ORDER BY distributor_id",
+        [row.id]
+      );
+      return { ...row, distributor_ids: links.map((l) => String(l.distributor_id)).join(",") };
+    }
   },
   "buy/orders": {
     table: "orders",
@@ -352,8 +609,8 @@ const configs: Record<string, ResourceConfig> = {
       GROUP BY p.id
       ORDER BY p.created_at DESC
     `,
-    allowedInsert: ["project_code", "name_en", "name_bn", "interest_slug", "lender_name", "division", "district", "upazila", "image_url", "summary_en", "summary_bn", "market_overview_en", "market_overview_bn", "investment_amount", "income_amount", "income_label_en", "income_label_bn", "model_en", "model_bn", "loan_partners_en", "loan_partners_bn", "capacity_label_en", "capacity_label_bn", "terms_json", "duration_label", "region_based", "is_active", "platform_fee", "logistics_fee", "warehouse_vet_fee", "start_date", "end_date", "capacity", "max_credit_amount", "status", "steps_json"],
-    allowedUpdate: ["name_en", "name_bn", "interest_slug", "lender_name", "division", "district", "upazila", "image_url", "summary_en", "summary_bn", "market_overview_en", "market_overview_bn", "investment_amount", "income_amount", "income_label_en", "income_label_bn", "model_en", "model_bn", "loan_partners_en", "loan_partners_bn", "capacity_label_en", "capacity_label_bn", "terms_json", "duration_label", "region_based", "is_active", "platform_fee", "logistics_fee", "warehouse_vet_fee", "start_date", "end_date", "capacity", "max_credit_amount", "status", "steps_json"],
+    allowedInsert: ["project_code", "name_en", "name_bn", "interest_slug", "lender_name", "division", "district", "upazila", "image_url", "summary_en", "summary_bn", "market_overview_en", "market_overview_bn", "investment_amount", "income_amount", "income_label_en", "income_label_bn", "model_en", "model_bn", "loan_partners_en", "loan_partners_bn", "loan_partner_logos", "capacity_label_en", "capacity_label_bn", "terms_json", "duration_label", "duration_label_bn", "region_based", "is_active", "platform_fee", "logistics_fee", "warehouse_vet_fee", "start_date", "end_date", "capacity", "max_credit_amount", "status", "steps_json"],
+    allowedUpdate: ["name_en", "name_bn", "interest_slug", "lender_name", "division", "district", "upazila", "image_url", "summary_en", "summary_bn", "market_overview_en", "market_overview_bn", "investment_amount", "income_amount", "income_label_en", "income_label_bn", "model_en", "model_bn", "loan_partners_en", "loan_partners_bn", "loan_partner_logos", "capacity_label_en", "capacity_label_bn", "terms_json", "duration_label", "duration_label_bn", "region_based", "is_active", "platform_fee", "logistics_fee", "warehouse_vet_fee", "start_date", "end_date", "capacity", "max_credit_amount", "status", "steps_json"],
     defaults: { project_code: `PRJ-${Date.now()}`, name_en: "New partner project", capacity: 0, region_based: 1, is_active: 1, status: "draft" }
   },
   "partners/applications": {
@@ -929,6 +1186,12 @@ function normalizePayload(payload: Record<string, unknown>, config: ResourceConf
     aliased.is_active = aliased.status.toLowerCase() === "inactive" ? 0 : 1;
   }
 
+  // A blank here means "clear it": otherwise a fee switched from % to flat
+  // kept its old percentage, because blanks are dropped below.
+  for (const [key, blank] of Object.entries(config.blankAs ?? {})) {
+    if (aliased[key] === "") aliased[key] = blank;
+  }
+
   const source = mode === "insert" ? { ...config.defaults, ...aliased } : aliased;
   const entries = Object.entries(source)
     .filter(([key, value]) => allowed.includes(key) && value !== undefined && value !== "")
@@ -1035,7 +1298,8 @@ export async function getResourceRow(resource: string, id: string) {
     `SELECT * FROM ${config.table} WHERE \`${idColumn}\` = ? LIMIT 1`,
     [id]
   );
-  return rows[0] ?? null;
+  const row = rows[0] ?? null;
+  return row && config.loadRow ? config.loadRow(row) : row;
 }
 
 export async function getResourceRelated(resource: string, id: string) {
@@ -1098,6 +1362,41 @@ export async function getResourceRelated(resource: string, id: string) {
   return {};
 }
 
+// Which location text columns each table carries. Every one of these tables has
+// division_id / district_id / upazila_id (migration 031). The text is written by
+// the server from the ids and is never taken from the client as typed — that is
+// what stopped "Dhaka District" and "Chattogram Sadar" reaching the data.
+const GEO_TEXT_COLUMNS: Record<string, GeoLevel[]> = {
+  app_users: ["division", "district", "upazila"],
+  partner_projects: ["division", "district", "upazila"],
+  sale_listings: ["division", "district", "upazila"],
+  loan_applications: ["division", "district", "upazila"],
+  sale_pricing_rules: ["division", "district"],
+  zone_officers: ["district", "upazila"],
+  orders: ["district", "upazila"],
+  community_posts: ["district", "upazila"],
+  market_updates: ["district", "upazila"],
+  weather_alerts: ["district", "upazila"],
+  admin_users: ["district", "upazila"],
+  // Ids only: a distributor's service area, where a promo code is valid.
+  distributors: [],
+  promotions: []
+};
+
+for (const config of Object.values(configs)) {
+  const levels = GEO_TEXT_COLUMNS[config.table];
+  if (!levels) continue;
+  config.geo = levels;
+  for (const col of ["division_id", "district_id", "upazila_id", ...levels]) {
+    if (!config.allowedInsert.includes(col)) config.allowedInsert.push(col);
+    if (!config.allowedUpdate.includes(col)) config.allowedUpdate.push(col);
+  }
+}
+
+async function prepareGeo(config: ResourceConfig, payload: Record<string, unknown>) {
+  return config.geo ? normaliseGeoPayload(payload, config.geo) : payload;
+}
+
 // Most resources are a single autocommitted statement. A resource carrying an
 // afterWrite guard needs the write and the check on one connection so the check
 // can veto: same SQL either way, different execution context.
@@ -1106,6 +1405,13 @@ async function runWrite(
   sql: string,
   values: unknown[]
 ): Promise<ResultSetHeader> {
+  if (config.table === "app_settings") {
+    // Settings are cached for a few seconds; a change made here is meant to
+    // apply on the very next request.
+    const written = await executeQuery(sql, values);
+    invalidateSettings();
+    return written;
+  }
   if (!config.afterWrite) return executeQuery(sql, values);
   const guard = config.afterWrite;
   return withTransaction(async (tx) => {
@@ -1118,7 +1424,7 @@ async function runWrite(
 export async function createResource(resource: string, payload: Record<string, unknown>) {
   const config = configs[resource];
   if (!config) return null;
-  const data = normalizePayload(payload, config, "insert");
+  const data = normalizePayload(await prepareGeo(config, payload), config, "insert");
 
   if (Object.keys(data).length === 0) {
     throw new Error("No allowed fields were provided for insert.");
@@ -1131,6 +1437,7 @@ export async function createResource(resource: string, payload: Record<string, u
     `INSERT INTO ${config.table} (${columns.map((column) => `\`${column}\``).join(", ")}) VALUES (${placeholders})`,
     Object.values(data)
   );
+  if (config.afterSave && result.insertId) await config.afterSave(String(result.insertId), payload);
   return { insertId: result.insertId, affectedRows: result.affectedRows };
 }
 
@@ -1138,18 +1445,45 @@ export async function updateResource(resource: string, id: string, payload: Reco
   const config = configs[resource];
   if (!config) return null;
   const idColumn = config.idColumn ?? "id";
-  const data = normalizePayload(payload, config, "update");
+  const data = normalizePayload(await prepareGeo(config, payload), config, "update");
 
   if (Object.keys(data).length === 0) {
+    // A save that only touches what afterSave owns (e.g. a product's
+    // distributors) has no column to update, and that is fine.
+    if (config.afterSave) {
+      await config.afterSave(id, payload);
+      return { affectedRows: 0, changedRows: 0 };
+    }
     throw new Error("No allowed fields were provided for update.");
   }
 
   const assignments = Object.keys(data).map((column) => `\`${column}\` = ?`).join(", ");
+  // Orders: the form re-sends every field, so only a real status change goes
+  // on the buyer's timeline.
+  const [before] = config.table === "orders"
+    ? await queryRows<Record<string, unknown>>("SELECT fulfillment_status, payment_status FROM orders WHERE id = ? LIMIT 1", [id])
+    : [];
   const result = await runWrite(
     config,
     `UPDATE ${config.table} SET ${assignments} WHERE \`${idColumn}\` = ?`,
     [...Object.values(data), id]
   );
+  if (config.afterSave) await config.afterSave(id, payload);
+  if (config.table === "orders") {
+    if (typeof data.fulfillment_status === "string" && data.fulfillment_status !== before?.fulfillment_status) {
+      await recordOrderEvent(id, data.fulfillment_status);
+      // Tell the buyer — once per stage (assigned then in transit is one "on the way").
+      const event = ORDER_STATUS_EVENT[data.fulfillment_status];
+      const alreadyOnTheWay = ["assigned", "in_transit"].includes(String(before?.fulfillment_status));
+      if (event && !(event === "order_on_the_way" && alreadyOnTheWay)) await notifyOrder(id, event);
+    }
+    if (typeof data.payment_status === "string" && data.payment_status !== before?.payment_status) {
+      await recordOrderEvent(id, data.payment_status, { kind: "payment" });
+    }
+    // An order edited here (cancelled, payment marked failed, confirmed) moves
+    // its discount with it — released, spent, or turned into a voucher.
+    await syncOrderPromotion(id);
+  }
   return { affectedRows: result.affectedRows, changedRows: (result as ResultSetHeader).changedRows };
 }
 

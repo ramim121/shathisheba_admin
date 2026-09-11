@@ -24,6 +24,10 @@ export const PUBLIC_READS = new Set<string>([
   "geo/divisions",
   "geo/districts",
   "geo/upazilas",
+  // Place search and name resolution: public reference data, needed on the
+  // registration path before a farmer has a token.
+  "geo/search",
+  "geo/resolve",
   "sale/categories",
   "sale/animals",
   "sale/breeds",
@@ -35,7 +39,9 @@ export const PUBLIC_READS = new Set<string>([
   "learning/modules",
   "learning/contents",
   "market-updates",
-  "app/market-updates"
+  "app/market-updates",
+  // The partner strip is public brand information.
+  "app/partners"
 ]);
 
 export const PUBLIC_WRITES = new Set<string>(["app/auth/request-otp", "app/auth/verify-otp"]);
@@ -44,6 +50,30 @@ export const ADMIN_ONLY = new Set<string>([
   "admin/users",
   // Platform switches. Readable state, but only staff decide it.
   "settings/app",
+  "admin/geo/scopes",
+  "admin/geo/zones",
+  // Farmers' profile changes waiting for approval, and the decision itself.
+  "admin/profile-requests",
+  "admin/profile-requests/review",
+  // Sale listing six-step workflow, price-rule overlap check, promotions.
+  "admin/sale/listing-workflow",
+  "admin/sale/pricing/overlaps",
+  "promotions/codes",
+  "promotions/redemptions",
+  "promotions/vouchers",
+  "brands/manufacturers",
+  "brands/distributors",
+  // Notifications and the home partner strip (the app reads app/partners).
+  "admin/notifications/status",
+  "admin/notifications/audience",
+  "admin/notifications/preview",
+  "admin/notifications/test",
+  "admin/notifications/broadcast",
+  "admin/partners/reorder",
+  "home/partners",
+  "notifications/templates",
+  "notifications/broadcasts",
+  "notifications/outbox",
   "audit/logs",
   "reports",
   // Finance back-office. The farmer's own finance data is reached through

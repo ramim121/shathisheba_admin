@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
 import { AdminShell } from "@/components/AdminShell";
+import { Select } from "@/components/Select";
 import {
   ListChecks, Store, HandCoins, ScrollText, UsersRound, ShieldCheck,
   CheckCircle2, XCircle, ChevronRight, Loader2, ExternalLink, BadgeCheck, AlertTriangle,
-  PackageCheck, Edit3, Boxes
+  PackageCheck, Edit3, Boxes, ArrowRight, History, GitCompareArrows, X
 } from "lucide-react";
 
 type Row = Record<string, unknown>;
@@ -18,8 +19,61 @@ type Verification = {
   in_system: boolean; nid: string; user_photo: string; trade_license: string;
   banking: boolean; document_count: number; nid_number: string | null; is_kyc_verified: boolean; user_status: string | null;
 };
-type Detail = { type: string; item: Row; verification: Verification | null; documents: Row[] };
+type Change = { field: string; label: string; before: string | null; after: string | null };
+type PreviousDecision = { decision: string; decided_at: string };
+type Detail = {
+  type: string; item: Row; verification: Verification | null; documents: Row[];
+  changes?: Change[]; previous_decision?: PreviousDecision | null;
+};
 type Selected = { type: string; id: string; title: string };
+type QueueKey = "listings" | "enrollments" | "kyc" | "users" | "orders";
+type DecisionResult = { previous_status?: string | null; status?: string; effects?: string[] };
+/** A decision just made: its banner, and (while `showRow`) its flash row in the queue. */
+type Decision = {
+  key: number; queue: QueueKey | null; id: string; title: string; action: "approve" | "reject";
+  previousStatus: string | null; status: string; effects: string[]; showRow: boolean;
+};
+
+// Long enough to read the flash row, short enough that the queue does not
+// fill up with things that are already done.
+const FLASH_MS = 4000;
+
+const QUEUE_OF: Record<string, QueueKey> = {
+  listing: "listings", enrollment: "enrollments", kyc: "kyc", user: "users", order: "orders"
+};
+
+// Detail columns that the listing's publish form shows under another name, so
+// a changed seller price also lights up the price box the admin is about to set.
+const PUBFORM_FIELD = { price: "farmer_expected_price", stock: "quantity", description: "description" } as const;
+
+function humanStatus(s: string | null | undefined) {
+  return String(s ?? "").replace(/_/g, " ");
+}
+
+function transitionText(d: { previousStatus: string | null; status: string }) {
+  return d.previousStatus && d.previousStatus !== d.status
+    ? `${humanStatus(d.previousStatus)} → ${humanStatus(d.status)}`
+    : humanStatus(d.status);
+}
+
+/** Outcome of a decision with its side effects as chips. */
+function DecisionBanner({ d, onDismiss }: { d: Omit<Decision, "key" | "queue" | "id" | "showRow">; onDismiss: () => void }) {
+  const ok = d.action === "approve";
+  return (
+    <div className={`aq-result ${ok ? "is-ok" : "is-bad"}`} role="status">
+      <span className="aq-result-icon">{ok ? <CheckCircle2 size={18} /> : <XCircle size={18} />}</span>
+      <div className="aq-result-main">
+        <p className="aq-result-line">
+          <strong>{ok ? "Approved ✓" : "Rejected ✕"}</strong> {d.title} <span className="aq-result-trans">· {transitionText(d)}</span>
+        </p>
+        {d.effects.length ? (
+          <ul className="aq-effects">{d.effects.map((e, i) => <li key={i}>{e}</li>)}</ul>
+        ) : null}
+      </div>
+      <button type="button" className="aq-result-x" aria-label="Dismiss" onClick={onDismiss}><X size={15} /></button>
+    </div>
+  );
+}
 
 const DOC_LABEL: Record<string, string> = {
   nid_front: "NID Front", nid_back: "NID Back", selfie: "User Photo",
@@ -76,6 +130,13 @@ export default function ApprovalsPage() {
   const [reqDocs, setReqDocs] = useState<string[]>([]);
   const [reqMsg, setReqMsg] = useState("");
   const [decideError, setDecideError] = useState("");
+  const [note, setNote] = useState("");
+  const [decisions, setDecisions] = useState<Decision[]>([]);
+  // Result of verifying a single KYC document from inside the drawer.
+  const [docDecision, setDocDecision] = useState<Omit<Decision, "key" | "queue" | "id" | "showRow"> | null>(null);
+  const timers = useRef<number[]>([]);
+
+  useEffect(() => () => { timers.current.forEach((t) => window.clearTimeout(t)); }, []);
 
   const loadQueues = useCallback(async () => {
     setLoading(true);
@@ -87,6 +148,18 @@ export default function ApprovalsPage() {
       setLoading(false);
     }
   }, []);
+
+  function pushDecision(d: Omit<Decision, "key" | "showRow">) {
+    const key = Date.now() + Math.random();
+    setDecisions((prev) => [{ ...d, key, showRow: true }, ...prev].slice(0, 4));
+    timers.current.push(window.setTimeout(() => {
+      setDecisions((prev) => prev.map((x) => (x.key === key ? { ...x, showRow: false } : x)));
+    }, FLASH_MS));
+  }
+
+  function dismissDecision(key: number) {
+    setDecisions((prev) => prev.filter((x) => x.key !== key));
+  }
 
   useEffect(() => {
     loadQueues();
@@ -108,6 +181,8 @@ export default function ApprovalsPage() {
         setDetail(json.data);
         setDecideError("");
         setReqMsg("");
+        setNote("");
+        setDocDecision(null);
         if (sel.type === "listing") {
           const it = json.data.item as Row;
           setPub({
@@ -131,12 +206,24 @@ export default function ApprovalsPage() {
 
   // Verify / reject one KYC document inline, then refresh the open drawer.
   async function decideDoc(docId: string, action: "approve" | "reject") {
-    await fetch("/api/v1/app/admin/approve", {
+    const doc = detail?.documents.find((d) => String(d.id) === docId);
+    const json = await fetch("/api/v1/app/admin/approve", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ type: "kyc", id: docId, action, admin_id: adminId })
-    }).catch(() => {});
-    if (selected) openDetail(selected);
+    }).then((r) => r.json()).catch(() => null);
+    if (selected) await openDetail(selected);
+    // After openDetail, which clears the previous one.
+    if (json?.ok) {
+      const result = (json.result ?? {}) as DecisionResult;
+      setDocDecision({
+        title: DOC_LABEL[String(doc?.doc_type)] || "Document",
+        action,
+        previousStatus: result.previous_status ?? null,
+        status: result.status ?? (action === "approve" ? "verified" : "rejected"),
+        effects: Array.isArray(result.effects) ? result.effects : []
+      });
+    }
     loadQueues();
   }
 
@@ -199,6 +286,7 @@ export default function ApprovalsPage() {
     setActing(true);
     try {
       const body: Record<string, unknown> = { type: selected.type, id: selected.id, action, admin_id: adminId };
+      if (note.trim()) body.note = note.trim();
       if (selected.type === "listing" && action === "approve") {
         body.price = Number(pub.price);
         body.stock = Number(pub.stock || 0);
@@ -212,6 +300,16 @@ export default function ApprovalsPage() {
       });
       const json = await res.json();
       if (json.ok) {
+        const result = (json.result ?? {}) as DecisionResult;
+        pushDecision({
+          queue: QUEUE_OF[selected.type] ?? null,
+          id: selected.id,
+          title: selected.title,
+          action,
+          previousStatus: result.previous_status ?? null,
+          status: result.status ?? (action === "approve" ? "approved" : "rejected"),
+          effects: Array.isArray(result.effects) ? result.effects : []
+        });
         setSelected(null);
         setDetail(null);
         loadQueues();
@@ -223,13 +321,21 @@ export default function ApprovalsPage() {
     }
   }
 
+  const changes = detail?.changes ?? [];
+  const changedFields = new Set(changes.map((c) => c.field));
+
   function queueItemType(key: keyof typeof QUEUE_META): string {
     return key === "listings" ? "listing" : key === "enrollments" ? "enrollment" : key === "users" ? "user" : key === "orders" ? "order" : "kyc";
   }
 
-  function renderQueue(key: keyof typeof QUEUE_META, items: Row[]) {
+  function renderQueue(key: keyof typeof QUEUE_META, all: Row[]) {
     const meta = QUEUE_META[key];
     const Icon = meta.icon;
+    const flashes = decisions.filter((d) => d.showRow && d.queue === key);
+    const flashIds = new Set(flashes.map((d) => d.id));
+    // The reload may not have dropped a just-decided item yet; the flash row
+    // stands in for it so it never shows twice.
+    const items = flashIds.size ? all.filter((it) => !flashIds.has(String(it.id))) : all;
     return (
       <section className="aq-card" key={key}>
         <header className="aq-head">
@@ -243,7 +349,18 @@ export default function ApprovalsPage() {
           <Link className="aq-viewall" href={meta.viewAll}>View all <ExternalLink size={13} /></Link>
         </header>
         <div className="aq-list">
-          {items.length === 0 ? <p className="aq-empty">Nothing pending 🎉</p> : items.slice(0, 12).map((it) => {
+          {flashes.map((d) => (
+            <div className={`aq-item aq-flash ${d.action === "approve" ? "is-ok" : "is-bad"}`} key={`flash-${d.key}`} role="status">
+              <div className="aq-item-main">
+                <span className="aq-item-title">{d.title}</span>
+                <span className="aq-flash-line">
+                  {d.action === "approve" ? "Approved ✓" : "Rejected ✕"} · {transitionText(d)}
+                </span>
+              </div>
+              <button type="button" className="aq-flash-x" aria-label="Dismiss" onClick={() => dismissDecision(d.key)}><X size={14} /></button>
+            </div>
+          ))}
+          {items.length === 0 && flashes.length === 0 ? <p className="aq-empty">Nothing pending 🎉</p> : items.slice(0, 12).map((it) => {
             const id = String(it.id);
             const title =
               key === "listings" ? `${fmt(it.title)} · ${fmt(it.quantity)} ${fmt(it.unit)}` :
@@ -287,10 +404,20 @@ export default function ApprovalsPage() {
           <h1 className="page-title"><ListChecks size={22} style={{ verticalAlign: "-4px", marginRight: 8 }} />Approvals</h1>
           <p className="page-sub">Decisional to-do queue. Review each applicant&apos;s KYC verification, then approve or reject. {queues ? <strong>{queues.counts.total} pending.</strong> : null}</p>
         </div>
-        <button className="aq-refresh" onClick={loadQueues}>Refresh</button>
+        <button className="aq-refresh" onClick={() => loadQueues()} disabled={loading}>
+          {loading ? <Loader2 size={13} className="spin" style={{ verticalAlign: "-2px", marginRight: 5 }} /> : null}Refresh
+        </button>
       </div>
 
-      {loading || !queues ? (
+      {decisions.length ? (
+        <div className="aq-results">
+          {decisions.map((d) => <DecisionBanner key={d.key} d={d} onDismiss={() => dismissDecision(d.key)} />)}
+        </div>
+      ) : null}
+
+      {/* Only the first load blanks the grid: a flash row has to stay on
+          screen while the queues reload underneath it. */}
+      {!queues ? (
         <p className="page-sub"><Loader2 size={16} className="spin" style={{ verticalAlign: "-3px" }} /> Loading queues…</p>
       ) : (
         <div className="aq-grid">
@@ -317,6 +444,33 @@ export default function ApprovalsPage() {
               <div className="drawer-body"><Loader2 size={18} className="spin" /> Loading…</div>
             ) : (
               <div className="drawer-body">
+                {docDecision ? <DecisionBanner d={docDecision} onDismiss={() => setDocDecision(null)} /> : null}
+
+                {detail.previous_decision ? (
+                  <p className="aq-prevnote">
+                    <History size={13} /> Last reviewed: <strong>{humanStatus(detail.previous_decision.decision)}</strong> on {fmtDate(detail.previous_decision.decided_at)}
+                    {changes.length ? " — since resubmitted with changes." : "."}
+                  </p>
+                ) : null}
+
+                {changes.length ? (
+                  <div className="aq-changes">
+                    <h3 className="vpanel-title"><GitCompareArrows size={15} /> Changed since last review <span className="aq-count">{changes.length}</span></h3>
+                    <ul>
+                      {changes.map((c) => (
+                        <li key={c.field}>
+                          <span className="aq-change-label">{c.label}</span>
+                          <span className="aq-change-vals">
+                            <del>{c.before === null || c.before === "" ? "—" : c.before}</del>
+                            <ArrowRight size={12} aria-hidden="true" />
+                            <ins>{c.after === null || c.after === "" ? "—" : c.after}</ins>
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+
                 {detail.verification ? (
                   <div className="vpanel">
                     <h3 className="vpanel-title"><ShieldCheck size={15} /> KYC Verification</h3>
@@ -381,6 +535,24 @@ export default function ApprovalsPage() {
                   </div>
                 ) : null}
 
+                {detail.type === "order" && detail.item.promotion ? (() => {
+                  const p = detail.item.promotion as Row;
+                  const source = p.source === "first_purchase" ? "First-purchase discount" : p.source === "voucher" ? "Voucher" : `Promo code ${String(p.code ?? "")}`;
+                  const state: Record<string, string> = {
+                    applied: "Approving this order confirms the discount (a first purchase is then spent). Rejecting it returns the discount to the buyer for their next order.",
+                    approved: "Confirmed with the order.",
+                    released: "Returned to the buyer — the order was rejected before approval.",
+                    failed: "The order failed after approval. A first-purchase discount has been turned into a voucher for the next order."
+                  };
+                  return (
+                    <div className="invpanel promo-panel">
+                      <h3 className="vpanel-title">🏷️ Discount on this order</h3>
+                      <p><strong>{source}</strong>: −৳{String(p.discount_amount)} on ৳{String(p.order_subtotal)} — buyer pays ৳{String(detail.item.payable_amount)}.</p>
+                      <p className="pubform-note">{state[String(p.status)] ?? String(p.status)}</p>
+                    </div>
+                  );
+                })() : null}
+
                 {detail.type === "order" && Array.isArray(detail.item.order_lines) ? (
                   <div className="invpanel">
                     <h3 className="vpanel-title"><Boxes size={15} /> Inventory check</h3>
@@ -417,16 +589,18 @@ export default function ApprovalsPage() {
                     <h3 className="vpanel-title"><Store size={15} /> Publish to Buy-from-Shathi</h3>
                     <p className="pubform-note">On approval this listing becomes a priced product buyers can order.</p>
                     <div className="pubform-grid">
-                      <label>Price (৳) *<input type="number" min="0" value={pub.price} onChange={(e) => setPub({ ...pub, price: e.target.value })} /></label>
-                      <label>Stock<input type="number" min="0" value={pub.stock} onChange={(e) => setPub({ ...pub, stock: e.target.value })} /></label>
+                      <label className={changedFields.has(PUBFORM_FIELD.price) ? "is-changed" : undefined}>Price (৳) *<input type="number" min="0" value={pub.price} onChange={(e) => setPub({ ...pub, price: e.target.value })} /></label>
+                      <label className={changedFields.has(PUBFORM_FIELD.stock) ? "is-changed" : undefined}>Stock<input type="number" min="0" value={pub.stock} onChange={(e) => setPub({ ...pub, stock: e.target.value })} /></label>
                     </div>
-                    <label className="pubform-block">Category
-                      <select value={pub.buy_category_id} onChange={(e) => setPub({ ...pub, buy_category_id: e.target.value })}>
-                        <option value="">Livestock (default)</option>
-                        {categories.map((c) => <option key={String(c.id)} value={String(c.id)}>{String(c.name_en)}</option>)}
-                      </select>
-                    </label>
-                    <label className="pubform-block">Description
+                    <div className="pubform-block">Category
+                      <Select
+                        aria-label="Buy category"
+                        value={pub.buy_category_id}
+                        onChange={(v) => setPub({ ...pub, buy_category_id: v })}
+                        options={[{ value: "", label: "Livestock (default)" }, ...categories.map((c) => ({ value: String(c.id), label: String(c.name_en) }))]}
+                      />
+                    </div>
+                    <label className={`pubform-block${changedFields.has(PUBFORM_FIELD.description) ? " is-changed" : ""}`}>Description
                       <textarea rows={2} value={pub.description} onChange={(e) => setPub({ ...pub, description: e.target.value })} placeholder="Shown to buyers" />
                     </label>
                   </div>
@@ -462,7 +636,7 @@ export default function ApprovalsPage() {
                     {Object.entries(detail.item)
                       .filter(([k, v]) => v !== null && v !== "" && !["password_hash", "profile_json", "ai_analysis_json", "banking_json", "farm_assessment_json"].includes(k))
                       .map(([k, v]) => (
-                        <div className="vitem-row" key={k}>
+                        <div className={`vitem-row${changedFields.has(k) ? " is-changed" : ""}`} key={k} title={changedFields.has(k) ? "Changed since last review" : undefined}>
                           <dt>{k.replace(/_/g, " ")}</dt>
                           <dd>{fmt(v)}</dd>
                         </div>
@@ -474,6 +648,16 @@ export default function ApprovalsPage() {
 
             <footer className="drawer-foot-wrap">
               {decideError ? <p className="drawer-error"><AlertTriangle size={14} /> {decideError}</p> : null}
+              <div className="aq-note-wrap">
+                <input
+                  className="input"
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  placeholder="Note (optional) — the reason, kept with the decision"
+                  aria-label="Decision note"
+                  maxLength={500}
+                />
+              </div>
               <div className="drawer-foot">
                 <button className="btn-reject" disabled={acting} onClick={() => decide("reject")}><XCircle size={16} /> Reject</button>
                 <button className="btn-approve" disabled={acting} onClick={() => decide("approve")}>{acting ? <Loader2 size={16} className="spin" /> : <CheckCircle2 size={16} />} Approve</button>

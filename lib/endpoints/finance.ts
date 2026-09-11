@@ -8,6 +8,10 @@ import {
   computeQuote, generateSchedule, clampAmount, installmentCount,
   type ProductTerms, type RepaymentMode,
 } from "@/lib/finance/pricing-engine";
+import { assertOperational, ZoneInactiveError } from "@/lib/operational";
+import { LocationRequiredError } from "@/lib/geo-scope";
+import { resolveGeoIds, toGeoId } from "@/lib/geo";
+import { getSetting } from "@/lib/settings";
 
 // Farmer-facing finance endpoints (/api/v1/app/finance/*).
 //
@@ -541,9 +545,71 @@ const REQUIRED_CONSENTS = [
 // POST app/finance/applications — composite and transactional (API-02).
 // A half-created credit application is far more damaging than a half-created
 // order, so application, consents and the first event are one unit of work.
+type LoanCheckin = {
+  status: "matched" | "mismatch" | "no_fix" | "not_required";
+  lat: number | null;
+  lng: number | null;
+  district_id: number | null;
+  upazila_id: number | null;
+  review: string | null;
+};
+
+/**
+ * Where the phone is when the farmer applies. The profile says where they
+ * farm; the check-in is corroboration. With `loan_gps_checkin` = flag (the
+ * default) a check-in outside the profile district is accepted and put in
+ * front of an officer; `enforce` refuses it; `off` does not ask.
+ */
+async function loanCheckin(payload: Row, profile: Row | undefined): Promise<LoanCheckin> {
+  const mode = (await getSetting("loan_gps_checkin", "flag")).trim().toLowerCase();
+  if (mode === "off") {
+    return { status: "not_required", lat: null, lng: null, district_id: null, upazila_id: null, review: null };
+  }
+  const lat = payload.checkin_lat == null || payload.checkin_lat === "" ? NaN : Number(payload.checkin_lat);
+  const lng = payload.checkin_lng == null || payload.checkin_lng === "" ? NaN : Number(payload.checkin_lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0)) {
+    throw new LocationRequiredError(
+      "Turn on your phone's location to check in — a loan application is checked in from where you farm."
+    );
+  }
+  let districtId = toGeoId(payload.checkin_district_id);
+  let upazilaId = toGeoId(payload.checkin_upazila_id);
+  if (upazilaId) {
+    try {
+      const r = await resolveGeoIds({ upazila_id: upazilaId });
+      districtId = r.district_id;
+    } catch {
+      upazilaId = null;
+    }
+  }
+  const status: LoanCheckin["status"] =
+    districtId === null ? "no_fix" : Number(districtId) === Number(profile?.district_id) ? "matched" : "mismatch";
+  if (status === "mismatch" && mode === "enforce") {
+    throw new ZoneInactiveError(
+      "Your phone is not in the district on your profile. Check in from your area, or update your profile location."
+    );
+  }
+  const review =
+    status === "mismatch" ? "GPS check-in was outside the profile district." :
+    status === "no_fix" ? "GPS check-in could not be placed in a district." : null;
+  return { status, lat, lng, district_id: districtId, upazila_id: upazilaId, review };
+}
+
 export async function createLoanApplication(payload: Row) {
   const userId = payload.user_id;
   if (!userId) throw new Error("A signed-in user is required.");
+
+  // A loan needs people on the ground: the farmer must be inside an area a
+  // field officer covers (at the loan scope's level), have an address on file,
+  // and check in by GPS. The covering officer is assigned to the application.
+  const operational = await assertOperational(userId, "loan_applications");
+  const [profile] = await queryRows<Row>(
+    "SELECT village, district_id, upazila_id FROM app_users WHERE id = ? LIMIT 1", [userId]
+  );
+  if (!String(profile?.village ?? "").trim()) {
+    throw new LocationRequiredError("Add your village or address to your profile before applying for a loan.");
+  }
+  const checkin = await loanCheckin(payload, profile);
 
   const active = await queryRows<Row>(
     `SELECT application_code FROM loan_applications
@@ -569,7 +635,7 @@ export async function createLoanApplication(payload: Row) {
   const quote = await createQuote({ ...payload, user_id: userId }, true);
 
   const [user] = await queryRows<Row>(
-    "SELECT division, district, upazila FROM app_users WHERE id = ? LIMIT 1", [userId]
+    "SELECT division, district, upazila, division_id, district_id, upazila_id FROM app_users WHERE id = ? LIMIT 1", [userId]
   );
   const code = `LON-APP-${Date.now()}`;
 
@@ -578,19 +644,26 @@ export async function createLoanApplication(payload: Row) {
       `INSERT INTO loan_applications
         (application_code, user_id, loan_product_id, linked_project_id, requested_amount,
          purpose_code, purpose_text, tenure_months, repayment_mode, quote_id, status,
-         division, district, upazila, submitted_at,
-         manual_review_required, manual_review_reason, needs_correction_note)
-       VALUES (?,?,?,?,?,?,?,?,?,?, 'submitted', ?,?,?, NOW(), ?,?,?)`,
+         division, district, upazila, division_id, district_id, upazila_id, submitted_at,
+         manual_review_required, manual_review_reason, needs_correction_note,
+         assigned_officer_id, checkin_lat, checkin_lng, checkin_district_id, checkin_upazila_id,
+         checkin_status, checkin_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?, 'submitted', ?,?,?, ?,?,?, NOW(), ?,?,?, ?,?,?,?,?,?,?)`,
       [code, userId, product.id, payload.linked_project_id ?? null, quote.principal,
        payload.purpose_code ?? "other", payload.purpose_text ?? null,
        quote.tenure_months, quote.repayment_mode, quote.quote_id,
        user?.division ?? null, user?.district ?? null, user?.upazila ?? null,
+       user?.division_id ?? null, user?.district_id ?? null, user?.upazila_id ?? null,
        // The farmer said something on file is wrong. Flagging it here is what
        // gets it onto the officer's queue; a note with no flag would be read by
        // nobody until the visit, which is exactly when it is too late.
-       needsCorrection ? 1 : 0,
-       needsCorrection ? "The applicant reported that a detail on their profile is wrong." : null,
-       needsCorrection ? correctionNote : null]
+       needsCorrection || checkin.review ? 1 : 0,
+       [needsCorrection ? "The applicant reported that a detail on their profile is wrong." : null, checkin.review]
+         .filter(Boolean).join(" ") || null,
+       needsCorrection ? correctionNote : null,
+       operational.officer ? Number(operational.officer.id) : null,
+       checkin.lat, checkin.lng, checkin.district_id, checkin.upazila_id, checkin.status,
+       checkin.lat !== null ? new Date() : null]
     );
     const id = ins.insertId;
 

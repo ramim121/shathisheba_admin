@@ -21,6 +21,8 @@
 //     not the schedule would be a loan with no repayment obligation.
 
 import { queryRows, withTransaction, type Tx } from "@/lib/db";
+import { findFieldOfficer } from "@/lib/officers";
+import { getUserGeo } from "@/lib/geo-scope";
 import { recordAudit } from "@/lib/audit";
 import { computeQuote, generateSchedule, maturityDate, type ProductTerms } from "@/lib/finance/pricing-engine";
 import type { Row } from "./shared";
@@ -590,14 +592,7 @@ export async function getLoanAccount(userId: string) {
 
   // Who the farmer should actually talk to. Their own district's field officer,
   // not a national hotline nobody answers.
-  const officers = await queryRows<Row>(
-    `SELECT o.name, o.phone, o.upazila, o.district
-       FROM zone_officers o
-       JOIN app_users u ON u.id = ?
-      WHERE o.is_active = 1 AND o.officer_role = 'field_officer' AND o.district = u.district
-      ORDER BY o.id LIMIT 1`,
-    [userId]
-  );
+  const officer = await findFieldOfficer(await getUserGeo(userId));
 
   return {
     has_account: true,
@@ -609,9 +604,7 @@ export async function getLoanAccount(userId: string) {
       overdue_installments: overdueRows.length,
       penalty_accrued: penaltyAccrued,
       oldest_due_date: overdueRows.length ? isoDay(overdueRows[0].due_date) : null,
-      officer: officers[0]
-        ? { name: String(officers[0].name), phone: String(officers[0].phone ?? ""), area: String(officers[0].upazila ?? officers[0].district ?? "") }
-        : null
+      officer: officer ? { name: officer.name, phone: officer.phone, area: officer.area } : null
     },
     account: {
       ...account,

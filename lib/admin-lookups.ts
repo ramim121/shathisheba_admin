@@ -69,6 +69,24 @@ const LOOKUPS: Record<string, string> = {
     ORDER BY c.sort_order, p.name_en
     LIMIT 500
   `,
+  manufacturers: `
+    SELECT CAST(id AS CHAR) AS id,
+           CONCAT(name_en, IF(name_bn IS NULL, '', CONCAT(' / ', name_bn))) AS label,
+           IF(is_active = 1, 'Active', 'Inactive') AS \`group\`
+    FROM manufacturers
+    ORDER BY is_active DESC, name_en
+  `,
+  distributors: `
+    SELECT CAST(d.id AS CHAR) AS id,
+           CONCAT(COALESCE(d.short_name_en, d.name_en), ' · ',
+                  COALESCE(CONCAT(u.name_en, ', ', di.name_en), CONCAT(di.name_en, ' district'), CONCAT(v.name_en, ' division'), 'Nationwide')) AS label,
+           IF(d.is_active = 1, 'Active', 'Inactive') AS \`group\`
+    FROM distributors d
+    LEFT JOIN geo_upazilas u ON u.id = d.upazila_id
+    LEFT JOIN geo_districts di ON di.id = d.district_id
+    LEFT JOIN geo_divisions v ON v.id = d.division_id
+    ORDER BY d.is_active DESC, d.name_en
+  `,
   "learning-categories": `
     SELECT CAST(id AS CHAR) AS id,
            CONCAT(name_en, ' / ', COALESCE(name_bn, '')) AS label

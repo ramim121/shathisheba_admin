@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { AdminShell } from "@/components/AdminShell";
 import { Boxes, RefreshCw, AlertTriangle } from "lucide-react";
 
@@ -19,6 +20,7 @@ function fmtDate(v: unknown) {
 }
 
 export default function InventoryPage() {
+  const router = useRouter();
   const [data, setData] = useState<{ products: Row[]; movements: Row[] } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -70,7 +72,12 @@ export default function InventoryPage() {
                   const low = n(p.stock_qty) <= n(p.low_stock_threshold);
                   const short = n(p.stock_qty) < n(p.pending_qty);
                   return (
-                    <tr key={String(p.id)}>
+                    <tr
+                      key={String(p.id)}
+                      className="row-link"
+                      title="Open product"
+                      onClick={() => router.push(`/manage/view?resource=buy/products&id=${encodeURIComponent(String(p.id))}`)}
+                    >
                       <td><strong>{String(p.name_en)}</strong><br /><span className="inv-sku">{String(p.sku)}</span></td>
                       <td>{String(p.category_name)}</td>
                       <td><strong>{n(p.stock_qty)}</strong> {String(p.unit)}</td>

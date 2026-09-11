@@ -1,23 +1,30 @@
 import { executeQuery, queryRows, withTransaction } from "@/lib/db";
 import type { Row } from "./shared";
+import { geoFilter, getUserGeo, weatherGeo } from "@/lib/geo-scope";
+import { getDistributorById, pickDistributor, productDistributors } from "@/lib/distribution";
+import { ruleFees } from "@/lib/pricing";
+import { resolveGeoNames, type GeoIds } from "@/lib/geo";
 
 // Reference and catalogue reads: geography, sale taxonomy, buy categories,
 // market updates, weather and price quoting. All are lookup data with no
 // personal information, which is why they are the public tier of the API.
 
-export async function getAppMarketUpdates(district?: string | null) {
-  // Location-first: a user's district updates sort to the top, then national ones.
+export async function getAppMarketUpdates(userId?: string | null) {
+  // Untargeted updates show everywhere; targeted ones only inside their area at
+  // the market_updates scope. The farmer's own district still sorts first.
+  const geo = await getUserGeo(userId);
+  const area = await geoFilter("market_updates", "m", geo);
   return queryRows<Row>(
     `
-      SELECT CAST(id AS CHAR) AS id, title_en, title_bn, body_en, body_bn,
-             image_url, detail_en, detail_bn, update_type, category, status,
-             district, upazila, created_at,
-             (image_url IS NOT NULL OR detail_en IS NOT NULL OR detail_bn IS NOT NULL) AS has_detail
-      FROM market_updates
-      WHERE status = 'active'
-      ORDER BY (district = ?) DESC, sort_order, created_at DESC
+      SELECT CAST(m.id AS CHAR) AS id, m.title_en, m.title_bn, m.body_en, m.body_bn,
+             m.image_url, m.detail_en, m.detail_bn, m.update_type, m.category, m.status,
+             m.district, m.upazila, m.created_at,
+             (m.image_url IS NOT NULL OR m.detail_en IS NOT NULL OR m.detail_bn IS NOT NULL) AS has_detail
+      FROM market_updates m
+      WHERE m.status = 'active' AND ${area.sql}
+      ORDER BY (m.district_id <=> ?) DESC, m.sort_order, m.created_at DESC
     `,
-    [district ?? null]
+    [...area.params, geo.district_id]
   );
 }
 
@@ -36,17 +43,19 @@ export async function getAppMarketUpdate(id: string) {
   return rows[0] ?? null;
 }
 
-export async function getAppWeatherAlerts(district?: string | null) {
+export async function getAppWeatherAlerts(userId?: string | null, gpsDistrictId?: string | null, gpsUpazilaId?: string | null) {
+  const geo = await weatherGeo(userId, gpsDistrictId, gpsUpazilaId);
+  const area = await geoFilter("weather_alerts", "w", geo);
   return queryRows<Row>(
     `
-      SELECT CAST(id AS CHAR) AS id, title_en, title_bn, body_en, body_bn,
-             body_en AS description_en, body_bn AS description_bn,
-             alert_type, severity, district, upazila
-      FROM weather_alerts
-      WHERE is_active = 1 AND (? IS NULL OR district = ? OR district IS NULL)
-      ORDER BY starts_at DESC, created_at DESC
+      SELECT CAST(w.id AS CHAR) AS id, w.title_en, w.title_bn, w.body_en, w.body_bn,
+             w.body_en AS description_en, w.body_bn AS description_bn,
+             w.alert_type, w.severity, w.district, w.upazila
+      FROM weather_alerts w
+      WHERE w.is_active = 1 AND ${area.sql}
+      ORDER BY (w.upazila_id <=> ?) DESC, (w.district_id <=> ?) DESC, w.starts_at DESC, w.created_at DESC
     `,
-    [district ?? null, district ?? null]
+    [...area.params, geo.upazila_id, geo.district_id]
   );
 }
 
@@ -98,7 +107,7 @@ export async function getAppGeoDistricts(divisionId?: string | null) {
   );
 }
 
-// GET /api/v1/geo/upazilas?district_id=12  (upazila == thana for listing addresses)
+// GET /api/v1/geo/upazilas?district_id=12
 export async function getAppGeoUpazilas(districtId?: string | null) {
   return queryRows<Row>(
     `
@@ -118,6 +127,7 @@ export async function getSalePriceQuote(params: {
   animal_id?: string | null;
   breed_id?: string | null;
   sale_item_id?: string | null;
+  user_id?: string | null;
   district?: string | null;
   weight?: string | null;
   meat_weight?: string | null;
@@ -125,18 +135,31 @@ export async function getSalePriceQuote(params: {
   const animalId = params.animal_id ?? null;
   const breedId = params.breed_id ?? null;
   const saleItemId = params.sale_item_id ?? null;
-  const district = params.district ?? null;
+  // The seller's approved location decides the rule. A district name is still
+  // accepted from older app builds, resolved to an id rather than compared as
+  // text.
+  let geo: GeoIds = await getUserGeo(params.user_id);
+  if (!geo.district_id && params.district) {
+    const r = await resolveGeoNames({ district: params.district });
+    geo = { division_id: r.division_id, district_id: r.district_id, upazila_id: r.upazila_id };
+  }
+  const area = await geoFilter("sale_pricing", "r", geo);
   const rows = await queryRows<Row>(
     `
       SELECT CAST(r.id AS CHAR) AS id, CAST(r.sale_item_id AS CHAR) AS sale_item_id,
              CAST(r.animal_id AS CHAR) AS animal_id, CAST(r.breed_id AS CHAR) AS breed_id,
              r.district, r.division, r.unit,
              r.b2b_market_rate, r.b2b_meat_rate, r.dressing_pct, r.farmer_rate,
-             r.platform_fee, r.platform_fee_pct, r.logistics_fee, r.warehouse_vet_fee,
+             r.platform_fee, r.platform_fee_pct, r.logistics_fee, r.logistics_fee_pct,
+             r.warehouse_vet_fee, r.warehouse_vet_fee_pct,
              (
-               (r.animal_id IS NOT NULL AND r.animal_id = ?) * 8 +
-               (r.breed_id IS NOT NULL AND r.breed_id = ?) * 4 +
-               (r.district IS NOT NULL AND r.district = ?) * 2
+               -- Animal and breed outrank geography; among equals the most
+               -- specific area wins. Geo weights sum to 7, below breed's 32.
+               (r.animal_id IS NOT NULL AND r.animal_id = ?) * 64 +
+               (r.breed_id IS NOT NULL AND r.breed_id = ?) * 32 +
+               (r.upazila_id IS NOT NULL AND r.upazila_id <=> ?) * 4 +
+               (r.district_id IS NOT NULL AND r.district_id <=> ?) * 2 +
+               (r.division_id IS NOT NULL AND r.division_id <=> ?) * 1
              ) AS match_score
       FROM sale_pricing_rules r
       WHERE r.is_active = 1
@@ -155,11 +178,12 @@ export async function getSalePriceQuote(params: {
         )
         AND (r.animal_id IS NULL OR r.animal_id = ?)
         AND (r.breed_id IS NULL OR r.breed_id = ?)
-        AND (r.district IS NULL OR r.district = ?)
+        AND ${area.sql}
       ORDER BY match_score DESC, r.effective_from DESC, r.id DESC
       LIMIT 1
     `,
-    [animalId, breedId, district, saleItemId, saleItemId, animalId, animalId, animalId, breedId, district]
+    [animalId, breedId, geo.upazila_id, geo.district_id, geo.division_id,
+     saleItemId, saleItemId, animalId, animalId, animalId, breedId, ...area.params]
   );
   const rule = rows[0] ?? null;
   if (!rule) return { rule: null, breakdown: null };
@@ -171,24 +195,16 @@ export async function getSalePriceQuote(params: {
   const dressing = Number(rule.dressing_pct ?? 50) || 50;
   const b2bMeat = Number(rule.b2b_meat_rate ?? 0) || (dressing > 0 ? (b2bLive * 100) / dressing : 0);
 
-  // A percentage beats the flat per-kg figure when one is configured: the
-  // platform's cut scales with the animal's value, a fixed ৳/kg does not.
-  const pct = rule.platform_fee_pct === null || rule.platform_fee_pct === undefined
-    ? null
-    : Number(rule.platform_fee_pct);
-  const platform = pct !== null && Number.isFinite(pct)
-    ? (b2bLive * pct) / 100
-    : Number(rule.platform_fee ?? 0);
-
-  const logistics = Number(rule.logistics_fee ?? 0);
-  const vet = Number(rule.warehouse_vet_fee ?? 0);
-  const deductions = platform + logistics + vet;
-  // farmer_rate is only trusted when the rule predates the percentage fee. Once
-  // a percentage is set the rate is derived, so a stale stored figure cannot
-  // drift away from the arithmetic the farmer can see on the screen.
-  const netFarmerRate = pct !== null && Number.isFinite(pct)
-    ? b2bLive - deductions
-    : Number(rule.farmer_rate ?? b2bLive - deductions);
+  // Each fee is a flat ৳/kg or a % of the live rate (lib/pricing.ts). The net
+  // is always derived, so a stale stored farmer_rate cannot drift away from
+  // the arithmetic the farmer sees on the screen.
+  const fees = ruleFees(rule);
+  const platform = fees.platform.amount;
+  const logistics = fees.logistics.amount;
+  const vet = fees.care.amount;
+  const pct = fees.platform.pct;
+  const deductions = fees.deductions;
+  const netFarmerRate = fees.net;
 
   // Either weight identifies the animal; whichever the caller sends, the other
   // is derived so both sides of the trade see their own unit.
@@ -209,7 +225,9 @@ export async function getSalePriceQuote(params: {
       platform_fee: platform,
       platform_fee_pct: pct,
       logistics_fee: logistics,
+      logistics_fee_pct: fees.logistics.pct,
       warehouse_vet_fee: vet,
+      warehouse_vet_fee_pct: fees.care.pct,
       total_deductions: deductions,
       net_farmer_rate: netFarmerRate,
       net_farmer_meat_rate: dressing > 0 ? (netFarmerRate * 100) / dressing : 0,
@@ -266,37 +284,103 @@ export async function getAppPricing() {
 
 // Only surface categories that actually have sellable products (availability-gated),
 // with a live product_count so the app can badge/sort them.
-export async function getAppBuyCategories() {
-  return queryRows<Row>(
-    `
-      SELECT CAST(c.id AS CHAR) AS id, c.slug, c.interest_slug, c.name_en, c.name_bn,
-             c.description_en, c.description_bn,
-             COUNT(p.id) AS product_count
-      FROM buy_categories c
-      JOIN products p ON p.buy_category_id = c.id AND p.status IN ('active','out_of_stock')
-      WHERE c.is_active = 1
-      GROUP BY c.id
-      ORDER BY c.sort_order, c.id
-    `
-  );
+// A product is offered where one of its distributors serves the buyer (see
+// lib/distribution.ts); a product with no distributor is sold everywhere.
+// Filtered in code rather than SQL because the same pick also names the
+// distributor the order will go to.
+export async function getAppBuyCategories(userId?: string | null) {
+  const [cats, products, geo] = await Promise.all([
+    queryRows<Row>(
+      `SELECT CAST(c.id AS CHAR) AS id, c.slug, c.interest_slug, c.name_en, c.name_bn, c.description_en, c.description_bn
+         FROM buy_categories c WHERE c.is_active = 1 ORDER BY c.sort_order, c.id`
+    ),
+    queryRows<Row>("SELECT id, buy_category_id FROM products WHERE status IN ('active','out_of_stock')"),
+    getUserGeo(userId)
+  ]);
+  const links = await productDistributors(products.map((p) => Number(p.id)));
+  const counts = new Map<string, number>();
+  for (const p of products) {
+    if (!pickDistributor(links.get(Number(p.id)), geo).available) continue;
+    const key = String(p.buy_category_id);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return cats.filter((c) => counts.has(String(c.id))).map((c) => ({ ...c, product_count: counts.get(String(c.id)) ?? 0 }));
 }
 
-export async function getAppProducts(category?: string | null, interest?: string | null) {
-  return queryRows<Row>(
-    `
-      SELECT CAST(p.id AS CHAR) AS id, p.sku, p.name_en, p.name_bn,
-             p.short_description_en, p.short_description_bn,
-             p.package_size, p.unit, p.price, p.stock_qty, p.low_stock_threshold,
-             p.delivery_window, p.status, p.metadata,
-             JSON_UNQUOTE(JSON_EXTRACT(p.metadata, '$.image_url')) AS image_url,
-             c.slug AS category_slug, c.name_en AS category_name
-      FROM products p
-      JOIN buy_categories c ON c.id = p.buy_category_id
-      WHERE (? IS NULL OR c.slug = ?)
-        AND (? IS NULL OR c.interest_slug = ?)
-        AND p.status IN ('active','out_of_stock')
-      ORDER BY (p.status = 'active') DESC, p.updated_at DESC, p.id DESC
-    `,
-    [category ?? null, category ?? null, interest ?? null, interest ?? null]
+export async function getAppProducts(category?: string | null, interest?: string | null, userId?: string | null, manufacturerId?: string | null) {
+  const [rows, geo] = await Promise.all([
+    queryRows<Row>(
+      `
+        SELECT CAST(p.id AS CHAR) AS id, p.sku, p.name_en, p.name_bn,
+               p.short_description_en, p.short_description_bn,
+               p.package_size, p.package_size_bn, p.unit, p.price, p.stock_qty, p.low_stock_threshold,
+               p.delivery_window, p.delivery_window_bn, p.status, p.metadata,
+               JSON_UNQUOTE(JSON_EXTRACT(p.metadata, '$.image_url')) AS image_url,
+               CAST(m.id AS CHAR) AS manufacturer_id, m.name_en AS manufacturer_name, m.name_bn AS manufacturer_name_bn,
+               COALESCE(m.short_name_en, m.name_en) AS manufacturer_short, COALESCE(m.short_name_bn, m.name_bn) AS manufacturer_short_bn,
+               m.logo_url AS manufacturer_logo,
+               c.slug AS category_slug, c.name_en AS category_name, c.name_bn AS category_name_bn
+        FROM products p
+        JOIN buy_categories c ON c.id = p.buy_category_id
+        LEFT JOIN manufacturers m ON m.id = p.manufacturer_id
+        WHERE (? IS NULL OR c.slug = ?)
+          AND (? IS NULL OR c.interest_slug = ?)
+          AND (? IS NULL OR p.manufacturer_id = ?)
+          AND p.status IN ('active','out_of_stock')
+        ORDER BY (p.status = 'active') DESC, p.updated_at DESC, p.id DESC
+      `,
+      [category ?? null, category ?? null, interest ?? null, interest ?? null, manufacturerId ?? null, manufacturerId ?? null]
+    ),
+    getUserGeo(userId)
+  ]);
+  const links = await productDistributors(rows.map((r) => Number(r.id)));
+  return rows.flatMap((r) => {
+    const pick = pickDistributor(links.get(Number(r.id)), geo);
+    if (!pick.available) return [];
+    const d = pick.distributor;
+    return [{
+      ...r,
+      distributor_id: d ? String(d.id) : null,
+      distributor_name: d ? d.short_name_en ?? d.name_en : null,
+      distributor_name_bn: d ? d.short_name_bn ?? d.name_bn : null,
+      distributor_logo: d?.logo_url ?? null,
+      distributor_lock: d?.lock ?? "none",
+      distributor_area: d?.area_en ?? "Nationwide",
+      distributor_area_bn: d?.area_bn ?? "সারা দেশ"
+    }];
+  });
+}
+
+// GET /api/v1/app/brands/manufacturer?manufacturer_id=  — the modal behind "Made by".
+export async function getAppManufacturer(manufacturerId?: string | null) {
+  if (!manufacturerId) return null;
+  const [m] = await queryRows<Row>(
+    `SELECT CAST(id AS CHAR) AS id, code, name_en, name_bn, short_name_en, short_name_bn, logo_url,
+            description_en, description_bn, address_en, address_bn, factory_address_en, factory_address_bn,
+            phone, email, website, registration_no, contact_person, established_year
+       FROM manufacturers WHERE id = ? AND is_active = 1 LIMIT 1`,
+    [manufacturerId]
   );
+  if (!m) return null;
+  const [count] = await queryRows<Row>("SELECT COUNT(*) AS n FROM products WHERE manufacturer_id = ? AND status = 'active'", [manufacturerId]);
+  return { ...m, kind: "manufacturer", product_count: Number(count?.n ?? 0) };
+}
+
+// GET /api/v1/app/brands/distributor?distributor_id=  — the modal behind "Distributed by".
+export async function getAppDistributor(distributorId?: string | null) {
+  const d = await getDistributorById(distributorId);
+  if (!d) return null;
+  const [extra] = await queryRows<Row>(
+    `SELECT description_en, description_bn, services_en, services_bn, email, website, registration_no,
+            contact_person, established_year
+       FROM distributors WHERE id = ? AND is_active = 1 LIMIT 1`,
+    [distributorId]
+  );
+  if (!extra) return null;
+  const [count] = await queryRows<Row>(
+    `SELECT COUNT(*) AS n FROM product_distributors pd JOIN products p ON p.id = pd.product_id
+      WHERE pd.distributor_id = ? AND pd.is_active = 1 AND p.status = 'active'`,
+    [distributorId]
+  );
+  return { ...d, ...extra, id: String(d.id), kind: "distributor", product_count: Number(count?.n ?? 0) };
 }

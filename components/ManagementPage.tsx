@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { ArrowDown, ArrowUp, ChevronsUpDown, Download, Edit3, Eye, Filter, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
 import { AdminShell } from "@/components/AdminShell";
 import { Status } from "@/components/Status";
+import { Select } from "@/components/Select";
 
 export type ManagementColumn = {
   key: string;
@@ -27,16 +29,41 @@ export type ManagementPageProps = {
   formFields: {
     label: string;
     name: string;
-    type?: "text" | "textarea" | "select" | "date" | "datetime";
+    /**
+     * fee — `name` is the flat ৳/kg column, `pctName` the percent column; one
+     *       toggle picks which holds the value, the other submits blank.
+     * image — URL box plus an upload button (POST /api/upload) and a preview.
+     * multi-lookup — several `lookup` records, submitted as "1,2,3".
+     */
+    type?: "text" | "textarea" | "select" | "date" | "datetime" | "geo" | "fee" | "image" | "multi-lookup";
     options?: string[];
+    /** Overrides the form's built-in required-field list. */
+    required?: boolean;
+    /** Shown disabled with its value, and left out of the submitted payload. */
+    readOnly?: boolean;
+    /** Which form section the field belongs to; inferred from its name if absent. */
+    section?: string;
     /** Key into lib/admin-lookups — renders a name picker that submits the id. */
     lookup?: string;
+    /** type "fee": the percent column paired with the flat column in `name`. */
+    pctName?: string;
+    /** type "image": upload folder passed to /api/upload (default "misc"). */
+    folder?: string;
     value?: string;
     hint?: string;
   }[];
+  /** Shown between the page header and the table — e.g. a warning banner. */
+  banner?: ReactNode;
 };
 
 const PAGE_SIZES = [10, 25, 50, 100];
+
+// Records with a purpose-built detail screen open there; everything else opens
+// the generic record view.
+const DETAIL_ROUTES: Record<string, (id: string) => string> = {
+  "sale/listings": (id) => `/sale/${encodeURIComponent(id)}`,
+  "loan/applications": (id) => `/loan/applications/${encodeURIComponent(id)}`
+};
 
 // Treats values that look numeric (incl. ৳ / commas / %) as numbers for sorting.
 function asSortable(value: unknown): number | string {
@@ -54,8 +81,10 @@ export function ManagementPage({
   endpoint,
   columns,
   rows: initialRows,
-  formFields: _formFields
+  formFields: _formFields,
+  banner
 }: ManagementPageProps) {
+  const router = useRouter();
   const [rows, setRows] = useState<ManagementRow[]>(initialRows);
   const [message, setMessage] = useState<string>("");
   const [loading, setLoading] = useState(false);
@@ -68,6 +97,8 @@ export function ManagementPage({
   const [pageSize, setPageSize] = useState(25);
   const resource = useMemo(() => endpoint.replace(/^\/api\/v1\//, ""), [endpoint]);
   const createHref = `/manage/form?resource=${encodeURIComponent(resource)}`;
+  const detailHref = (id: string) =>
+    DETAIL_ROUTES[resource]?.(id) ?? `/manage/view?resource=${encodeURIComponent(resource)}&id=${encodeURIComponent(id)}`;
   const allColumns: ManagementColumn[] = useMemo(() => [...columns, { key: "status", label: "Status" }], [columns]);
 
   // global search -> per-column filters -> sort
@@ -203,6 +234,7 @@ export function ManagementPage({
         </div>
       </section>
 
+      {banner}
       <section className="list-layout">
         <div className="panel">
           <div className="panel-header">
@@ -252,14 +284,23 @@ export function ManagementPage({
               </thead>
               <tbody>
                 {pageRows.map((row) => (
-                  <tr key={row.id}>
+                  <tr
+                    key={row.id}
+                    className="row-link"
+                    // The whole row opens the record; the edit/delete controls
+                    // inside it keep their own behaviour.
+                    onClick={(e) => {
+                      if ((e.target as HTMLElement).closest("a, button, input, select, textarea")) return;
+                      router.push(detailHref(row.id));
+                    }}
+                  >
                     {columns.map((column) => (
                       <td key={column.key}>{row[column.key]}</td>
                     ))}
                     <td><Status label={row.status ?? "Active"} /></td>
                     <td>
                       <div className="row-actions">
-                        <Link href={`/manage/view?resource=${encodeURIComponent(resource)}&id=${encodeURIComponent(row.id)}`} title="View details"><Eye size={16} /></Link>
+                        <Link href={detailHref(row.id)} title="View details"><Eye size={16} /></Link>
                         <Link href={`/manage/form?resource=${encodeURIComponent(resource)}&id=${encodeURIComponent(row.id)}`} title="Edit"><Edit3 size={16} /></Link>
                         <button onClick={() => void deleteRow(row.id)} title="Delete" type="button"><Trash2 size={16} /></button>
                       </div>
@@ -280,9 +321,13 @@ export function ManagementPage({
           <div className="table-footer">
             <div className="page-size">
               <span>Rows per page</span>
-              <select value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))}>
-                {PAGE_SIZES.map((s) => <option key={s} value={s}>{s}</option>)}
-              </select>
+              <Select
+                size="sm"
+                aria-label="Rows per page"
+                value={String(pageSize)}
+                options={PAGE_SIZES.map((s) => ({ value: String(s), label: String(s) }))}
+                onChange={(v) => setPageSize(Number(v))}
+              />
             </div>
             <div className="pager">
               <span>

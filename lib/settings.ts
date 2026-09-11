@@ -3,26 +3,41 @@ import { queryRows } from "@/lib/db";
 /**
  * Platform switches, read from `app_settings`.
  *
- * Deliberately not cached: these are read a handful of times per request at
- * most, and a stale switch that stays wrong until a restart is worse than the
- * query. A missing key falls back to the caller's default rather than throwing —
- * a switch nobody has set yet should behave like its default, not take the
- * endpoint down.
+ * A single request can consult half a dozen switches (every geo filter reads
+ * its scope), so values are held for a few seconds rather than re-queried each
+ * time. The window is short enough that a change in the admin is visible
+ * almost at once, and a write through the admin clears it immediately.
+ *
+ * A missing key falls back to the caller's default rather than throwing — a
+ * switch nobody has set yet behaves like its default.
  */
 
-export async function getSetting(key: string, fallback: string): Promise<string> {
+const TTL_MS = 10_000;
+let cache: { at: number; values: Map<string, string | null> } | null = null;
+
+async function all(): Promise<Map<string, string | null>> {
+  if (cache && Date.now() - cache.at < TTL_MS) return cache.values;
   try {
-    const rows = await queryRows<{ value_text: string | null }>(
-      "SELECT value_text FROM app_settings WHERE setting_key = ? LIMIT 1",
-      [key]
+    const rows = await queryRows<{ setting_key: string; value_text: string | null }>(
+      "SELECT setting_key, value_text FROM app_settings"
     );
-    const value = rows[0]?.value_text;
-    return value === null || value === undefined || value === "" ? fallback : String(value);
+    cache = { at: Date.now(), values: new Map(rows.map((r) => [r.setting_key, r.value_text])) };
   } catch {
-    // The table may not exist yet on an environment that has not run migration
-    // 030. Behaving like the default is the safe read.
-    return fallback;
+    // The table may not exist on an environment that has not run migration
+    // 030. Behaving like the defaults is the safe read.
+    cache = { at: Date.now(), values: new Map() };
   }
+  return cache.values;
+}
+
+/** Drop the cached values; called after any write to app_settings. */
+export function invalidateSettings() {
+  cache = null;
+}
+
+export async function getSetting(key: string, fallback: string): Promise<string> {
+  const value = (await all()).get(key);
+  return value === null || value === undefined || value === "" ? fallback : String(value);
 }
 
 /** "1", "true", "yes" and "on" are true; everything else is false. */

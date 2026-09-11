@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { AdminShell } from "@/components/AdminShell";
+import { Select } from "@/components/Select";
 
 // Loan applications — the operational queue.
 //
@@ -79,6 +81,7 @@ const STATUS_TONE: Record<string, string> = {
 const taka = (n: unknown) => `৳${Number(n || 0).toLocaleString("en-IN")}`;
 
 export default function LoanApplicationsPage() {
+  const router = useRouter();
   const [data, setData] = useState<Queue | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -132,10 +135,14 @@ export default function LoanApplicationsPage() {
       )}
 
       <div className="filters">
-        <select value={status} onChange={(e) => { setPage(1); setStatus(e.target.value); }}>
-          <option value="">All stages</option>
-          {Object.entries(STATUS_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-        </select>
+        <div className="filter-select">
+          <Select
+            aria-label="Stage"
+            value={status}
+            options={[{ value: "", label: "All stages" }, ...Object.entries(STATUS_LABEL).map(([k, v]) => ({ value: k, label: v }))]}
+            onChange={(v) => { setPage(1); setStatus(v); }}
+          />
+        </div>
         {data && <span className="count">{data.total} application{data.total === 1 ? "" : "s"}</span>}
       </div>
 
@@ -164,7 +171,14 @@ export default function LoanApplicationsPage() {
               </thead>
               <tbody>
                 {data.rows.map((r) => (
-                  <tr key={r.id}>
+                  <tr
+                    key={r.id}
+                    className="row-link"
+                    onClick={(e) => {
+                      if ((e.target as HTMLElement).closest("a, button, input, select")) return;
+                      router.push(`/loan/applications/${r.id}`);
+                    }}
+                  >
                     <td className="mono">{r.application_code}</td>
                     <td>
                       <div className="who">{r.farmer}</div>
@@ -211,7 +225,7 @@ export default function LoanApplicationsPage() {
         .sub { margin:0; color:#6b6b6b; max-width:680px; }
         .kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:14px; margin-bottom:18px; }
         .filters { display:flex; align-items:center; gap:12px; margin-bottom:12px; }
-        select { padding:8px 12px; border:1px solid #E8D7DF; border-radius:9px; background:#fff; font-size:14px; }
+        .filter-select { width:240px; max-width:100%; }
         .count { color:#6b6b6b; font-size:13px; }
         .table-wrap { overflow-x:auto; background:#fff; border:1px solid #E8D7DF; border-radius:14px; }
         table { width:100%; border-collapse:collapse; font-size:14px; }

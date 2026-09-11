@@ -6,50 +6,8 @@ import { buildAppUser } from "./auth";
 // The farmer's own record: personal information, banking, farm details, KYC
 // documents and onboarding preferences.
 
-export async function savePersonalInfo(payload: Row) {
-  const userId = payload.user_id;
-  const fullName = (payload.full_name ?? payload.display_name ?? "").toString().trim();
-  const gender = (payload.gender ?? "").toString().trim();
-  if (!userId) throw new Error("user_id is required.");
-  if (!fullName) throw new Error("Name is required.");
-  if (!["male", "female", "other", "undisclosed"].includes(gender)) {
-    throw new Error("A valid gender is required.");
-  }
-
-  await executeQuery(
-    `UPDATE app_users
-       SET full_name = ?, display_name = COALESCE(NULLIF(?, ''), display_name, ?),
-           gender = ?, date_of_birth = ?, profile_image_url = COALESCE(NULLIF(?, ''), profile_image_url),
-           division = COALESCE(NULLIF(?, ''), division),
-           district = COALESCE(NULLIF(?, ''), district),
-           upazila = COALESCE(NULLIF(?, ''), upazila),
-           latitude = COALESCE(?, latitude),
-           longitude = COALESCE(?, longitude),
-           personal_info_completed = 1
-     WHERE id = ?`,
-    [
-      fullName,
-      (payload.display_name ?? "").toString(),
-      fullName,
-      gender,
-      (payload.date_of_birth ?? null) as string | null,
-      (payload.profile_image_url ?? "").toString(),
-      (payload.division ?? "").toString(),
-      (payload.district ?? "").toString(),
-      (payload.upazila ?? "").toString(),
-      payload.latitude != null ? Number(payload.latitude) : null,
-      payload.longitude != null ? Number(payload.longitude) : null,
-      userId
-    ]
-  );
-
-  const rows = await queryRows<Row>(
-    "SELECT id, full_name, display_name, phone, gender, date_of_birth, division, district, upazila, profile_image_url, status, personal_info_completed, is_kyc_verified, nid_number, profile_json FROM app_users WHERE id = ? LIMIT 1",
-    [userId]
-  );
-  if (rows.length === 0) throw new Error("User not found.");
-  return { user: await buildAppUser(rows[0]) };
-}
+// The save itself, with its approval gate, lives in profile-changes.
+export { savePersonalInfo } from "./profile-changes";
 
 // GET /api/v1/app/me?user_id=  -> current user with roles + onboarding gates.
 export async function getAppMe(userId?: string | null) {

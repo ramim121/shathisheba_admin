@@ -1,8 +1,14 @@
-import { ManagementPage } from "@/components/ManagementPage";
-import { allManagementPages } from "@/lib/admin-pages";
+import { AdminShell } from "@/components/AdminShell";
+import { GeoScopeSettings } from "@/components/GeoScopeSettings";
+import { OperationalZones } from "@/components/OperationalZones";
 
-// The System > Settings nav entry has pointed at this route all along; until now
-// there was nothing here to serve it.
+// Settings opens on the geo filters: the switch staff reach for most. The raw
+// key/value table moved to Settings > Platform switches.
 export default function Page() {
-  return <ManagementPage {...allManagementPages["settings/app"]} />;
+  return (
+    <AdminShell>
+      <GeoScopeSettings />
+      <OperationalZones />
+    </AdminShell>
+  );
 }

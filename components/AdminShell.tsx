@@ -4,198 +4,181 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
-  BellRing,
-  BookOpen,
-  Boxes,
-  ChevronDown,
-  CloudSun,
-  CreditCard,
   GraduationCap,
   HandCoins,
-  Headset,
-  HelpCircle,
   LayoutDashboard,
   ListChecks,
   LogOut,
   MapPin,
+  Megaphone,
   MessageSquareText,
   PackageCheck,
-  Pencil,
-  ReceiptText,
   ScrollText,
   Search,
   Settings2,
   ShieldCheck,
   ShoppingCart,
-  Sparkles,
   Store,
-  Tags,
-  Trash2,
-  Trophy,
-  UsersRound,
-  Building2
+  UsersRound
 } from "lucide-react";
 
-type NavLink = { label: string; href: string; icon: typeof LayoutDashboard };
-type NavSection = { title: string; icon: typeof LayoutDashboard; items: NavLink[] };
+type NavTab = { label: string; href: string };
+type NavGroup = { label: string; icon: typeof LayoutDashboard; tabs: NavTab[] };
 
-// Flat quick-access items pinned at the top of the sidebar.
-const pinned: NavLink[] = [
-  { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-  { label: "Approvals", href: "/approvals", icon: ListChecks },
-  { label: "API Viewer", href: "/api-viewer", icon: ScrollText }
-];
-
-// Grouped, collapsible (cascading) navigation. Trimmed of the redundant
-// "Product Catalogue" (duplicate of Products) and the static "Reports" stub.
-const sections: NavSection[] = [
-  // Loan operations sit directly beneath the pinned items because they become
-  // the highest-frequency daily work for field officers and credit staff.
+// The sidebar used to list some sixty pages in eleven accordions, with the page
+// you wanted usually folded away in a closed one. It now lists destinations;
+// the pages inside a destination are tabs across the top of the page itself
+// (SectionTabs), so related screens are one click apart and the sidebar fits
+// on a laptop screen without scrolling.
+const groups: NavGroup[] = [
+  { label: "Dashboard", icon: LayoutDashboard, tabs: [{ label: "Dashboard", href: "/dashboard" }] },
   {
-    title: "Loan & Credit",
-    icon: HandCoins,
-    items: [
-      { label: "Loan Applications", href: "/loan/applications", icon: ListChecks },
-      { label: "Credit Dashboard", href: "/loan/dashboard", icon: LayoutDashboard },
-      { label: "Readiness Checks", href: "/loan/readiness-checks", icon: ShieldCheck },
-      { label: "Loan Accounts", href: "/loan/accounts", icon: CreditCard },
-      { label: "Collections", href: "/loan/collections", icon: HandCoins },
-      { label: "Lender Submissions", href: "/loan/lenders", icon: Building2 }
+    label: "Approvals", icon: ListChecks, tabs: [
+      { label: "Approval queue", href: "/approvals" },
+      { label: "Profile changes", href: "/users/change-requests" }
     ]
   },
   {
-    title: "Loan Setup",
-    icon: Settings2,
-    items: [
-      { label: "Loan Products", href: "/loan/products", icon: HandCoins },
-      { label: "Lenders", href: "/loan/lenders-setup", icon: Building2 },
-      { label: "Readiness Questionnaire", href: "/loan/questionnaire", icon: ScrollText },
-      { label: "Scorecard Criteria", href: "/loan/scorecard-criteria", icon: ListChecks },
-      { label: "Scorecard Rules", href: "/loan/scorecard-rules", icon: ScrollText },
-      { label: "Hard Stops", href: "/loan/hard-stops", icon: ShieldCheck },
-      { label: "Reason Codes", href: "/loan/reason-codes", icon: Tags },
-      { label: "Pathway Rules", href: "/loan/pathway-rules", icon: ListChecks },
-      { label: "Development Tasks", href: "/loan/development-templates", icon: BookOpen },
-      { label: "Corroboration Signals", href: "/loan/confidence-signals", icon: ShieldCheck },
-      { label: "Consent Types", href: "/loan/consent-types", icon: BookOpen },
-      { label: "Loan Purposes", href: "/loan/purposes", icon: Tags }
+    // Loan operations sit high because they are the highest-frequency daily
+    // work for field officers and credit staff.
+    label: "Loans", icon: HandCoins, tabs: [
+      { label: "Applications", href: "/loan/applications" },
+      { label: "Credit dashboard", href: "/loan/dashboard" },
+      { label: "Readiness checks", href: "/loan/readiness-checks" },
+      { label: "Loan accounts", href: "/loan/accounts" },
+      { label: "Collections", href: "/loan/collections" },
+      { label: "Lender submissions", href: "/loan/lenders" }
     ]
   },
   {
-    title: "Content & CMS",
-    icon: GraduationCap,
-    items: [
-      { label: "Market Updates", href: "/market-updates", icon: BellRing },
-      { label: "Weather Alerts", href: "/weather", icon: CloudSun },
-      { label: "Learning CMS", href: "/learning", icon: GraduationCap },
-      { label: "Learning Studio", href: "/learning/studio", icon: Pencil },
-      { label: "Learning Progress", href: "/learning/progress", icon: Trophy },
-      { label: "Ask Shathi Apa", href: "/assistant", icon: Sparkles },
-      { label: "FAQ & Help", href: "/faq", icon: HelpCircle },
-      { label: "App Interests", href: "/interests", icon: Boxes }
+    label: "Loan setup", icon: Settings2, tabs: [
+      { label: "Products", href: "/loan/products" },
+      { label: "Lenders", href: "/loan/lenders-setup" },
+      { label: "Questionnaire", href: "/loan/questionnaire" },
+      { label: "Scorecard criteria", href: "/loan/scorecard-criteria" },
+      { label: "Scorecard rules", href: "/loan/scorecard-rules" },
+      { label: "Hard stops", href: "/loan/hard-stops" },
+      { label: "Reason codes", href: "/loan/reason-codes" },
+      { label: "Pathway rules", href: "/loan/pathway-rules" },
+      { label: "Development tasks", href: "/loan/development-templates" },
+      { label: "Corroboration signals", href: "/loan/confidence-signals" },
+      { label: "Consent types", href: "/loan/consent-types" },
+      { label: "Loan purposes", href: "/loan/purposes" }
     ]
   },
   {
-    title: "Marketplace",
-    icon: Store,
-    items: [
-      { label: "All Listings", href: "/sale", icon: Store },
-      { label: "Sale Categories", href: "/sale/categories", icon: Tags },
-      { label: "Sale Items", href: "/sale/items", icon: ListChecks },
-      { label: "Animal Master", href: "/sale/animals", icon: Boxes },
-      { label: "Animal Breeds", href: "/sale/breeds", icon: Boxes },
-      { label: "Pricing Rules", href: "/sale/pricing", icon: ReceiptText },
-      { label: "Payment Confirmations", href: "/sale/confirmations", icon: ShieldCheck }
+    label: "Marketplace", icon: Store, tabs: [
+      { label: "Listings", href: "/sale" },
+      { label: "Categories", href: "/sale/categories" },
+      { label: "Items", href: "/sale/items" },
+      { label: "Animals", href: "/sale/animals" },
+      { label: "Breeds", href: "/sale/breeds" },
+      { label: "Price rules", href: "/sale/pricing" },
+      { label: "Payment confirmations", href: "/sale/confirmations" }
     ]
   },
   {
-    title: "Geography",
-    icon: MapPin,
-    items: [
-      { label: "Divisions", href: "/geo/divisions", icon: MapPin },
-      { label: "Districts", href: "/geo/districts", icon: MapPin },
-      { label: "Upazilas / Thanas", href: "/geo/upazilas", icon: MapPin }
+    label: "Buy & orders", icon: ShoppingCart, tabs: [
+      { label: "Products", href: "/buy/products" },
+      { label: "Categories", href: "/buy/categories" },
+      { label: "Manufacturers", href: "/buy/manufacturers" },
+      { label: "Distributors", href: "/buy/distributors" },
+      { label: "Orders", href: "/orders" },
+      { label: "Inventory", href: "/orders/inventory" },
+      { label: "Payments", href: "/orders/payments" },
+      { label: "Promotions", href: "/buy/promotions" },
+      { label: "Discounts given", href: "/buy/redemptions" },
+      { label: "Vouchers", href: "/buy/vouchers" }
     ]
   },
   {
-    title: "Buy & Orders",
-    icon: ShoppingCart,
-    items: [
-      { label: "Products", href: "/buy/products", icon: PackageCheck },
-      { label: "Buy Categories", href: "/buy/categories", icon: Tags },
-      { label: "Placed Orders", href: "/orders", icon: ShoppingCart },
-      { label: "Inventory", href: "/orders/inventory", icon: Boxes },
-      { label: "Payments", href: "/orders/payments", icon: CreditCard }
+    label: "Projects & KYC", icon: PackageCheck, tabs: [
+      { label: "Projects", href: "/partners" },
+      { label: "KYC approvals", href: "/kyc" }
     ]
   },
   {
-    title: "Partners & KYC",
-    icon: HandCoins,
-    items: [
-      { label: "Projects", href: "/partners", icon: HandCoins },
-      { label: "KYC Approvals", href: "/kyc", icon: ShieldCheck }
+    label: "Community", icon: MessageSquareText, tabs: [
+      { label: "Posts", href: "/community" },
+      { label: "Field officers", href: "/community/officers" },
+      { label: "Reported posts", href: "/community/reports" }
     ]
   },
   {
-    title: "Community",
-    icon: MessageSquareText,
-    items: [
-      { label: "Posts & Moderation", href: "/community", icon: MessageSquareText },
-      { label: "Zone Officers", href: "/community/officers", icon: Headset },
-      { label: "Reported Posts", href: "/community/reports", icon: BookOpen }
+    label: "Content", icon: GraduationCap, tabs: [
+      { label: "Market updates", href: "/market-updates" },
+      { label: "Weather alerts", href: "/weather" },
+      { label: "Learning CMS", href: "/learning" },
+      { label: "Learning studio", href: "/learning/studio" },
+      { label: "Learning progress", href: "/learning/progress" },
+      { label: "Ask Shathi Apa", href: "/assistant" },
+      { label: "FAQ & help", href: "/faq" },
+      { label: "App interests", href: "/interests" }
     ]
   },
   {
-    title: "Users",
-    icon: UsersRound,
-    items: [
-      { label: "All Users", href: "/users", icon: UsersRound },
-      { label: "User Roles", href: "/users/roles", icon: ShieldCheck },
-      { label: "Banking", href: "/users/banking", icon: CreditCard },
-      { label: "Farm Info", href: "/users/farm", icon: Boxes },
-      { label: "KYC Documents", href: "/users/kyc", icon: ScrollText },
-      { label: "Clear Records", href: "/users/clear-records", icon: Trash2 }
+    // What reaches farmers outside the screens they open: the home strip,
+    // push, in-app and email.
+    label: "Engagement", icon: Megaphone, tabs: [
+      { label: "Home partners", href: "/home/partners" },
+      { label: "Send notification", href: "/notifications/send" },
+      { label: "Templates", href: "/notifications/templates" },
+      { label: "Broadcasts", href: "/notifications/broadcasts" },
+      { label: "Delivery log", href: "/notifications/log" }
     ]
   },
   {
-    title: "System",
-    icon: Settings2,
-    items: [
-      { label: "Admin Users", href: "/admin-users", icon: ShieldCheck },
-      { label: "Settings", href: "/settings", icon: Settings2 }
+    label: "Users", icon: UsersRound, tabs: [
+      { label: "All users", href: "/users" },
+      { label: "Roles", href: "/users/roles" },
+      { label: "Banking", href: "/users/banking" },
+      { label: "Farm info", href: "/users/farm" },
+      { label: "KYC documents", href: "/users/kyc" },
+      { label: "Clear records", href: "/users/clear-records" }
+    ]
+  },
+  {
+    label: "Geography", icon: MapPin, tabs: [
+      { label: "Hierarchy", href: "/geo" },
+      { label: "Divisions", href: "/geo/divisions" },
+      { label: "Districts", href: "/geo/districts" },
+      { label: "Upazilas", href: "/geo/upazilas" }
+    ]
+  },
+  {
+    label: "Settings", icon: ShieldCheck, tabs: [
+      { label: "Geo filters", href: "/settings" },
+      { label: "Platform switches", href: "/settings/switches" },
+      { label: "Admin users", href: "/admin-users" },
+      { label: "API viewer", href: "/api-viewer" }
     ]
   }
 ];
 
-function isActive(pathname: string, href: string) {
-  return pathname === href;
-}
-
-function sectionHasActive(pathname: string, section: NavSection) {
-  return section.items.some((item) => isActive(pathname, item.href));
+/**
+ * The tab a path belongs to: the longest tab href that is the path itself or a
+ * parent of it, so /sale/pricing/new lands on "Price rules", not "Listings".
+ */
+function locate(pathname: string): { group: NavGroup; tab: NavTab } | null {
+  let best: { group: NavGroup; tab: NavTab; score: number } | null = null;
+  for (const group of groups) {
+    for (const tab of group.tabs) {
+      const score = pathname === tab.href ? tab.href.length + 1 : pathname.startsWith(`${tab.href}/`) ? tab.href.length : -1;
+      if (score > (best?.score ?? -1)) best = { group, tab, score };
+    }
+  }
+  return best ? { group: best.group, tab: best.tab } : null;
 }
 
 function SidebarNav() {
   const pathname = usePathname() ?? "";
   const [q, setQ] = useState("");
-  // Open the group that contains the active route; collapse the rest. The user
-  // can toggle any group, with the open set tracked in state.
-  const [open, setOpen] = useState<Record<string, boolean>>(() => {
-    const initial: Record<string, boolean> = {};
-    for (const section of sections) initial[section.title] = sectionHasActive(pathname, section);
-    return initial;
-  });
-
-  function toggle(title: string) {
-    setOpen((prev) => ({ ...prev, [title]: !prev[title] }));
-  }
+  const here = locate(pathname);
 
   const query = q.trim().toLowerCase();
-  const searchResults: Array<{ label: string; href: string; icon: typeof LayoutDashboard; group: string }> = query
-    ? [
-        ...pinned.map((i) => ({ ...i, group: "Quick" })),
-        ...sections.flatMap((s) => s.items.map((i) => ({ ...i, group: s.title })))
-      ].filter((i) => i.label.toLowerCase().includes(query) || i.group.toLowerCase().includes(query))
+  const results = query
+    ? groups.flatMap((g) => g.tabs.map((t) => ({ ...t, group: g.label, icon: g.icon })))
+        .filter((t) => t.label.toLowerCase().includes(query) || t.group.toLowerCase().includes(query))
     : [];
 
   return (
@@ -208,9 +191,9 @@ function SidebarNav() {
 
       {query ? (
         <nav className="nav-search-results">
-          {searchResults.length === 0 ? <p className="nav-search-empty">No menu items match “{q}”.</p> : null}
-          {searchResults.map((item) => (
-            <Link className={`nav-item${isActive(pathname, item.href) ? " active" : ""}`} href={item.href} key={item.href + item.group} title={item.group}>
+          {results.length === 0 ? <p className="nav-search-empty">No menu items match “{q}”.</p> : null}
+          {results.map((item) => (
+            <Link className={`nav-item${here?.tab.href === item.href ? " active" : ""}`} href={item.href} key={item.href + item.group} title={item.group}>
               <item.icon />
               <span className="nav-item-label">{item.label}</span>
               <span className="nav-item-group">{item.group}</span>
@@ -218,39 +201,37 @@ function SidebarNav() {
           ))}
         </nav>
       ) : (
-      <>
-      <nav className="nav-pinned">
-        {pinned.map((item) => (
-          <Link className={`nav-item${isActive(pathname, item.href) ? " active" : ""}`} href={item.href} key={item.href}>
-            <item.icon />
-            {item.label}
-          </Link>
-        ))}
-      </nav>
-
-      {sections.map((section) => {
-        const expanded = open[section.title] || sectionHasActive(pathname, section);
-        return (
-          <div className={`nav-accordion${expanded ? " open" : ""}`} key={section.title}>
-            <button className="nav-accordion-head" onClick={() => toggle(section.title)} type="button">
-              <section.icon className="nav-accordion-icon" />
-              <span>{section.title}</span>
-              <ChevronDown className="nav-chevron" />
-            </button>
-            <div className="nav-accordion-body">
-              {section.items.map((item) => (
-                <Link className={`nav-item${isActive(pathname, item.href) ? " active" : ""}`} href={item.href} key={item.href}>
-                  <item.icon />
-                  {item.label}
-                </Link>
-              ))}
-            </div>
-          </div>
-        );
-      })}
-      </>
+        <nav className="nav-pinned">
+          {groups.map((group) => (
+            <Link
+              className={`nav-item${here?.group === group ? " active" : ""}`}
+              href={group.tabs[0].href}
+              key={group.label}
+            >
+              <group.icon />
+              <span className="nav-item-label">{group.label}</span>
+              {group.tabs.length > 1 ? <span className="nav-item-group">{group.tabs.length}</span> : null}
+            </Link>
+          ))}
+        </nav>
       )}
     </>
+  );
+}
+
+/** Every page in the current sidebar destination, as tabs above the content. */
+function SectionTabs() {
+  const pathname = usePathname() ?? "";
+  const here = locate(pathname);
+  if (!here || here.group.tabs.length < 2) return null;
+  return (
+    <nav className="section-tabs" aria-label={`${here.group.label} pages`}>
+      {here.group.tabs.map((tab) => (
+        <Link key={tab.href} href={tab.href} className={here.tab.href === tab.href ? "active" : ""}>
+          {tab.label}
+        </Link>
+      ))}
+    </nav>
   );
 }
 
@@ -325,7 +306,10 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
         <AdminIdentity />
       </aside>
 
-      <main className="main">{children}</main>
+      <main className="main">
+        <SectionTabs />
+        {children}
+      </main>
 
       <nav className="mobile-nav">
         <Link href="/dashboard"><LayoutDashboard size={18} />Home</Link>

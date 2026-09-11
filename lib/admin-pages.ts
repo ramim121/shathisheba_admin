@@ -66,7 +66,7 @@ export const pages: Record<string, ManagementPageProps> = {
       status: item.severity
     })),
     formFields: [
-      { label: "District", name: "district", value: "Mymensingh" },
+      { label: "Location", name: "location", type: "geo", required: true, hint: "The area the alert covers — choose at least a district." },
       { label: "Severity", name: "severity", type: "select", options: ["info", "advisory", "watch", "warning", "critical"] },
       { label: "Push notification", name: "push", type: "select", options: ["No", "Yes"] },
       ...defaultFields
@@ -99,8 +99,7 @@ export const pages: Record<string, ManagementPageProps> = {
       { label: "Image URL", name: "image_url", value: "" },
       { label: "Category", name: "category", value: "price" },
       { label: "Update type", name: "update_type", type: "select", options: ["price", "stock", "training", "notice", "weather"] },
-      { label: "District (blank = all)", name: "district", value: "" },
-      { label: "Upazila", name: "upazila", value: "" },
+      { label: "Location", name: "location", type: "geo", hint: "Leave blank to send the update everywhere." },
       { label: "Status", name: "status", type: "select", options: ["active", "draft", "archived"] },
       { label: "Sort order", name: "sort_order", value: "0" }
     ]
@@ -141,9 +140,10 @@ export const pages: Record<string, ManagementPageProps> = {
       { label: "Estimated earning", name: "estimated_earning", value: "120960" },
       { label: "Contact phone", name: "contact_phone", value: "01700000000" },
       { label: "Address", name: "address_text", type: "textarea", value: "Village, Upazila, District" },
+      { label: "Location", name: "location", type: "geo", hint: "Normally inherited from the farmer's profile; correct it here if needed." },
       // The four stages the farmer sees on their progress screen. Status decides
       // which stage is lit; the dates and verified weight fill in the detail.
-      { label: "Status", name: "status", type: "select", options: ["draft", "submitted", "field_verification", "active", "sold", "paid", "rejected", "cancelled"], hint: "submitted -> field_verification -> active (approved) -> paid" },
+      { label: "Status", name: "status", type: "select", options: ["draft", "submitted", "field_verification", "verified", "active", "contracted", "shipped", "sold", "paid", "rejected", "cancelled"], hint: "Normally set by the listing's six-step screen: submitted -> field_verification -> verified -> active (profile approved) -> contracted -> shipped -> paid" },
       { label: "Field visit date", name: "field_visit_date", type: "date", hint: "Set with status field_verification so the farmer sees a date, not a promise." },
       { label: "Field visit note", name: "field_visit_note", type: "textarea", value: "" },
       { label: "Verified weight (kg live)", name: "verified_weight_kg", value: "", hint: "From the portable scale. Final payment is set on this." },
@@ -273,9 +273,7 @@ export const pages: Record<string, ManagementPageProps> = {
       { label: "Category (interest slug)", name: "interest_slug", type: "select", options: ["livestock-poultry", "crops", "fishery", "vegetables", "fruits", "inputs", "machinery"] },
       { label: "Lender", name: "lender_name", value: "BRAC Bank" },
       { label: "Region based (1) or open to all (0)", name: "region_based", type: "select", options: ["1", "0"] },
-      { label: "Division", name: "division", value: "Mymensingh" },
-      { label: "District", name: "district", value: "Mymensingh" },
-      { label: "Upazila / Thana", name: "upazila", value: "Mymensingh Sadar" },
+      { label: "Location", name: "location", type: "geo", hint: "A region-based project is shown only inside this area. Leave blank only for a national project." },
       { label: "Cover image URL", name: "image_url", value: "" },
       { label: "Short summary (English)", name: "summary_en", type: "textarea", value: "One-line project summary." },
       { label: "Short summary (Bangla)", name: "summary_bn", type: "textarea", value: "প্রকল্পের সংক্ষিপ্ত বিবরণ।" },
@@ -292,10 +290,12 @@ export const pages: Record<string, ManagementPageProps> = {
       { label: "Model line (Bangla)", name: "model_bn", value: "বাই-ব্যাক অফার + লাভ ভাগাভাগি মডেল" },
       { label: "Loan partners (English)", name: "loan_partners_en", value: "Loan provided by BRAC Bank & DigiGram Ventures" },
       { label: "Loan partners (Bangla)", name: "loan_partners_bn", value: "ঋণ প্রদান করছে ব্র্যাক ব্যাংক ও ডিজিগ্রাম ভেঞ্চারস" },
+      { label: "Loan partner logos (JSON)", name: "loan_partner_logos", type: "textarea", value: "", hint: "Small logos on the project card, in order: [{\"name\":\"BRAC Bank\",\"logo_url\":\"https://…/partners/brac-bank.png\"}]. PNG about 96 px tall." },
       { label: "Capacity label (English)", name: "capacity_label_en", value: "100 farmers in your upazila" },
       { label: "Capacity label (Bangla)", name: "capacity_label_bn", value: "আপনার উপজেলায় ১০০ জন কৃষক" },
       { label: "Terms (JSON)", name: "terms_json", type: "textarea", value: "", hint: "Buy-back rate and profit-share split. Keys: buyback.guaranteed_rate_per_kg, profit_share.farmer_pct." },
       { label: "Duration / timeframe label", name: "duration_label", value: "4 months" },
+      { label: "Duration label (Bangla)", name: "duration_label_bn", value: "৪ মাস" },
       { label: "Start date", name: "start_date", type: "date" },
       { label: "End date (auto-inactive after)", name: "end_date", type: "date" },
       { label: "Capacity", name: "capacity", value: "100" },
@@ -376,8 +376,7 @@ export const pages: Record<string, ManagementPageProps> = {
       { label: "Post body", name: "body", type: "textarea", value: "Write community post" },
       { label: "Image URL", name: "image_url", value: "" },
       { label: "Official Shathi Sheba post (highlighted)", name: "is_official", type: "select", options: ["0", "1"] },
-      { label: "District", name: "district", value: "Mymensingh" },
-      { label: "Upazila", name: "upazila", value: "Mymensingh Sadar" },
+      { label: "Location", name: "location", type: "geo", hint: "Filled from the author's profile when a farmer posts." },
       { label: "Moderation status", name: "status", type: "select", options: ["visible", "answered", "hidden", "moderation", "removed"] },
       { label: "Report count", name: "report_count", value: "0" }
     ]
@@ -403,8 +402,7 @@ export const pages: Record<string, ManagementPageProps> = {
       { label: "Display name", name: "display_name", value: "Rahim" },
       { label: "Phone", name: "phone", value: "01712-345678" },
       { label: "Email", name: "email", value: "rahim@example.com" },
-      { label: "District", name: "district", value: "Mymensingh" },
-      { label: "Upazila", name: "upazila", value: "Mymensingh Sadar" },
+      { label: "Location", name: "location", type: "geo", hint: "Admin edits apply at once. A farmer's own edits go through Users > Profile changes." },
       { label: "Status", name: "status", type: "select", options: ["active", "pending", "suspended"] }
     ]
   },
@@ -570,12 +568,12 @@ export const nestedPages: Record<string, ManagementPageProps> = {
     ]
   },
   "geo/upazilas": {
-    title: "Geo — Upazilas / Thanas",
-    description: "Official Bangladesh upazilas (thanas) used by the address Thana dropdown and region targeting.",
+    title: "Geo — Upazilas",
+    description: "Official Bangladesh upazilas, with English and Bangla names. Every location in the platform points at one of these by id.",
     entityName: "Upazila",
     endpoint: "/api/v1/geo/upazilas",
     columns: [
-      { key: "name", label: "Upazila / Thana" },
+      { key: "name", label: "Upazila" },
       { key: "bangla", label: "Bangla" },
       { key: "district", label: "District" }
     ],
@@ -630,31 +628,36 @@ export const nestedPages: Record<string, ManagementPageProps> = {
     entityName: "Pricing Rule",
     endpoint: "/api/v1/sale/pricing",
     columns: [
+      { key: "rule", label: "Rule" },
       { key: "item", label: "Item" },
-      { key: "district", label: "District" },
+      { key: "district", label: "Area" },
       { key: "rates", label: "Rates" },
-      { key: "fees", label: "Fees" }
+      { key: "fees", label: "Fees" },
+      { key: "listings", label: "Listings" }
     ],
     rows: [],
     formFields: [
-      { label: "Sale item", name: "sale_item_id", lookup: "sale-items" },
+      { label: "Rule name", name: "rule_name", value: "National livestock rate", hint: "Shown on every listing priced by this rule." },
+      { label: "Sale item", name: "sale_item_id", lookup: "sale-items", required: true },
       { label: "Project (optional)", name: "partner_project_id", lookup: "partner-projects" },
       { label: "Animal (blank = any)", name: "animal_id", lookup: "animals" },
       { label: "Breed (blank = any)", name: "breed_id", lookup: "breeds" },
-      { label: "Division (blank = any)", name: "division", value: "" },
-      { label: "District (blank = any)", name: "district", value: "" },
-      { label: "Effective from", name: "effective_from", type: "date" },
+      { label: "Location", name: "location", type: "geo", hint: "Blank = a national rule. The most specific matching area wins." },
+      { label: "Effective from", name: "effective_from", type: "date", required: true },
+      { label: "Effective to (blank = open-ended)", name: "effective_to", type: "date" },
       // Every figure below is per kg of LIVE weight - that is the basis the whole
       // breakdown reconciles against. The meat rate is the same money restated.
-      { label: "B2B market rate (per kg live)", name: "b2b_market_rate", value: "400" },
-      { label: "B2B meat rate (per kg meat)", name: "b2b_meat_rate", value: "800" },
+      { label: "B2B market rate (per kg live)", name: "b2b_market_rate", value: "425", required: true },
+      { label: "B2B meat rate (per kg meat)", name: "b2b_meat_rate", value: "850" },
       { label: "Dressing %", name: "dressing_pct", value: "50", hint: "live weight = meat weight / (dressing % / 100). 50% means live = 2 x meat." },
-      { label: "Platform fee %", name: "platform_fee_pct", value: "2", hint: "Percentage of the live amount. Set this and it overrides the flat fee below." },
-      { label: "Platform fee (flat, per kg)", name: "platform_fee", value: "0", hint: "Only used when Platform fee % is blank." },
-      { label: "Logistics fee (per kg live)", name: "logistics_fee", value: "7" },
-      { label: "Warehouse and vet fee (per kg live)", name: "warehouse_vet_fee", value: "7" },
-      { label: "Farmer rate (per kg live)", name: "farmer_rate", value: "378", hint: "Derived automatically when Platform fee % is set." },
-      { label: "Unit", name: "unit", value: "kg" }
+      // Each fee is either a % of the live B2B rate or a flat ৳ per kg live —
+      // one toggle, one value, so the form can't hold two competing figures.
+      { label: "Platform fee", name: "platform_fee", pctName: "platform_fee_pct", type: "fee", value: "", section: "Pricing & numbers" },
+      { label: "Logistics & transport", name: "logistics_fee", pctName: "logistics_fee_pct", type: "fee", value: "", section: "Pricing & numbers" },
+      { label: "Warehousing & care", name: "warehouse_vet_fee", pctName: "warehouse_vet_fee_pct", type: "fee", value: "", section: "Pricing & numbers" },
+      { label: "Net farmer rate (per kg live)", name: "farmer_rate", readOnly: true, section: "Pricing & numbers", hint: "Calculated on save: B2B rate − platform − logistics − care." },
+      { label: "Unit", name: "unit", value: "kg" },
+      { label: "Active", name: "is_active", type: "select", options: ["1", "0"], hint: "Only active rules price new listings. Saving warns if this rule overlaps another active one." }
     ]
   },
   "buy/categories": {
@@ -685,17 +688,178 @@ export const nestedPages: Record<string, ManagementPageProps> = {
       { key: "sku", label: "SKU" },
       { key: "name", label: "Product" },
       { key: "category", label: "Category" },
-      { key: "stock", label: "Stock & Price" }
+      { key: "stock", label: "Stock & Price" },
+      { key: "manufacturer", label: "Manufacturer" },
+      { key: "area", label: "Distributors" }
     ],
     rows: [],
     formFields: [
       { label: "Buy category", name: "buy_category_id", lookup: "buy-categories" },
       { label: "SKU", name: "sku", value: "BUY-FEED-01" },
       { label: "English name", name: "name_en", value: "Shadhin Cattle Feed" },
+      { label: "Bangla name", name: "name_bn", value: "" },
+      { label: "Short description (English)", name: "short_description_en", type: "textarea", value: "" },
+      { label: "Short description (Bangla)", name: "short_description_bn", type: "textarea", value: "" },
       { label: "Unit", name: "unit", value: "sack" },
-      { label: "Price", name: "price", value: "1800" },
+      { label: "Package size", name: "package_size", value: "" },
+      { label: "Price (per unit)", name: "price", value: "1800" },
       { label: "Stock quantity", name: "stock_qty", value: "240" },
+      { label: "Low stock threshold", name: "low_stock_threshold", value: "20" },
+      { label: "Package size (Bangla)", name: "package_size_bn", value: "" },
+      { label: "Delivery window", name: "delivery_window", value: "2–3 days" },
+      { label: "Delivery window (Bangla)", name: "delivery_window_bn", value: "২–৩ দিন" },
+      // Where it can be bought comes from its distributors: a buyer sees it only
+      // where one of them serves them, and delivery is locked to that area.
+      { label: "Manufacturer", name: "manufacturer_id", lookup: "manufacturers", section: "Supply chain" },
+      { label: "Distributors", name: "distributor_ids", type: "multi-lookup", lookup: "distributors", section: "Supply chain", hint: "Leave empty to ship direct from the manufacturer, anywhere. Otherwise buyers see it only inside a distributor's area, and the delivery address is locked to that area." },
       { label: "Status", name: "status", type: "select", options: ["draft", "active", "out_of_stock", "inactive"] }
+    ]
+  },
+  "brands/manufacturers": {
+    title: "Manufacturers",
+    description: "Who makes the Buy from Shathi products. Shown on the product page as \"Made by\" with a tap-through profile and a link to all their products.",
+    entityName: "Manufacturer",
+    endpoint: "/api/v1/brands/manufacturers",
+    columns: [
+      { key: "code", label: "Code" },
+      { key: "name", label: "Name" },
+      { key: "bangla", label: "Bangla" },
+      { key: "contact", label: "Contact" },
+      { key: "products", label: "Products" }
+    ],
+    rows: [],
+    formFields: [
+      { label: "Name (English)", name: "name_en", required: true, value: "" },
+      { label: "Name (Bangla)", name: "name_bn", value: "" },
+      { label: "Short name (English)", name: "short_name_en", value: "", hint: "Shown on product cards." },
+      { label: "Short name (Bangla)", name: "short_name_bn", value: "" },
+      { label: "Code", name: "code", value: "" },
+      { label: "Logo", name: "logo_url", type: "image", folder: "partners" },
+      { label: "About (English)", name: "description_en", type: "textarea", value: "", section: "Details" },
+      { label: "About (Bangla)", name: "description_bn", type: "textarea", value: "", section: "Details" },
+      { label: "Office address (English)", name: "address_en", value: "", section: "Contact" },
+      { label: "Office address (Bangla)", name: "address_bn", value: "", section: "Contact" },
+      { label: "Factory address (English)", name: "factory_address_en", value: "", section: "Contact" },
+      { label: "Factory address (Bangla)", name: "factory_address_bn", value: "", section: "Contact" },
+      { label: "Phone", name: "phone", value: "", section: "Contact" },
+      { label: "Email", name: "email", value: "", section: "Contact" },
+      { label: "Website", name: "website", value: "", section: "Contact" },
+      { label: "Contact person", name: "contact_person", value: "", section: "Contact" },
+      { label: "Registration no.", name: "registration_no", value: "", section: "Details" },
+      { label: "Established (year)", name: "established_year", value: "", section: "Details" },
+      { label: "Active", name: "is_active", type: "select", options: ["1", "0"], section: "Details" }
+    ]
+  },
+  "brands/distributors": {
+    title: "Distributors",
+    description: "Who delivers Buy from Shathi products, and where. A buyer sees a product only where one of its distributors serves them; the delivery address is locked to that distributor's area (upazila = fixed address, only village/house is typed).",
+    entityName: "Distributor",
+    endpoint: "/api/v1/brands/distributors",
+    columns: [
+      { key: "code", label: "Code" },
+      { key: "name", label: "Name" },
+      { key: "area", label: "Service area" },
+      { key: "contact", label: "Contact" },
+      { key: "products", label: "Products" }
+    ],
+    rows: [],
+    formFields: [
+      { label: "Name (English)", name: "name_en", required: true, value: "" },
+      { label: "Name (Bangla)", name: "name_bn", value: "" },
+      { label: "Short name (English)", name: "short_name_en", value: "", hint: "Shown on product cards and orders." },
+      { label: "Short name (Bangla)", name: "short_name_bn", value: "" },
+      { label: "Code", name: "code", value: "" },
+      { label: "Logo", name: "logo_url", type: "image", folder: "partners" },
+      { label: "Service area", name: "location", type: "geo", section: "Service area", hint: "Any division = nationwide. A district = the whole district (buyers pick the upazila). An upazila = that upazila only (address fixed, buyers type only village/house)." },
+      { label: "About (English)", name: "description_en", type: "textarea", value: "", section: "Details" },
+      { label: "About (Bangla)", name: "description_bn", type: "textarea", value: "", section: "Details" },
+      { label: "Services (English)", name: "services_en", type: "textarea", value: "", section: "Details" },
+      { label: "Services (Bangla)", name: "services_bn", type: "textarea", value: "", section: "Details" },
+      { label: "Address (English)", name: "address_en", value: "", section: "Contact" },
+      { label: "Address (Bangla)", name: "address_bn", value: "", section: "Contact" },
+      { label: "Phone / hotline", name: "phone", value: "", section: "Contact" },
+      { label: "Email", name: "email", value: "", section: "Contact" },
+      { label: "Website", name: "website", value: "", section: "Contact" },
+      { label: "Contact person", name: "contact_person", value: "", section: "Contact" },
+      { label: "Registration no.", name: "registration_no", value: "", section: "Details" },
+      { label: "Established (year)", name: "established_year", value: "", section: "Details" },
+      { label: "Active", name: "is_active", type: "select", options: ["1", "0"], section: "Details" }
+    ]
+  },
+  "promotions/codes": {
+    title: "Promotions",
+    description: "Buy from Shathi discounts. The first-purchase offer applies itself; promo codes are typed by the buyer (never on a first purchase). One discount per order.",
+    entityName: "Promotion",
+    endpoint: "/api/v1/promotions/codes",
+    columns: [
+      { key: "code", label: "Code" },
+      { key: "name", label: "Name" },
+      { key: "discount", label: "Discount" },
+      { key: "minimum", label: "Minimum" },
+      { key: "validity", label: "Valid" },
+      { key: "area", label: "Area" },
+      { key: "uses", label: "Uses" }
+    ],
+    rows: [],
+    formFields: [
+      { label: "Kind", name: "kind", type: "select", options: ["promo_code", "first_purchase"], hint: "Keep one active first_purchase promotion; everything else is a promo_code." },
+      { label: "Code", name: "code", value: "EID500", hint: "What the buyer types. Leave blank for first_purchase." },
+      { label: "Name (English)", name: "name_en", value: "Eid discount" },
+      { label: "Name (Bangla)", name: "name_bn", value: "" },
+      { label: "Description", name: "description_en", type: "textarea", value: "" },
+      { label: "Discount type", name: "discount_type", type: "select", options: ["flat", "percent"], section: "Pricing & numbers" },
+      { label: "Discount value", name: "discount_value", value: "100", section: "Pricing & numbers", hint: "Taka for flat, percent for percent." },
+      { label: "Maximum discount (৳, percent only)", name: "max_discount", value: "", section: "Pricing & numbers" },
+      { label: "Order must be over (৳)", name: "min_order_amount", value: "500", section: "Pricing & numbers" },
+      { label: "Valid from", name: "starts_at", type: "datetime", section: "Schedule" },
+      { label: "Valid until", name: "ends_at", type: "datetime", section: "Schedule" },
+      { label: "Valid in", name: "location", type: "geo", section: "Location", hint: "Checked against the delivery address. Blank = everywhere." },
+      { label: "Total uses allowed", name: "usage_limit_total", value: "", section: "Settings", hint: "Blank = unlimited." },
+      { label: "Uses per buyer", name: "usage_limit_per_user", value: "1", section: "Settings" },
+      { label: "Voucher if an approved order fails", name: "voucher_on_failure", type: "select", options: ["0", "1"], section: "Settings", hint: "First purchase: issue a voucher for the same amount on the next order." },
+      { label: "Active", name: "is_active", type: "select", options: ["1", "0"], section: "Settings" }
+    ]
+  },
+  "promotions/redemptions": {
+    title: "Discounts Given",
+    description: "Every discount applied at checkout and where it stands: applied (awaiting approval), approved (order confirmed), released (order rejected — the offer went back to the buyer) or failed (approved order failed — a first purchase becomes a voucher).",
+    entityName: "Discount",
+    endpoint: "/api/v1/promotions/redemptions",
+    columns: [
+      { key: "order_code", label: "Order" },
+      { key: "buyer", label: "Buyer" },
+      { key: "promotion", label: "Promotion" },
+      { key: "discount", label: "Discount" },
+      { key: "order_status", label: "Order status" },
+      { key: "placed", label: "Placed" }
+    ],
+    rows: [],
+    formFields: [
+      { label: "Note", name: "note", type: "textarea", value: "" }
+    ]
+  },
+  "promotions/vouchers": {
+    title: "Vouchers",
+    description: "Single-use credit held by a buyer, applied automatically to their next order that clears the minimum. Issued when an approved first purchase fails, or by hand as goodwill.",
+    entityName: "Voucher",
+    endpoint: "/api/v1/promotions/vouchers",
+    columns: [
+      { key: "buyer", label: "Buyer" },
+      { key: "phone", label: "Phone" },
+      { key: "amount", label: "Amount" },
+      { key: "reason", label: "Reason" },
+      { key: "from_order", label: "Issued for" },
+      { key: "used_on", label: "Used on" }
+    ],
+    rows: [],
+    formFields: [
+      { label: "Buyer", name: "user_id", lookup: "users" },
+      { label: "Amount (৳)", name: "amount", value: "200" },
+      { label: "Order must be over (৳)", name: "min_order_amount", value: "0" },
+      { label: "Reason", name: "reason", type: "select", options: ["manual", "goodwill", "first_purchase_failed"] },
+      { label: "Expires", name: "expires_at", type: "datetime" },
+      { label: "Note", name: "note", type: "textarea", value: "" },
+      { label: "Status", name: "status", type: "select", options: ["available", "void", "expired"] }
     ]
   },
   "orders/payments": {
@@ -750,8 +914,7 @@ export const nestedPages: Record<string, ManagementPageProps> = {
       { label: "Officer role", name: "officer_role", type: "select", options: ["field_officer", "ho_query_officer"] },
       { label: "Name", name: "name", value: "Rana Hossain" },
       { label: "Phone", name: "phone", value: "01700000002" },
-      { label: "District", name: "district", value: "Mymensingh" },
-      { label: "Upazila", name: "upazila", value: "Mymensingh Sadar" },
+      { label: "Location", name: "location", type: "geo", hint: "Shown as the contact for farmers inside this area. An officer with no area is nobody's officer." },
       { label: "Active", name: "is_active", type: "select", options: ["1", "0"] }
     ]
   },
@@ -851,6 +1014,76 @@ export const nestedPages: Record<string, ManagementPageProps> = {
       { label: "Status", name: "status", type: "select", options: ["visible", "answered", "hidden", "moderation", "removed"] },
       { label: "Moderated by admin id", name: "moderated_by", value: "1" },
       { label: "Report count", name: "report_count", value: "0" }
+    ]
+  },
+  // The list itself is app/home/partners (PartnerStripManager); this entry
+  // feeds the create/edit form and the generic record view.
+  "home/partners": {
+    title: "Home Partners",
+    description: "The buyer / partner strip on the app's home screen. Order here is the order farmers see.",
+    entityName: "Partner",
+    endpoint: "/api/v1/home/partners",
+    columns: [
+      { key: "name", label: "Name" },
+      { key: "kind", label: "Kind" },
+      { key: "badge", label: "Badge" },
+      { key: "sort_order", label: "Order" }
+    ],
+    rows: [],
+    formFields: [
+      { label: "Name (English)", name: "name_en", required: true, value: "", section: "Basics" },
+      { label: "Name (Bangla)", name: "name_bn", value: "", section: "Basics" },
+      { label: "Kind", name: "kind", type: "select", options: ["buyer", "partner", "sponsor"], required: true, section: "Basics" },
+      { label: "Logo", name: "logo_url", type: "image", folder: "partners", section: "Basics", hint: "Square works best — it is shown in a rounded tile on the phone." },
+      { label: "Badge (English)", name: "badge_en", value: "", section: "Basics", hint: "A short tag under the logo, e.g. \"Verified buyer\"." },
+      { label: "Badge (Bangla)", name: "badge_bn", value: "", section: "Basics" },
+      { label: "Tagline (English)", name: "tagline_en", value: "", section: "Details" },
+      { label: "Tagline (Bangla)", name: "tagline_bn", value: "", section: "Details" },
+      { label: "Description (English)", name: "description_en", type: "textarea", value: "", section: "Details" },
+      { label: "Description (Bangla)", name: "description_bn", type: "textarea", value: "", section: "Details" },
+      { label: "Website", name: "website", value: "", section: "Contact" },
+      { label: "Phone", name: "phone", value: "", section: "Contact" },
+      { label: "Order", name: "sort_order", value: "10", section: "Visibility", hint: "Lower shows first. The Home partners page sets this for you when you drag cards." },
+      { label: "Active", name: "is_active", type: "select", options: ["1", "0"], section: "Visibility" },
+      { label: "Show from (optional)", name: "starts_at", type: "datetime", section: "Visibility" },
+      { label: "Show until (optional)", name: "ends_at", type: "datetime", section: "Visibility" }
+    ]
+  },
+  // Broadcasts and the outbox are written by the send screen and the
+  // notification pipeline; the console only reads them.
+  "notifications/broadcasts": {
+    title: "Broadcast History",
+    description: "Every notification sent from Send notification — who it targeted, how many received it, and how many were delivered.",
+    entityName: "Broadcast",
+    endpoint: "/api/v1/notifications/broadcasts",
+    columns: [
+      { key: "title", label: "Title" },
+      { key: "target", label: "Audience" },
+      { key: "recipients", label: "Recipients" },
+      { key: "delivered", label: "Delivered" },
+      { key: "sent", label: "Sent" }
+    ],
+    rows: [],
+    formFields: [
+      { label: "Title", name: "title", readOnly: true }
+    ]
+  },
+  "notifications/outbox": {
+    title: "Delivery Log",
+    description: "One row per push and email the system tried to deliver. Emails wait here as queued until an email provider is configured.",
+    entityName: "Delivery",
+    endpoint: "/api/v1/notifications/outbox",
+    columns: [
+      { key: "channel", label: "Channel" },
+      { key: "recipient", label: "Recipient" },
+      { key: "subject", label: "Subject" },
+      { key: "event", label: "Event" },
+      { key: "error", label: "Error" },
+      { key: "created", label: "Created" }
+    ],
+    rows: [],
+    formFields: [
+      { label: "Status", name: "status", readOnly: true }
     ]
   }
 };

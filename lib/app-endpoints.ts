@@ -35,6 +35,13 @@ export * from "./endpoints/admin-maintenance";
 import { getUserRoles, safeJson, type Row } from "./endpoints/shared";
 import { buildAppUser, buildKycSummary } from "./endpoints/auth";
 import { getBoolSetting } from "@/lib/settings";
+import { GeoLockedError, LocationRequiredError, geoFilter, geoRowVisible, getGeoScope, getUserGeo, weatherGeo } from "@/lib/geo-scope";
+import { resolveGeoIds, toGeoId, type GeoIds, type GeoResolved } from "@/lib/geo";
+import { assertAreaCovered, assertOperational, getAreaStatus } from "@/lib/operational";
+import { PromoError, evaluatePromotions, getOrderPromotion, recordOrderPromotion } from "@/lib/promotions";
+import { deliversTo, getDistributorById, pickDistributor, productDistributors, type Distributor } from "@/lib/distribution";
+import { recordOrderEvent } from "@/lib/order-events";
+import { notifyEnrollment, notifyOrder } from "@/lib/notices";
 
 
 export async function getOnboardingTree() {
@@ -83,24 +90,27 @@ export async function getOnboardingTree() {
 // GET /api/v1/app/home
 // Greeting, weather summary, quick stats, service tiles, market updates,
 // and the Ask Shathi Apa card — mirrors the Home screen.
-export async function getHomeFeed(userId?: string | null, district?: string | null) {
+export async function getHomeFeed(userId?: string | null, gpsDistrictId?: string | null, gpsUpazilaId?: string | null) {
   const userRows = userId
     ? await queryRows<Row>("SELECT id, full_name, display_name, district, upazila FROM app_users WHERE id = ? LIMIT 1", [userId])
     : [];
   const user = userRows[0] ?? null;
-  const targetDistrict = district ?? (user?.district as string | undefined) ?? "Mymensingh";
 
+  // There used to be a hard-coded "Mymensingh" fallback here, so a farmer with
+  // no district on file was shown Mymensingh's weather as if it were theirs.
+  const wxGeo = await weatherGeo(userId, gpsDistrictId, gpsUpazilaId);
+  const wx = await geoFilter("weather_alerts", "w", wxGeo);
   const weatherRows = await queryRows<Row>(
     `
       SELECT
-        district, upazila, alert_type, severity, title_en, title_bn,
-        body_en, body_bn, weather_payload
-      FROM weather_alerts
-      WHERE is_active = 1 AND (district = ? OR district IS NULL)
-      ORDER BY (district = ?) DESC, starts_at DESC
+        w.district, w.upazila, w.alert_type, w.severity, w.title_en, w.title_bn,
+        w.body_en, w.body_bn, w.weather_payload
+      FROM weather_alerts w
+      WHERE w.is_active = 1 AND ${wx.sql}
+      ORDER BY (w.upazila_id <=> ?) DESC, (w.district_id <=> ?) DESC, w.starts_at DESC
       LIMIT 1
     `,
-    [targetDistrict, targetDistrict]
+    [...wx.params, wxGeo.upazila_id, wxGeo.district_id]
   );
 
   let listingCount = 0;
@@ -121,15 +131,17 @@ export async function getHomeFeed(userId?: string | null, district?: string | nu
     earning = Number(stats[0]?.earning ?? 0);
   }
 
+  const userGeo = await getUserGeo(userId);
+  const mk = await geoFilter("market_updates", "m", userGeo);
   const marketUpdates = await queryRows<Row>(
     `
-      SELECT CAST(id AS CHAR) AS id, title_en, title_bn, body_en, update_type, status
-      FROM market_updates
-      WHERE status = 'active' AND (district = ? OR district IS NULL)
-      ORDER BY sort_order, created_at DESC
+      SELECT CAST(m.id AS CHAR) AS id, m.title_en, m.title_bn, m.body_en, m.update_type, m.status
+      FROM market_updates m
+      WHERE m.status = 'active' AND ${mk.sql}
+      ORDER BY (m.district_id <=> ?) DESC, m.sort_order, m.created_at DESC
       LIMIT 6
     `,
-    [targetDistrict]
+    [...mk.params, userGeo.district_id]
   );
 
   const assistantRows = await queryRows<Row>(
@@ -146,7 +158,7 @@ export async function getHomeFeed(userId?: string | null, district?: string | nu
   return {
     greeting: {
       name: (user?.display_name as string) ?? (user?.full_name as string) ?? "Farmer",
-      district: targetDistrict,
+      district: (user?.district as string) ?? null,
       upazila: (user?.upazila as string) ?? null
     },
     weather: weatherRows[0] ?? null,
@@ -162,67 +174,295 @@ export async function getHomeFeed(userId?: string | null, district?: string | nu
   };
 }
 
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+type OrderLine = { product_id: number; name_en: string; quantity: number; unit_price: number; line_total: number };
+
+type OrderContext = {
+  lines: OrderLine[];
+  /** Who fulfils it; null when the manufacturer ships directly (anywhere). */
+  distributor: Distributor | null;
+  delivery: GeoResolved;
+};
+
+// Everything an order depends on, worked out the same way for the quote and
+// for placement:
+//  - prices come from the catalogue, never from the request (the app sending
+//    unit_price used to be what the order was charged at);
+//  - the distributor is the one serving the buyer's own area;
+//  - the delivery address must lie inside that distributor's area. An
+//    upazila-level distributor fixes it outright; a district- or
+//    division-level one lets the buyer choose within it.
+async function buildOrder(userId: unknown, input: Row, items: Row[]): Promise<OrderContext> {
+  const ids = items.map((i) => Number(i.product_id)).filter((n) => Number.isFinite(n) && n > 0);
+  if (!ids.length) throw new Error("Choose a product to order.");
+  const [rows, buyerGeo, links] = await Promise.all([
+    queryRows<Row>(`SELECT id, name_en, price, status FROM products WHERE id IN (${ids.map(() => "?").join(",")})`, ids),
+    getUserGeo(userId),
+    productDistributors(ids)
+  ]);
+  const byId = new Map(rows.map((r) => [Number(r.id), r]));
+  const lines: OrderLine[] = [];
+  let distributor: Distributor | null = null;
+  for (const item of items) {
+    const p = byId.get(Number(item.product_id));
+    if (!p || p.status !== "active") throw new Error(`${p?.name_en ?? "That product"} is not available right now.`);
+    const pick = pickDistributor(links.get(Number(p.id)), buyerGeo);
+    if (!pick.available) throw new GeoLockedError(`${p.name_en} is not sold in your area.`);
+    if (pick.distributor) {
+      if (distributor && distributor.id !== pick.distributor.id) {
+        throw new Error("These products come from different distributors — please order them separately.");
+      }
+      distributor = pick.distributor;
+    }
+    const quantity = Number(item.quantity ?? 0);
+    if (!(quantity > 0)) throw new Error("Quantity must be at least 1.");
+    const unit = Number(p.price ?? 0);
+    lines.push({ product_id: Number(p.id), name_en: String(p.name_en), quantity, unit_price: unit, line_total: round2(quantity * unit) });
+  }
+
+  const picked = ["delivery_division_id", "delivery_district_id", "delivery_upazila_id"].some((k) => toGeoId(input[k]));
+  let delivery = picked
+    ? await resolveGeoIds({ division_id: input.delivery_division_id, district_id: input.delivery_district_id, upazila_id: input.delivery_upazila_id })
+    : await resolveGeoIds(buyerGeo);
+  if (distributor) {
+    if (distributor.lock === "upazila") {
+      delivery = await resolveGeoIds({ upazila_id: distributor.upazila_id });
+    } else if (!deliversTo(distributor, delivery)) {
+      throw new GeoLockedError(`${distributor.short_name_en ?? distributor.name_en} delivers only within ${distributor.area_en}.`);
+    }
+  }
+  if (!delivery.upazila_id) throw new LocationRequiredError("Choose the delivery upazila.");
+  return { lines, distributor, delivery };
+}
+
+function publicDistributor(d: Distributor | null) {
+  if (!d) return null;
+  return {
+    id: String(d.id), name_en: d.name_en, name_bn: d.name_bn, short_name_en: d.short_name_en, short_name_bn: d.short_name_bn,
+    logo_url: d.logo_url, phone: d.phone, address_en: d.address_en, address_bn: d.address_bn,
+    lock: d.lock, area_en: d.area_en, area_bn: d.area_bn,
+    division_id: d.division_id, district_id: d.district_id, upazila_id: d.upazila_id,
+    division: d.division, district: d.district, upazila: d.upazila,
+    division_bn: d.division_bn, district_bn: d.district_bn, upazila_bn: d.upazila_bn
+  };
+}
+
+// GET /api/v1/app/orders/quote?product_id=&quantity=&code=&division_id=&district_id=&upazila_id=
+// Everything the order screens show before the buyer commits: subtotal, the
+// discount that will apply and why, who delivers, how far the address is
+// locked, and whether it is deliverable. Problems are reported, not thrown —
+// the screen explains them.
+export async function getOrderQuote(q: URLSearchParams) {
+  const userId = q.get("user_id");
+  const productId = q.get("product_id");
+  const quantity = Number(q.get("quantity") ?? 1) || 1;
+  let ctx: OrderContext | null = null;
+  let deliveryError: string | null = null;
+  let deliveryCode: string | null = null;
+  try {
+    ctx = await buildOrder(userId, {
+      delivery_division_id: q.get("division_id"),
+      delivery_district_id: q.get("district_id"),
+      delivery_upazila_id: q.get("upazila_id")
+    }, [{ product_id: productId, quantity }]);
+    const area = await getAreaStatus("orders", ctx.delivery);
+    if (area.state === "zone_inactive") {
+      deliveryError = "Shathi Sheba does not deliver to that area yet. Choose an address inside an active zone.";
+      deliveryCode = "zone_inactive";
+    }
+  } catch (error) {
+    deliveryError = error instanceof Error ? error.message : "That address cannot be used.";
+    deliveryCode = (error as { code?: string }).code ?? "invalid_request";
+  }
+  // A failed address check still prices the product, so the total shows
+  // while the problem is explained.
+  let subtotal = ctx ? round2(ctx.lines.reduce((s, l) => s + l.line_total, 0)) : 0;
+  if (!ctx && productId) {
+    const [p] = await queryRows<Row>("SELECT price FROM products WHERE id = ? LIMIT 1", [productId]);
+    subtotal = round2(Number(p?.price ?? 0) * quantity);
+  }
+  const promo = await evaluatePromotions({ userId, subtotal, code: q.get("code"), geo: ctx?.delivery ?? (await getUserGeo(userId)) });
+  const discount = promo.applied?.discount ?? 0;
+  const d = ctx?.delivery ?? null;
+  return {
+    subtotal,
+    delivery_fee: 0,
+    discount,
+    payable: round2(subtotal - discount),
+    promotion: promo.applied,
+    first_purchase: promo.first_purchase,
+    is_first_purchase: promo.is_first_purchase,
+    code_status: promo.code_status,
+    code_error: promo.code_error,
+    deliverable: !deliveryError,
+    delivery_error: deliveryError,
+    delivery_error_code: deliveryCode,
+    distributor: publicDistributor(ctx?.distributor ?? null),
+    delivery_lock: ctx?.distributor?.lock ?? "none",
+    delivery: d
+      ? {
+          division_id: d.division_id, district_id: d.district_id, upazila_id: d.upazila_id,
+          division: d.division, district: d.district, upazila: d.upazila,
+          division_bn: d.division_bn, district_bn: d.district_bn, upazila_bn: d.upazila_bn
+        }
+      : null
+  };
+}
+
 // POST /api/v1/app/orders
-// Composite order placement: orders + order_items in one call.
+// Composite order placement: orders + order_items + the discount, in one call.
 export async function placeOrder(payload: Row) {
   const userId = payload.user_id;
   const items = Array.isArray(payload.items) ? (payload.items as Row[]) : [];
   if (!userId || items.length === 0) {
     throw new Error("user_id and at least one item are required.");
   }
+  // The buyer's profile must be complete and inside a zone, and so must the
+  // address the order is going to.
+  await assertOperational(userId, "orders");
+  const ctx = await buildOrder(userId, payload, items);
+  const { lines, delivery, distributor } = ctx;
+  await assertAreaCovered("orders", delivery);
 
-  const totalAmount = items.reduce((sum, item) => {
-    const qty = Number(item.quantity ?? 0);
-    const price = Number(item.unit_price ?? 0);
-    return sum + qty * price;
-  }, 0);
-  const deliveryFee = Number(payload.delivery_fee ?? (totalAmount >= 500 ? 0 : 0));
-  const payable = totalAmount + deliveryFee;
+  const subtotal = round2(lines.reduce((s, l) => s + l.line_total, 0));
+  const deliveryFee = Math.max(0, Number(payload.delivery_fee ?? 0) || 0);
+  const code = typeof payload.promo_code === "string" ? payload.promo_code : null;
   const orderCode = `ORD-${new Date().getFullYear()}-${String(Date.now()).slice(-5)}`;
 
-  // Header and line items are one unit of work: a half-created order (header with
-  // no items, or some items missing) is unfulfillable and there is no repair path
-  // for the customer, so it must never reach the database.
-  const orderId = await withTransaction(async (tx) => {
+  // Header, line items, the discount and the first timeline entry are one unit
+  // of work: a half-created order is unfulfillable and there is no repair path
+  // for the customer. The buyer's row is locked so two orders placed at once
+  // cannot both take the first-purchase discount.
+  const placed = await withTransaction(async (tx) => {
+    await tx.query("SELECT id FROM app_users WHERE id = ? FOR UPDATE", [userId]);
+    const promo = await evaluatePromotions({ userId, subtotal, code, geo: delivery }, tx);
+    // A code the buyer typed that cannot be used stops the order — they were
+    // shown a total with it. A code merely outranked by a better automatic
+    // discount does not.
+    if (code && promo.code_status === "invalid") throw new PromoError(promo.code_error ?? "That promo code cannot be used.");
+    const discount = promo.applied?.discount ?? 0;
+    const payable = round2(subtotal + deliveryFee - discount);
+
     const orderResult = await tx.execute(
       `
         INSERT INTO orders
-          (order_code, user_id, total_amount, delivery_fee, payable_amount, payment_method, payment_status, fulfillment_status, delivery_address, district, upazila, notes)
-        VALUES (?, ?, ?, ?, ?, ?, 'pending', 'placed', ?, ?, ?, ?)
+          (order_code, user_id, distributor_id, total_amount, delivery_fee, discount_amount, payable_amount, payment_method, payment_status, fulfillment_status, delivery_address, district, upazila, division_id, district_id, upazila_id, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'placed', ?, ?, ?, ?, ?, ?, ?)
       `,
       [
         orderCode,
         userId,
-        totalAmount,
+        distributor?.id ?? null,
+        subtotal,
         deliveryFee,
+        discount,
         payable,
         payload.payment_method ?? "cash",
         payload.delivery_address ?? "Address",
-        payload.district ?? null,
-        payload.upazila ?? null,
+        delivery.district,
+        delivery.upazila,
+        delivery.division_id,
+        delivery.district_id,
+        delivery.upazila_id,
         payload.notes ?? null
       ]
     );
 
     const newOrderId = orderResult.insertId;
-    for (const item of items) {
-      const qty = Number(item.quantity ?? 0);
-      const price = Number(item.unit_price ?? 0);
+    for (const line of lines) {
       await tx.execute(
         "INSERT INTO order_items (order_id, product_id, quantity, unit_price, line_total) VALUES (?, ?, ?, ?, ?)",
-        [newOrderId, item.product_id, qty, price, qty * price]
+        [newOrderId, line.product_id, line.quantity, line.unit_price, line.line_total]
       );
     }
-    return newOrderId;
+    if (promo.applied) await recordOrderPromotion(tx, newOrderId, userId, subtotal, promo.applied);
+    await recordOrderEvent(newOrderId, "placed", { tx, note: "Order placed" });
+    return { orderId: newOrderId, discount, payable, promotion: promo.applied };
   });
 
+  await notifyOrder(placed.orderId, "order_placed");
+
   return {
-    order_id: orderId,
+    order_id: placed.orderId,
     order_code: orderCode,
-    total_amount: totalAmount,
+    total_amount: subtotal,
     delivery_fee: deliveryFee,
-    payable_amount: payable,
+    discount_amount: placed.discount,
+    payable_amount: placed.payable,
+    promotion: placed.promotion,
+    distributor: publicDistributor(distributor),
+    delivery: { division: delivery.division, district: delivery.district, upazila: delivery.upazila, division_bn: delivery.division_bn, district_bn: delivery.district_bn, upazila_bn: delivery.upazila_bn },
     estimated_delivery: "1-3 working days"
+  };
+}
+
+// GET /api/v1/app/orders/detail?order_id=
+// One order as the buyer sees it: items, delivery, payment summary, discount,
+// who delivers, and the timeline.
+export async function getAppOrderDetail(orderId?: string | null, userId?: string | null) {
+  if (!orderId || !userId) return null;
+  const [o] = await queryRows<Row>(
+    `SELECT CAST(o.id AS CHAR) AS id, o.order_code, o.total_amount, o.delivery_fee, o.discount_amount, o.payable_amount,
+            o.payment_method, o.payment_status, o.fulfillment_status, o.delivery_address, o.created_at, o.updated_at,
+            o.upazila, o.district, gv.name_en AS division, gu.name_bn AS upazila_bn, gd.name_bn AS district_bn, gv.name_bn AS division_bn,
+            CAST(o.distributor_id AS CHAR) AS distributor_id
+       FROM orders o
+       LEFT JOIN geo_upazilas gu ON gu.id = o.upazila_id
+       LEFT JOIN geo_districts gd ON gd.id = o.district_id
+       LEFT JOIN geo_divisions gv ON gv.id = o.division_id
+      WHERE o.id = ? AND o.user_id = ?
+      LIMIT 1`,
+    [orderId, userId]
+  );
+  if (!o) return null;
+  const [items, events, promotion, distributor] = await Promise.all([
+    queryRows<Row>(
+      `SELECT CAST(oi.product_id AS CHAR) AS product_id, oi.quantity, oi.unit_price, oi.line_total,
+              p.name_en, p.name_bn, p.unit, p.package_size, p.package_size_bn,
+              JSON_UNQUOTE(JSON_EXTRACT(p.metadata, '$.image_url')) AS image_url,
+              CAST(m.id AS CHAR) AS manufacturer_id, COALESCE(m.short_name_en, m.name_en) AS manufacturer_name,
+              COALESCE(m.short_name_bn, m.name_bn) AS manufacturer_name_bn
+         FROM order_items oi
+         JOIN products p ON p.id = oi.product_id
+         LEFT JOIN manufacturers m ON m.id = p.manufacturer_id
+        WHERE oi.order_id = ?`,
+      [orderId]
+    ),
+    queryRows<Row>("SELECT kind, status, note, created_at FROM order_events WHERE order_id = ? ORDER BY id", [orderId]),
+    getOrderPromotion(orderId),
+    getDistributorById(o.distributor_id)
+  ]);
+
+  const status = String(o.fulfillment_status);
+  const cancelled = status === "cancelled";
+  const at = (...statuses: string[]) =>
+    (events.filter((e) => e.kind === "fulfillment" && statuses.includes(String(e.status))).pop()?.created_at as string | undefined) ?? null;
+  // The step the order is standing on; delivered means every step is done.
+  const current = { placed: 1, confirmed: 2, assigned: 3, in_transit: 3, delivered: 4 }[status] ?? 1;
+  const who = distributor ? distributor.short_name_en ?? distributor.name_en : null;
+  const whoBn = distributor ? distributor.short_name_bn ?? distributor.name_bn ?? who : null;
+  const defs = [
+    { key: "placed", title_en: "Order placed", title_bn: "অর্ডার দেওয়া হয়েছে", desc_en: "We received your order", desc_bn: "আপনার অর্ডার পেয়েছি", date: at("placed") ?? o.created_at },
+    { key: "confirmed", title_en: "Confirmed", title_bn: "নিশ্চিত হয়েছে", desc_en: "Stock checked and approved", desc_bn: "মজুদ যাচাই করে অনুমোদিত", date: at("confirmed") },
+    { key: "on_the_way", title_en: "On the way", title_bn: "পথে আছে", desc_en: who ? `Dispatched by ${who}` : "Dispatched to you", desc_bn: whoBn ? `${whoBn} পাঠিয়েছে` : "আপনার কাছে পাঠানো হয়েছে", date: at("assigned", "in_transit") },
+    { key: "delivered", title_en: "Delivered", title_bn: "ডেলিভারি সম্পন্ন", desc_en: "Handed over to you", desc_bn: "আপনার হাতে পৌঁছেছে", date: at("delivered") }
+  ];
+  const steps = defs.map((s, i) => ({
+    ...s,
+    index: i + 1,
+    note: null,
+    state: cancelled ? (i === 0 ? "done" : "upcoming") : i < current ? "done" : i === current ? "current" : "upcoming"
+  }));
+  return {
+    order: o,
+    items,
+    promotion,
+    distributor: publicDistributor(distributor),
+    steps,
+    cancelled,
+    cancelled_at: cancelled ? at("cancelled") : null,
+    payments: events.filter((e) => e.kind === "payment")
   };
 }
 
@@ -247,13 +487,24 @@ export async function submitKycApplication(payload: Row) {
   // it but takes no new applications. Enforced here rather than only in the
   // app, because the app's copy of `is_active` can be a cached page old.
   const projectRows = await queryRows<Row>(
-    "SELECT is_active, status, name_en FROM partner_projects WHERE id = ? LIMIT 1",
+    `SELECT is_active, status, name_en, region_based, division_id, district_id, upazila_id
+       FROM partner_projects WHERE id = ? LIMIT 1`,
     [projectId]
   );
   const project = projectRows[0];
   if (!project) throw new Error("That project no longer exists.");
   if (Number(project.is_active ?? 0) !== 1 || String(project.status) !== "open") {
     throw new Error("This project is not accepting new applications.");
+  }
+  // Joining a project needs field coverage where the farmer is.
+  await assertOperational(userId, "partner_projects");
+  // The project list already hides out-of-area projects; this is the check that
+  // holds when someone calls the API directly.
+  if (Number(project.region_based ?? 1) === 1) {
+    const scope = await getGeoScope("partner_projects");
+    if (!geoRowVisible(scope, project as Partial<GeoIds>, await getUserGeo(userId))) {
+      throw new GeoLockedError("This project is only open to farmers in its area.");
+    }
   }
 
   // One live application per farmer per project — a second submission is a
@@ -299,6 +550,7 @@ export async function submitKycApplication(payload: Row) {
       (payload.verification_notes ?? "Submitted from mobile app.") as string,
     ]
   );
+  await notifyEnrollment(result.insertId, "enrollment_submitted");
   return { application_id: result.insertId, application_code: code, status: "submitted" };
 }
 
@@ -436,7 +688,7 @@ export async function getAppPartnerProjects() {
       SELECT CAST(id AS CHAR) AS id, project_code, name_en, name_bn,
              interest_slug, division, district, upazila, image_url,
              summary_en, summary_bn, market_overview_en, market_overview_bn,
-             investment_amount, duration_label, region_based, is_active,
+             investment_amount, duration_label, duration_label_bn, region_based, is_active,
              income_amount, income_label_en, income_label_bn,
              model_en, model_bn, loan_partners_en, loan_partners_bn,
              capacity_label_en, capacity_label_bn, terms_json,
@@ -465,18 +717,13 @@ async function userRootInterestSlugs(userId?: string | null): Promise<string[]> 
   return rows.map((r) => String(r.root_slug)).filter(Boolean);
 }
 
-async function resolveUserRegion(userId?: string | null, division?: string | null, district?: string | null) {
-  if ((division && district) || !userId) return { division: division ?? null, district: district ?? null };
-  const u = await queryRows<Row>("SELECT district FROM app_users WHERE id = ? LIMIT 1", [userId]);
-  return { division: division ?? null, district: district ?? (u[0]?.district as string | undefined) ?? null };
-}
-
 // GET /api/v1/app/projects/active?user_id=&division=&district=
 // "Projects active in your area": active, non-expired projects that are either
 // open to all (region_based=0) or match the user's division/district. Projects
 // matching the user's interests are flagged (matches_interest) for the tag.
-export async function getAppActiveProjects(userId?: string | null, division?: string | null, district?: string | null) {
-  const region = await resolveUserRegion(userId, division, district);
+export async function getAppActiveProjects(userId?: string | null) {
+  const geo = await getUserGeo(userId);
+  const area = await geoFilter("partner_projects", "p", geo);
   const interests = await userRootInterestSlugs(userId);
   const interestList = interests.length ? interests : [""];
   const placeholders = interestList.map(() => "?").join(", ");
@@ -484,10 +731,15 @@ export async function getAppActiveProjects(userId?: string | null, division?: st
     `
       SELECT CAST(p.id AS CHAR) AS id, p.project_code, p.name_en, p.name_bn,
              p.interest_slug, p.division, p.district, p.upazila, p.image_url,
+             CAST(p.division_id AS CHAR) AS division_id, CAST(p.district_id AS CHAR) AS district_id,
+             CAST(p.upazila_id AS CHAR) AS upazila_id,
              p.summary_en, p.summary_bn, p.market_overview_en, p.market_overview_bn,
-             p.investment_amount, p.duration_label, p.region_based, p.lender_name,
+             p.investment_amount, p.duration_label, p.duration_label_bn, p.region_based, p.lender_name,
              p.income_amount, p.income_label_en, p.income_label_bn,
-             p.model_en, p.model_bn, p.loan_partners_en, p.loan_partners_bn,
+             p.model_en, p.model_bn, p.loan_partners_en, p.loan_partners_bn, p.loan_partner_logos, p.duration_label_bn,
+             (SELECT name_bn FROM geo_upazilas WHERE id = p.upazila_id) AS upazila_bn,
+             (SELECT name_bn FROM geo_districts WHERE id = p.district_id) AS district_bn,
+             (SELECT name_bn FROM geo_divisions WHERE id = p.division_id) AS division_bn,
              p.capacity_label_en, p.capacity_label_bn, p.terms_json, p.is_active,
              p.max_credit_amount, p.capacity, p.status, p.start_date, p.end_date,
              (p.interest_slug IN (${placeholders})) AS matches_interest,
@@ -496,10 +748,14 @@ export async function getAppActiveProjects(userId?: string | null, division?: st
       WHERE p.is_active = 1
         AND p.status IN ('open', 'opening_soon')
         AND (p.end_date IS NULL OR p.end_date >= CURDATE())
-        AND (p.region_based = 0 OR p.division = ? OR p.district = ?)
+        -- National projects show everywhere. A region-based project must name
+        -- an area (one with none used to match nobody silently) and contain the
+        -- farmer at the configured level.
+        AND (p.region_based = 0
+             OR (COALESCE(p.upazila_id, p.district_id, p.division_id) IS NOT NULL AND ${area.sql}))
       ORDER BY matches_interest DESC, FIELD(p.status,'open','opening_soon'), p.start_date
     `,
-    [...interestList, region.division, region.district]
+    [...interestList, ...area.params]
   );
 }
 
@@ -511,9 +767,12 @@ export async function getAppMyProjects(userId?: string | null) {
     `
       SELECT CAST(p.id AS CHAR) AS id, p.project_code, p.name_en, p.name_bn,
              p.interest_slug, p.division, p.district, p.upazila, p.image_url,
-             p.summary_en, p.summary_bn, p.duration_label, p.investment_amount,
+             p.summary_en, p.summary_bn, p.duration_label, p.duration_label_bn, p.investment_amount,
              p.income_amount, p.income_label_en, p.income_label_bn,
-             p.model_en, p.model_bn, p.loan_partners_en, p.loan_partners_bn,
+             p.model_en, p.model_bn, p.loan_partners_en, p.loan_partners_bn, p.loan_partner_logos, p.duration_label_bn,
+             (SELECT name_bn FROM geo_upazilas WHERE id = p.upazila_id) AS upazila_bn,
+             (SELECT name_bn FROM geo_districts WHERE id = p.district_id) AS district_bn,
+             (SELECT name_bn FROM geo_divisions WHERE id = p.division_id) AS division_bn,
              p.capacity_label_en, p.capacity_label_bn, p.is_active,
              p.status AS project_status, p.start_date, p.end_date, p.steps_json,
              CAST(a.id AS CHAR) AS application_id, a.application_code,
@@ -538,8 +797,13 @@ export async function getAppMyProjects(userId?: string | null) {
 // GET /api/v1/app/sale/category-availability?user_id=&division=&district=
 // Returns the interest_slugs that have at least one active project in the
 // user's region (or open) — used to enable/disable List-for-Sale categories.
-export async function getSaleCategoryAvailability(userId?: string | null, division?: string | null, district?: string | null) {
-  const region = await resolveUserRegion(userId, division, district);
+export async function getSaleCategoryAvailability(userId?: string | null) {
+  const geo = await getUserGeo(userId);
+  const [names] = await queryRows<Row>(
+    "SELECT division, district, upazila FROM app_users WHERE id = ? LIMIT 1",
+    [userId ?? null]
+  );
+  const region = { division: names?.division ?? null, district: names?.district ?? null, upazila: names?.upazila ?? null };
 
   // The project gate is a coverage decision, not a law. With it off, every
   // category the app has actually built is open everywhere — a farmer in an
@@ -556,6 +820,7 @@ export async function getSaleCategoryAvailability(userId?: string | null, divisi
     return { region, available: categories.map((r) => String(r.slug)), gated: false };
   }
 
+  const area = await geoFilter("partner_projects", "p", geo);
   const rows = await queryRows<Row>(
     `
       SELECT DISTINCT p.interest_slug
@@ -564,9 +829,10 @@ export async function getSaleCategoryAvailability(userId?: string | null, divisi
         AND p.status IN ('open', 'opening_soon')
         AND (p.end_date IS NULL OR p.end_date >= CURDATE())
         AND p.interest_slug IS NOT NULL
-        AND (p.region_based = 0 OR p.division = ? OR p.district = ?)
+        AND (p.region_based = 0
+             OR (COALESCE(p.upazila_id, p.district_id, p.division_id) IS NOT NULL AND ${area.sql}))
     `,
-    [region.division, region.district]
+    area.params
   );
   const available = rows.map((r) => String(r.interest_slug));
   return { region, available, gated: true };
@@ -604,13 +870,16 @@ export async function getAppPartnerLedgers() {
   );
 }
 
-export async function getAppCommunityPosts(scope?: string | null, district?: string | null, filter?: string | null, userId?: string | null) {
+export async function getAppCommunityPosts(scope?: string | null, _district?: string | null, filter?: string | null, userId?: string | null) {
   const s = scope && scope !== "all" ? scope : null;
-  const d = district && district.trim() ? district.trim() : null;
+  const geo = await getUserGeo(userId);
 
-  // "Sale listings" filter: approved listings of the user's area straight from
-  // the marketplace table, shaped like feed posts.
+  // "Sale listings" filter: active listings of the farmer's area. A listing
+  // carries its seller's location (it inherits it at creation), and is shown
+  // only to farmers inside it at the sale_listings scope — by id, so "Dhaka
+  // District" and "Dhaka" are no longer two different places.
   if (filter === "listings") {
+    const area = await geoFilter("sale_listings", "l", geo);
     return queryRows<Row>(
       `
         SELECT CONCAT('listing-', l.id) AS id, u.full_name AS farmer_name,
@@ -623,18 +892,19 @@ export async function getAppCommunityPosts(scope?: string | null, district?: str
                1 AS is_listing
         FROM sale_listings l
         JOIN app_users u ON u.id = l.user_id
-        WHERE l.status = 'active'
-          AND (? IS NULL OR l.district IS NULL OR l.district = ?)
+        WHERE l.status = 'active' AND ${area.sql}
         ORDER BY l.created_at DESC
         LIMIT 50
       `,
-      [d, d]
+      area.params
     );
   }
 
   const mine = filter === "mine" && userId ? userId : null;
-  // "all" drops the regional restriction; default/"regional" keeps it.
-  const regional = filter === "all" ? null : d;
+  // "all" drops the regional restriction; the default regional feed shows
+  // Bangladesh-wide posts plus posts inside the farmer's area.
+  const regional = filter !== "all" && !mine;
+  const area = await geoFilter("community_posts", "p", geo);
   return queryRows<Row>(
     `
       SELECT CAST(p.id AS CHAR) AS id, u.full_name AS farmer_name,
@@ -645,26 +915,33 @@ export async function getAppCommunityPosts(scope?: string | null, district?: str
       JOIN app_users u ON u.id = p.user_id
       WHERE p.status = 'visible' AND (? IS NULL OR p.scope = ?)
         AND (? IS NULL OR p.user_id = ?)
-        -- Regional feed: nationwide posts always show; district-tagged posts only
-        -- show to users of that district (when the app sends one).
-        AND (? IS NULL OR p.district IS NULL OR p.scope = 'bangladesh' OR p.district = ?)
+        AND (${regional ? `(p.scope = 'bangladesh' OR ${area.sql})` : "1 = 1"})
       ORDER BY p.is_official DESC, p.created_at DESC
       LIMIT 50
     `,
-    [s, s, mine, mine, regional, regional]
+    [s, s, mine, mine, ...(regional ? area.params : [])]
   );
 }
 
-export async function getAppOfficers(district?: string | null) {
+export async function getAppOfficers(userId?: string | null) {
+  // Officers covering the farmer's area at the zone_officers scope. An officer
+  // with no area set belongs to no one — "district IS NULL" used to make them
+  // everyone's.
+  const geo = await getUserGeo(userId);
+  const area = await geoFilter("zone_officers", "o", geo);
   return queryRows<Row>(
     `
-      SELECT CAST(id AS CHAR) AS id, name, officer_role AS role,
-             district, upazila, phone
-      FROM zone_officers
-      WHERE is_active = 1 AND (? IS NULL OR district = ? OR district IS NULL)
-      ORDER BY district, upazila, officer_role
+      SELECT CAST(o.id AS CHAR) AS id, o.name, o.officer_role AS role,
+             o.district, o.upazila, o.phone,
+             (SELECT name_bn FROM geo_districts WHERE id = o.district_id) AS district_bn,
+             (SELECT name_bn FROM geo_upazilas WHERE id = o.upazila_id) AS upazila_bn
+      FROM zone_officers o
+      WHERE o.is_active = 1
+        AND COALESCE(o.upazila_id, o.district_id, o.division_id) IS NOT NULL
+        AND ${area.sql}
+      ORDER BY (o.upazila_id <=> ?) DESC, o.district, o.upazila, o.officer_role
     `,
-    [district ?? null, district ?? null]
+    [...area.params, geo.upazila_id]
   );
 }
 
@@ -749,10 +1026,15 @@ export async function getMyListings(userId?: string | null) {
              -- second round trip per listing.
              l.field_visit_date, l.verified_weight_kg, l.paid_at, l.paid_amount,
              si.name_en AS item_name, si.name_bn AS item_name_bn,
+             a.name_en AS animal_name, a.name_bn AS animal_name_bn,
+             b.name_en AS breed_name, b.name_bn AS breed_name_bn,
+             l.age_months, l.dressing_pct,
              c.slug AS category_slug
       FROM sale_listings l
       LEFT JOIN sale_items si ON si.id = l.sale_item_id
       LEFT JOIN sale_categories c ON c.id = si.sale_category_id
+      LEFT JOIN animals a ON a.id = l.animal_id
+      LEFT JOIN animal_breeds b ON b.id = l.breed_id
       WHERE l.user_id = ?
       ORDER BY l.created_at DESC
       LIMIT 100
@@ -766,14 +1048,25 @@ export async function getMyOrders(userId?: string | null) {
   if (!userId) return [];
   return queryRows<Row>(
     `
-      SELECT CAST(o.id AS CHAR) AS id, o.order_code, o.total_amount, o.delivery_fee, o.payable_amount,
-             o.payment_method, o.payment_status, o.fulfillment_status, o.district, o.upazila, o.created_at,
+      SELECT CAST(o.id AS CHAR) AS id, o.order_code, o.total_amount, o.delivery_fee, o.discount_amount, o.payable_amount,
+             o.payment_method, o.payment_status, o.fulfillment_status, o.district, o.upazila, o.created_at, o.updated_at,
+             (SELECT op.source FROM order_promotions op WHERE op.order_id = o.id LIMIT 1) AS promo_source,
+             (SELECT op.status FROM order_promotions op WHERE op.order_id = o.id LIMIT 1) AS promo_status,
              COUNT(oi.id) AS item_count,
-             GROUP_CONCAT(CONCAT(p.name_en, ' ×', oi.quantity) SEPARATOR ', ') AS items_summary,
-             JSON_UNQUOTE(JSON_EXTRACT(MAX(p.metadata), '$.image_url')) AS image_url
+             SUM(oi.quantity) AS total_qty,
+             ANY_VALUE(p.unit) AS unit,
+             GROUP_CONCAT(CONCAT(p.name_en, ' ×', oi.quantity + 0) SEPARATOR ', ') AS items_summary,
+             GROUP_CONCAT(CONCAT(COALESCE(p.name_bn, p.name_en), ' ×', oi.quantity + 0) SEPARATOR ', ') AS items_summary_bn,
+             JSON_UNQUOTE(JSON_EXTRACT(MAX(p.metadata), '$.image_url')) AS image_url,
+             ANY_VALUE(COALESCE(d.short_name_en, d.name_en)) AS distributor_name,
+             ANY_VALUE(COALESCE(d.short_name_bn, d.name_bn)) AS distributor_name_bn,
+             ANY_VALUE(gu.name_bn) AS upazila_bn, ANY_VALUE(gd.name_bn) AS district_bn
       FROM orders o
       LEFT JOIN order_items oi ON oi.order_id = o.id
       LEFT JOIN products p ON p.id = oi.product_id
+      LEFT JOIN distributors d ON d.id = o.distributor_id
+      LEFT JOIN geo_upazilas gu ON gu.id = o.upazila_id
+      LEFT JOIN geo_districts gd ON gd.id = o.district_id
       WHERE o.user_id = ?
       GROUP BY o.id
       ORDER BY o.created_at DESC

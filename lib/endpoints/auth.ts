@@ -33,10 +33,49 @@ export async function buildKycSummary(userId: number | string) {
   };
 }
 
+/**
+ * The farmer's approved location with both languages, and whether a profile
+ * change is waiting for review. Read here rather than trusted from the caller's
+ * row, because buildAppUser is fed by several SELECTs that predate the ids.
+ */
+async function loadUserGeoSummary(userId: unknown) {
+  const [g] = await queryRows<Row>(
+    `SELECT u.division_id, u.district_id, u.upazila_id, u.village,
+            v.name_en AS division, d.name_en AS district, z.name_en AS upazila,
+            v.name_bn AS division_bn, d.name_bn AS district_bn, z.name_bn AS upazila_bn
+       FROM app_users u
+       LEFT JOIN geo_divisions v ON v.id = u.division_id
+       LEFT JOIN geo_districts d ON d.id = u.district_id
+       LEFT JOIN geo_upazilas z ON z.id = u.upazila_id
+      WHERE u.id = ? LIMIT 1`,
+    [userId]
+  );
+  const [pending] = await queryRows<Row>(
+    "SELECT id, created_at FROM profile_change_requests WHERE user_id = ? AND status = 'pending' ORDER BY id DESC LIMIT 1",
+    [userId]
+  );
+  const id = (v: unknown) => (v === null || v === undefined ? null : String(v));
+  return {
+    division_id: id(g?.division_id),
+    district_id: id(g?.district_id),
+    upazila_id: id(g?.upazila_id),
+    division: (g?.division as string) ?? null,
+    district: (g?.district as string) ?? null,
+    upazila: (g?.upazila as string) ?? null,
+    division_bn: (g?.division_bn as string) ?? null,
+    district_bn: (g?.district_bn as string) ?? null,
+    upazila_bn: (g?.upazila_bn as string) ?? null,
+    village: (g?.village as string) ?? null,
+    profile_change_pending: Boolean(pending),
+    profile_change_request_id: id(pending?.id)
+  };
+}
+
 export async function buildAppUser(user: Row) {
   const profile = typeof user.profile_json === "string" ? safeJson(user.profile_json) : (user.profile_json as Row | null);
   const roles = await getUserRoles(user.id as number);
   const kyc = await buildKycSummary(user.id as number);
+  const geo = await loadUserGeoSummary(user.id);
   return {
     id: String(user.id),
     full_name: user.full_name ?? null,
@@ -44,9 +83,9 @@ export async function buildAppUser(user: Row) {
     phone: user.phone ?? null,
     gender: user.gender ?? null,
     date_of_birth: user.date_of_birth ?? null,
-    division: user.division ?? null,
-    district: user.district ?? null,
-    upazila: user.upazila ?? null,
+    // Names, ids and Bangla names all come from the geo summary, joined fresh
+    // from the masters rather than taken from whatever row the caller passed.
+    ...geo,
     profile_image_url: user.profile_image_url ?? null,
     status: user.status ?? "active",
     roles,

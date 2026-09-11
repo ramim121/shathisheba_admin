@@ -228,7 +228,7 @@ export const apiCatalog = [
   { method: "GET", path: "/api/v1/app/sale/price-quote?animal_id=1&breed_id=1&district=Mymensingh&weight=200", desc: "Resolve the approved B2B preset (most-specific animal/breed/region) and return the per-kg breakdown + net farmer rate" },
   { method: "GET", path: "/api/v1/geo/divisions", desc: "Bangladesh divisions for the address Division dropdown" },
   { method: "GET", path: "/api/v1/geo/districts?division_id=3", desc: "Districts within a division for the District dropdown" },
-  { method: "GET", path: "/api/v1/geo/upazilas?district_id=12", desc: "Upazilas/thanas within a district for the Thana dropdown" },
+  { method: "GET", path: "/api/v1/geo/upazilas?district_id=12", desc: "Upazilas within a district, for the location picker" },
   { method: "GET", path: "/api/v1/sale/listings", desc: "Active sale listings and verification statuses" },
   { method: "POST", path: "/api/v1/sale/listings", desc: "Create listing from mobile app photo/form payload" },
   { method: "POST", path: "/api/v1/app/sale/confirm", desc: "Record actual weight + final amount and issue a 10-min OTP" },

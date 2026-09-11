@@ -1,6 +1,9 @@
 import { queryRows } from "@/lib/db";
 import type { Row } from "@/lib/endpoints/shared";
 import { isoDay } from "@/lib/endpoints/loan-servicing";
+import { findFieldOfficer } from "@/lib/officers";
+import { getUserGeo } from "@/lib/geo-scope";
+import { ruleFees } from "@/lib/pricing";
 
 /**
  * Farmer-facing progress trails.
@@ -18,6 +21,10 @@ import { isoDay } from "@/lib/endpoints/loan-servicing";
 
 export type ProgressState = "done" | "current" | "upcoming";
 
+// Notes are shown as-is in the app, so each has a Bangla twin with Bangla digits.
+const BN_DIGITS = "০১২৩৪৫৬৭৮৯";
+const bnDigits = (v: unknown) => String(v ?? "").replace(/[0-9]/g, (d) => BN_DIGITS[Number(d)]);
+
 export type ProgressStep = {
   key: string;
   index: number;
@@ -29,6 +36,7 @@ export type ProgressStep = {
   /** The date this step happened, or is scheduled for. `null` while upcoming. */
   date: string | null;
   note: string | null;
+  note_bn?: string | null;
 };
 
 function buildSteps(
@@ -49,16 +57,19 @@ function buildSteps(
 // Sale listing
 // ---------------------------------------------------------------------------
 
-// The four milestones a farmer is told about when they submit a listing. The
-// database has more statuses than this (draft, cancelled); those never reach
-// the progress screen because they are not stages of the same journey.
+// The six milestones a farmer is told about. The number is the step the
+// listing is standing on (0-based): `submitted` means step 1 is done and field
+// verification is next. `sold` is the old word for a contracted animal.
 const LISTING_STAGE_BY_STATUS: Record<string, number> = {
   draft: 0,
   submitted: 1,
-  field_verification: 2,
+  field_verification: 1,
+  verified: 2,
   active: 3,
-  sold: 3,
-  paid: 4,
+  contracted: 4,
+  sold: 4,
+  shipped: 5,
+  paid: 6,
   rejected: 1,
   cancelled: 1
 };
@@ -74,17 +85,27 @@ export async function getListingProgress(listingId?: string | null, userId?: str
              l.created_at, l.approved_at, l.field_visit_date, l.field_visit_note,
              l.verified_weight_kg, l.paid_at, l.paid_amount, l.payment_method,
              l.payment_reference, l.media_json,
+             l.verified_at, l.contracted_at, l.shipped_at,
+             l.division_id, l.district_id, l.upazila_id,
              CAST(l.user_id AS CHAR) AS user_id,
              si.name_en AS item_name, si.name_bn AS item_name_bn,
              b.name_en AS breed_name, b.name_bn AS breed_name_bn,
              a.name_en AS animal_name, a.name_bn AS animal_name_bn,
-             o.name AS officer_name, o.phone AS officer_phone, o.upazila AS officer_area
+             c.contract_ref, c.agreed_rate_per_kg, c.contract_amount, c.advance_amount,
+             c.handover_at, c.dispatched_at, c.received_at, c.invoiced_at,
+             l.description, l.age_months, l.address_text,
+             gu.name_en AS upazila_name, gu.name_bn AS upazila_name_bn,
+             gd.name_en AS district_name, gd.name_bn AS district_name_bn,
+             r.rule_name, r.b2b_market_rate, r.b2b_meat_rate, r.platform_fee, r.platform_fee_pct,
+             r.logistics_fee, r.logistics_fee_pct, r.warehouse_vet_fee, r.warehouse_vet_fee_pct
       FROM sale_listings l
+      LEFT JOIN listing_contracts c ON c.listing_id = l.id
+      LEFT JOIN sale_pricing_rules r ON r.id = l.pricing_rule_id
+      LEFT JOIN geo_upazilas gu ON gu.id = l.upazila_id
+      LEFT JOIN geo_districts gd ON gd.id = l.district_id
       LEFT JOIN sale_items si ON si.id = l.sale_item_id
       LEFT JOIN animal_breeds b ON b.id = l.breed_id
       LEFT JOIN animals a ON a.id = l.animal_id
-      LEFT JOIN zone_officers o
-             ON o.district = l.district AND o.officer_role = 'field_officer' AND o.is_active = 1
       WHERE l.id = ? AND (? IS NULL OR l.user_id = ?)
       LIMIT 1
     `,
@@ -118,24 +139,49 @@ export async function getListingProgress(listingId?: string | null, userId?: str
         // three-day promise — a specific date is the more useful answer.
         desc_en: visitDate ? `Officer visiting on ${visitDate}` : "Officer within 3 working days",
         desc_bn: visitDate ? `কর্মকর্তা আসবেন ${visitDate}` : "কর্মকর্তা ৩ কর্মদিনে",
-        date: visitDate,
+        date: isoDay(listing.verified_at) ?? visitDate,
         note: (listing.field_visit_note as string) ?? null
       },
       {
-        key: "approved",
-        title_en: "Approved",
-        title_bn: "অনুমোদিত",
-        desc_en: "Weight confirmed",
-        desc_bn: "ওজন নিশ্চিত",
+        key: "profile_approved",
+        title_en: "Product profile approved",
+        title_bn: "পণ্য প্রোফাইল অনুমোদিত",
+        desc_en: "Photos, identity and weight confirmed",
+        desc_bn: "ছবি, পরিচয় ও ওজন নিশ্চিত",
         date: isoDay(listing.approved_at),
-        note: listing.verified_weight_kg ? `Verified ${listing.verified_weight_kg} kg` : null
+        note: listing.verified_weight_kg ? `Verified ${Number(listing.verified_weight_kg)} kg` : null,
+        note_bn: listing.verified_weight_kg ? `যাচাইকৃত ${bnDigits(Number(listing.verified_weight_kg))} কেজি` : null
+      },
+      {
+        key: "contract",
+        title_en: "Purchase contract accepted",
+        title_bn: "ক্রয় চুক্তি গৃহীত",
+        desc_en: "A buyer has agreed the price",
+        desc_bn: "ক্রেতা দাম মেনে নিয়েছেন",
+        date: isoDay(listing.contracted_at),
+        note: listing.contract_ref
+          ? `${listing.contract_ref}${listing.agreed_rate_per_kg ? ` · ৳${Number(listing.agreed_rate_per_kg)}/kg` : ""}${listing.advance_amount ? ` · advance ৳${Number(listing.advance_amount)}` : ""}`
+          : null,
+        note_bn: listing.contract_ref
+          ? `${listing.contract_ref}${listing.agreed_rate_per_kg ? ` · ৳${bnDigits(Number(listing.agreed_rate_per_kg))}/কেজি` : ""}${listing.advance_amount ? ` · অগ্রিম ৳${bnDigits(Number(listing.advance_amount))}` : ""}`
+          : null
+      },
+      {
+        key: "shipped",
+        title_en: "Product shipped",
+        title_bn: "পণ্য পাঠানো হয়েছে",
+        desc_en: "Handed over and on its way to the buyer",
+        desc_bn: "হস্তান্তর করে ক্রেতার কাছে পাঠানো হয়েছে",
+        date: isoDay(listing.shipped_at ?? listing.dispatched_at),
+        note: listing.received_at ? "Received by the buyer" : null,
+        note_bn: listing.received_at ? "ক্রেতা গ্রহণ করেছেন" : null
       },
       {
         key: "paid",
         title_en: "Payment",
         title_bn: "পেমেন্ট",
-        desc_en: "Cash or cheque",
-        desc_bn: "নগদ বা চেক",
+        desc_en: "Paid on the verified weight",
+        desc_bn: "যাচাইকৃত ওজনে পরিশোধ",
         date: isoDay(listing.paid_at),
         note: (listing.payment_reference as string) ?? null
       }
@@ -147,13 +193,18 @@ export async function getListingProgress(listingId?: string | null, userId?: str
   return {
     kind: "sale_listing" as const,
     listing,
+    // The rule the listing was priced on, as the farmer's breakdown.
+    pricing: listing.b2b_market_rate === null || listing.b2b_market_rate === undefined ? null : ruleFees(listing),
     reference: listing.listing_code,
     status,
     rejected,
     steps,
-    officer: listing.officer_name
-      ? { name: listing.officer_name, phone: listing.officer_phone, area: listing.officer_area }
-      : null
+    // The officer covering the listing's own area — the place the animal is.
+    officer: await findFieldOfficer({
+      division_id: listing.division_id === null ? null : Number(listing.division_id),
+      district_id: listing.district_id === null ? null : Number(listing.district_id),
+      upazila_id: listing.upazila_id === null ? null : Number(listing.upazila_id)
+    })
   };
 }
 
@@ -186,23 +237,16 @@ export async function getProjectApplicationProgress(
              CAST(a.partner_project_id AS CHAR) AS partner_project_id,
              p.name_en AS project_name, p.name_bn AS project_name_bn,
              p.project_code, p.steps_json, p.image_url,
-             p.model_en, p.model_bn, p.duration_label,
+             p.model_en, p.model_bn, p.duration_label, p.duration_label_bn,
              p.income_amount, p.income_label_en, p.income_label_bn,
              p.loan_partners_en, p.loan_partners_bn,
              o.name AS officer_name, o.phone AS officer_phone, o.upazila AS officer_area
       FROM partner_applications a
       JOIN partner_projects p ON p.id = a.partner_project_id
-      LEFT JOIN app_users u ON u.id = a.user_id
-      LEFT JOIN zone_officers o
-             ON o.id = a.assigned_officer_id
-             OR (a.assigned_officer_id IS NULL
-                 AND o.officer_role = 'field_officer' AND o.is_active = 1
-                 AND o.district = u.district)
+      -- The assigned officer only; with none assigned, the covering officer is
+      -- looked up by id below.
+      LEFT JOIN zone_officers o ON o.id = a.assigned_officer_id
       WHERE a.id = ? AND (? IS NULL OR a.user_id = ?)
-      -- Without the ordering the unassigned-officer branch can match several
-      -- officers in the district and LIMIT 1 would pick an arbitrary one over
-      -- the one actually assigned.
-      ORDER BY (o.id = a.assigned_officer_id) DESC, o.id
       LIMIT 1
     `,
     [applicationId, userId ?? null, userId ?? null]
@@ -285,7 +329,7 @@ export async function getProjectApplicationProgress(
     note: (application.progress_note as string) ?? null,
     officer: application.officer_name
       ? { name: application.officer_name, phone: application.officer_phone, area: application.officer_area }
-      : null
+      : await findFieldOfficer(await getUserGeo(application.user_id))
   };
 }
 
@@ -300,7 +344,7 @@ export async function getMyProjectApplications(userId?: string | null) {
              a.created_at, a.approved_at, a.field_visit_date,
              CAST(a.partner_project_id AS CHAR) AS partner_project_id,
              p.name_en AS project_name, p.name_bn AS project_name_bn,
-             p.project_code, p.image_url, p.duration_label,
+             p.project_code, p.image_url, p.duration_label, p.duration_label_bn,
              p.model_en, p.model_bn,
              p.income_amount, p.income_label_en, p.income_label_bn,
              p.is_active AS project_is_active, p.status AS project_status

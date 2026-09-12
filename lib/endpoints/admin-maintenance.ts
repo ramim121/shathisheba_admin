@@ -1,6 +1,9 @@
 import { queryRows, withTransaction } from "@/lib/db";
 import { recordAudit } from "@/lib/audit";
 import type { Row } from "./shared";
+import { DATASETS, WIPE_PLAN, type DatasetKey } from "@/lib/clear-records-datasets";
+
+export { DATASETS };
 
 // Account maintenance — "Clear Records".
 //
@@ -21,22 +24,7 @@ import type { Row } from "./shared";
 //   * Every run is audit-logged with the per-table counts, since this is a
 //     destructive operation on real user data.
 
-/**
- * Which datasets to clear. Selectable because the common case is not "wipe
- * everything" — it is "let me run the loan flow again" while keeping the
- * listings and training history that make the account realistic to test against.
- */
-export type DatasetKey =
-  | "loan"
-  | "readiness"
-  | "orders"
-  | "listings"
-  | "projects"
-  | "community"
-  | "learning"
-  | "profile_modules"
-  | "preferences"
-  | "sessions";
+export type { DatasetKey } from "@/lib/clear-records-datasets";
 
 export type ClearScope = {
   /** Datasets to clear. Empty means nothing is deleted. */
@@ -47,83 +35,12 @@ export type ClearScope = {
   resetRoles: boolean;
 };
 
-/** What the console offers, in the order it shows them. */
-export const DATASETS: { key: DatasetKey; label: string; hint: string; defaultOn: boolean }[] = [
-  { key: "loan", label: "Loan applications & accounts", hint: "Applications, quotes, consents, assessments, disbursements and repayments", defaultOn: true },
-  { key: "readiness", label: "Readiness checks", hint: "Self-declared assessments and their answers", defaultOn: true },
-  { key: "orders", label: "Buy orders", hint: "Orders and their line items", defaultOn: false },
-  { key: "listings", label: "Sale listings", hint: "Listings and payment confirmations", defaultOn: false },
-  { key: "projects", label: "Partner projects", hint: "Project applications and ledgers", defaultOn: false },
-  { key: "community", label: "Community activity", hint: "Posts and comments", defaultOn: false },
-  { key: "learning", label: "Training progress", hint: "Completed content, points and quiz scores", defaultOn: false },
-  { key: "profile_modules", label: "Banking, farm & KYC documents", hint: "Profile modules — not the basic profile itself", defaultOn: false },
-  { key: "preferences", label: "Category preferences", hint: "Selected interests", defaultOn: false },
-  { key: "sessions", label: "Sessions & one-time codes", hint: "Logs the phone out and clears pending OTPs", defaultOn: true },
-];
-
 export type ClearResult = {
   user: { id: string; full_name: string | null; phone: string | null };
   deleted: { table: string; rows: number }[];
   total: number;
   reset: string[];
 };
-
-/**
- * Ordered so children are removed before their parents. Each entry is either a
- * direct `user_id` match or a subquery through the owning record.
- */
-const WIPE_PLAN: { dataset: DatasetKey; table: string; sql: string }[] = [
-  // --- Finance: loan ---
-  { dataset: "loan", table: "loan_repayment_schedule", sql:
-    `DELETE FROM loan_repayment_schedule WHERE loan_account_id IN
-       (SELECT id FROM loan_accounts WHERE user_id = ?)` },
-  { dataset: "loan", table: "loan_repayments", sql:
-    `DELETE FROM loan_repayments WHERE loan_account_id IN
-       (SELECT id FROM loan_accounts WHERE user_id = ?)` },
-  { dataset: "loan", table: "loan_accounts", sql: `DELETE FROM loan_accounts WHERE user_id = ?` },
-  { dataset: "loan", table: "loan_application_events", sql:
-    `DELETE FROM loan_application_events WHERE application_id IN
-       (SELECT id FROM loan_applications WHERE user_id = ?)` },
-  { dataset: "loan", table: "loan_consents", sql: `DELETE FROM loan_consents WHERE user_id = ?` },
-  { dataset: "loan", table: "loan_quotes", sql: `DELETE FROM loan_quotes WHERE user_id = ?` },
-  { dataset: "loan", table: "loan_applications", sql: `DELETE FROM loan_applications WHERE user_id = ?` },
-
-  // --- Finance: readiness ---
-  { dataset: "readiness", table: "readiness_answers", sql:
-    `DELETE FROM readiness_answers WHERE assessment_id IN
-       (SELECT id FROM readiness_assessments WHERE user_id = ?)` },
-  { dataset: "readiness", table: "readiness_assessments", sql: `DELETE FROM readiness_assessments WHERE user_id = ?` },
-
-  // --- Marketplace: buying ---
-  { dataset: "orders", table: "order_items", sql:
-    `DELETE FROM order_items WHERE order_id IN (SELECT id FROM orders WHERE user_id = ?)` },
-  { dataset: "orders", table: "orders", sql: `DELETE FROM orders WHERE user_id = ?` },
-
-  // --- Marketplace: selling ---
-  { dataset: "listings", table: "payment_confirmations", sql:
-    `DELETE FROM payment_confirmations WHERE sale_listing_id IN
-       (SELECT id FROM sale_listings WHERE user_id = ?)` },
-  { dataset: "listings", table: "sale_listings", sql: `DELETE FROM sale_listings WHERE user_id = ?` },
-
-  // --- Partner projects ---
-  { dataset: "projects", table: "project_ledgers", sql:
-    `DELETE FROM project_ledgers WHERE partner_application_id IN
-       (SELECT id FROM partner_applications WHERE user_id = ?)` },
-  { dataset: "projects", table: "partner_applications", sql: `DELETE FROM partner_applications WHERE user_id = ?` },
-
-  // --- Community ---
-  { dataset: "community", table: "community_comments", sql: `DELETE FROM community_comments WHERE user_id = ?` },
-  { dataset: "community", table: "community_posts", sql: `DELETE FROM community_posts WHERE user_id = ?` },
-
-  // --- Learning ---
-  { dataset: "learning", table: "user_learning_progress", sql: `DELETE FROM user_learning_progress WHERE user_id = ?` },
-
-  // --- Profile modules and preferences ---
-  { dataset: "profile_modules", table: "app_user_kyc_documents", sql: `DELETE FROM app_user_kyc_documents WHERE user_id = ?` },
-  { dataset: "profile_modules", table: "app_user_banking", sql: `DELETE FROM app_user_banking WHERE user_id = ?` },
-  { dataset: "profile_modules", table: "app_user_farm", sql: `DELETE FROM app_user_farm WHERE user_id = ?` },
-  { dataset: "preferences", table: "user_interests", sql: `DELETE FROM user_interests WHERE user_id = ?` },
-];
 
 /** Preview what a wipe would remove, without removing anything. */
 export async function previewUserRecords(identifier: string, datasets?: DatasetKey[]) {

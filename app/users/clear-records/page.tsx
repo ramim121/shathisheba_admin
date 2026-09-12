@@ -2,12 +2,16 @@
 
 import { useState } from "react";
 import { AdminShell } from "@/components/AdminShell";
+import { DATASETS, TABLE_DATASET, TABLE_LABEL } from "@/lib/clear-records-datasets";
 
 // Clear Records — reset a test account without deleting it.
 //
 // The flow is deliberately two-step: look up what exists, then confirm by
 // typing the phone number back. This is an irreversible wipe of real user data,
 // so a single mis-click must not be able to trigger it.
+//
+// The dataset list, the table labels and the wipe plan all come from
+// lib/clear-records-datasets so this page cannot drift from what the API does.
 
 type Row = { table: string; rows: number };
 type Result = {
@@ -17,71 +21,8 @@ type Result = {
   reset: string[];
 };
 
-/**
- * Mirrors DATASETS in lib/endpoints/admin-maintenance.ts. Loan and readiness are
- * on by default because that is what this screen exists for — running the same
- * phone number through the finance flow again — while listings, orders and
- * training history are usually worth keeping so the account still looks real.
- */
-const DATASETS: { key: string; label: string; hint: string; defaultOn: boolean }[] = [
-  { key: "loan", label: "Loan applications & accounts", hint: "Applications, quotes, consents, assessments, disbursements, repayments", defaultOn: true },
-  { key: "readiness", label: "Readiness checks", hint: "Self-declared assessments and answers", defaultOn: true },
-  { key: "sessions", label: "Sessions & one-time codes", hint: "Logs the phone out and clears pending OTPs", defaultOn: true },
-  { key: "orders", label: "Buy orders", hint: "Orders and line items", defaultOn: false },
-  { key: "listings", label: "Sale listings", hint: "Listings and payment confirmations", defaultOn: false },
-  { key: "projects", label: "Partner projects", hint: "Project applications and ledgers", defaultOn: false },
-  { key: "community", label: "Community activity", hint: "Posts and comments", defaultOn: false },
-  { key: "learning", label: "Training progress", hint: "Completed content, points, quiz scores", defaultOn: false },
-  { key: "profile_modules", label: "Banking, farm & KYC documents", hint: "Profile modules — not the basic profile", defaultOn: false },
-  { key: "preferences", label: "Category preferences", hint: "Selected interests", defaultOn: false },
-];
-
-/** Which dataset each table belongs to — mirrors WIPE_PLAN's tags. */
-const TABLE_DATASET: Record<string, string> = {
-  loan_repayment_schedule: "loan", loan_repayments: "loan", loan_accounts: "loan",
-  loan_application_events: "loan", loan_consents: "loan", loan_quotes: "loan",
-  loan_applications: "loan",
-  readiness_answers: "readiness", readiness_assessments: "readiness",
-  order_items: "orders", orders: "orders",
-  payment_confirmations: "listings", sale_listings: "listings",
-  project_ledgers: "projects", partner_applications: "projects",
-  community_comments: "community", community_posts: "community",
-  user_learning_progress: "learning",
-  app_user_kyc_documents: "profile_modules", app_user_banking: "profile_modules",
-  app_user_farm: "profile_modules",
-  user_interests: "preferences",
-  app_sessions: "sessions", app_otps: "sessions",
-};
-
-const TABLE_LABEL: Record<string, string> = {
-  loan_repayment_schedule: "Repayment schedule",
-  loan_repayments: "Repayments",
-  loan_accounts: "Loan accounts",
-  loan_application_events: "Loan timeline events",
-  loan_consents: "Loan consents",
-  loan_quotes: "Loan quotes",
-  loan_applications: "Loan applications",
-  readiness_answers: "Readiness answers",
-  readiness_assessments: "Readiness checks",
-  order_items: "Order line items",
-  orders: "Buy orders",
-  payment_confirmations: "Payment confirmations",
-  sale_listings: "Sale listings",
-  project_ledgers: "Project ledgers",
-  partner_applications: "Project enrolments",
-  community_comments: "Community comments",
-  community_posts: "Community posts",
-  user_learning_progress: "Training progress",
-  app_user_kyc_documents: "KYC documents",
-  app_user_banking: "Banking details",
-  app_user_farm: "Farm information",
-  user_interests: "Saved preferences",
-  app_sessions: "Active sessions",
-  app_otps: "One-time codes",
-};
-
 export default function ClearRecordsPage() {
-  const [identifier, setIdentifier] = useState("01966662633");
+  const [identifier, setIdentifier] = useState("");
   const [preview, setPreview] = useState<Result | null>(null);
   const [confirmText, setConfirmText] = useState("");
   const [datasets, setDatasets] = useState<string[]>(
@@ -97,8 +38,7 @@ export default function ClearRecordsPage() {
     setBusy(true); setError(null); setDone(null); setPreview(null); setConfirmText("");
     try {
       const res = await fetch(
-        `/api/v1/admin/users/clear-records/preview?identifier=${encodeURIComponent(identifier)}` +
-          `&datasets=${encodeURIComponent(datasets.join(","))}`,
+        `/api/v1/admin/users/clear-records/preview?identifier=${encodeURIComponent(identifier)}`,
         { cache: "no-store" });
       const json = await res.json();
       if (!res.ok || json.ok === false) throw new Error(json.message || `HTTP ${res.status}`);
@@ -143,174 +83,182 @@ export default function ClearRecordsPage() {
   const selectedTotal = (preview?.deleted ?? [])
     .filter((r) => selectedTables.has(r.table))
     .reduce((sum, r) => sum + r.rows, 0);
+  const keptTotal = (preview?.total ?? 0) - selectedTotal;
 
   const armed =
     !!preview &&
     confirmText.trim() === identifier.trim() &&
     (datasets.length > 0 || resetOnboarding || resetRoles);
 
+  function toggle(key: string, on: boolean) {
+    setDatasets((cur) => (on ? [...cur, key] : cur.filter((k) => k !== key)));
+  }
+
   return (
     <AdminShell>
-      <div className="head">
-        <p className="eyebrow">Users</p>
-        <h1>Clear records</h1>
-        <p className="sub">
-          Wipes everything an account has <em>done</em> — loans, readiness checks, orders, listings,
-          enrolments, posts, training progress, KYC documents, banking and preferences — while keeping
-          the account itself and its basic profile. Use it to run the same phone number through a flow
-          repeatedly without re-registering.
-        </p>
-      </div>
+      <section className="topbar">
+        <div>
+          <p className="eyeline">Users</p>
+          <h1 className="page-title">Clear records</h1>
+          <p className="subtitle">
+            Wipes what an account has <em>done</em> — loans, readiness checks, orders, listings,
+            enrolments, posts, training progress, notifications, KYC documents, banking and
+            preferences — while keeping the account and its basic profile. Use it to run the same
+            phone number through a flow again without re-registering.
+          </p>
+        </div>
+      </section>
 
-      <section className="card">
-        <label className="lbl" htmlFor="identifier">Phone number or user id</label>
-        <div className="row">
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <h2>Find the account</h2>
+            <p>Search by phone number or user id.</p>
+          </div>
+        </div>
+        <div className="cr-lookup">
           <input
             id="identifier"
+            className="cr-input"
             value={identifier}
             onChange={(e) => { setIdentifier(e.target.value); setPreview(null); setDone(null); }}
+            onKeyDown={(e) => { if (e.key === "Enter" && identifier.trim()) void lookUp(); }}
             placeholder="01966662633"
+            aria-label="Phone number or user id"
           />
-          <button className="btn" onClick={lookUp} disabled={busy || !identifier.trim()}>
+          <button className="btn primary" onClick={lookUp} disabled={busy || !identifier.trim()}>
             {busy && !preview ? "Looking up…" : "Look up"}
           </button>
         </div>
       </section>
 
-      {error && <p className="error">{error}</p>}
+      {error ? <div className="cr-error">{error}</div> : null}
 
-      {preview && (
-        <section className="card">
-          <h2>{preview.user.full_name || "—"} <span className="muted">· {preview.user.phone}</span></h2>
-
-          {preview.total === 0 ? (
-            <p className="ok">This account already has no associated records. Nothing to clear.</p>
-          ) : (
-            <>
-              <p className="muted">
-                {preview.total} row{preview.total === 1 ? "" : "s"} across {preview.deleted.length} table
-                {preview.deleted.length === 1 ? "" : "s"} will be permanently deleted.
-              </p>
-              <ul className="rows">
-                {preview.deleted.map((r) => {
-                  const inScope = selectedTables.has(r.table);
-                  return (
-                    <li key={r.table} className={inScope ? "" : "out"}>
-                      <span>{TABLE_LABEL[r.table] ?? r.table}</span>
-                      <strong>{inScope ? r.rows : "kept"}</strong>
-                    </li>
-                  );
-                })}
-              </ul>
-
-              <div className="opts">
-                <p className="optsHead">What to clear</p>
-                {DATASETS.map((d) => (
-                  <label key={d.key}>
-                    <input
-                      type="checkbox"
-                      checked={datasets.includes(d.key)}
-                      onChange={(e) =>
-                        setDatasets((cur) =>
-                          e.target.checked ? [...cur, d.key] : cur.filter((k) => k !== d.key)
-                        )
-                      }
-                    />
-                    <span>
-                      <strong>{d.label}</strong>
-                      <em>{d.hint}</em>
-                    </span>
-                  </label>
-                ))}
-
-                <p className="optsHead">Also reset</p>
-                <label>
-                  <input type="checkbox" checked={resetOnboarding} onChange={(e) => setResetOnboarding(e.target.checked)} />
-                  <span>
-                    <strong>Reset onboarding</strong>
-                    <em>Clears the personal-info and KYC-verified flags and saved preferences, so the next
-                       login walks the full first-run journey. Name, phone and district are kept.</em>
-                  </span>
-                </label>
-                <label>
-                  <input type="checkbox" checked={resetRoles} onChange={(e) => setResetRoles(e.target.checked)} />
-                  <span>
-                    <strong>Also clear roles</strong>
-                    <em>Removes granted roles. The buyer role is re-granted automatically on next login.</em>
-                  </span>
-                </label>
+      {preview ? (
+        <>
+          <section className="panel">
+            <div className="panel-header">
+              <div>
+                <h2>{preview.user.full_name || "—"}</h2>
+                <p>{preview.user.phone} · user #{preview.user.id}</p>
               </div>
+              <span className={`status-pill ${selectedTotal ? "red" : "grey"}`}>
+                {selectedTotal} row{selectedTotal === 1 ? "" : "s"} selected
+              </span>
+            </div>
 
-              <div className="danger">
-                <p><strong>This cannot be undone.</strong> Type <code>{identifier}</code> to confirm.</p>
+            {preview.total === 0 ? (
+              <p className="cr-ok">This account has no associated records. Nothing to clear.</p>
+            ) : (
+              <div className="cr-body">
+                <div>
+                  <p className="cr-head">What to clear</p>
+                  <div className="cr-opts">
+                    {DATASETS.map((d) => (
+                      <label className="cr-opt" key={d.key}>
+                        <input
+                          type="checkbox"
+                          checked={datasets.includes(d.key)}
+                          onChange={(e) => toggle(d.key, e.target.checked)}
+                        />
+                        <span className="cr-opt-text">
+                          <strong>{d.label}</strong>
+                          <em>{d.hint}</em>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+
+                  <p className="cr-head">Also reset</p>
+                  <div className="cr-opts">
+                    <label className="cr-opt">
+                      <input type="checkbox" checked={resetOnboarding} onChange={(e) => setResetOnboarding(e.target.checked)} />
+                      <span className="cr-opt-text">
+                        <strong>Reset onboarding</strong>
+                        <em>Clears the personal-info and KYC-verified flags and saved preferences, so the
+                          next login walks the full first-run journey. Name, phone and district are kept.</em>
+                      </span>
+                    </label>
+                    <label className="cr-opt">
+                      <input type="checkbox" checked={resetRoles} onChange={(e) => setResetRoles(e.target.checked)} />
+                      <span className="cr-opt-text">
+                        <strong>Also clear roles</strong>
+                        <em>Removes granted roles. The buyer role is re-granted automatically on next login.</em>
+                      </span>
+                    </label>
+                  </div>
+                </div>
+
+                <aside className="cr-side">
+                  <p className="cr-head">Rows found</p>
+                  <ul className="cr-rows">
+                    {preview.deleted.map((r) => {
+                      const inScope = selectedTables.has(r.table);
+                      return (
+                        <li key={r.table} className={inScope ? "" : "out"}>
+                          <span>{TABLE_LABEL[r.table] ?? r.table}</span>
+                          <strong>{inScope ? r.rows : "kept"}</strong>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  <p className="cr-note">
+                    {selectedTotal} row{selectedTotal === 1 ? "" : "s"} will be deleted
+                    {keptTotal > 0 ? `, ${keptTotal} kept` : ""}.
+                  </p>
+                </aside>
+              </div>
+            )}
+          </section>
+
+          {preview.total > 0 || resetOnboarding || resetRoles ? (
+            <section className="cr-danger">
+              <p><strong>This cannot be undone.</strong> Type <code>{identifier}</code> to confirm.</p>
+              <div className="cr-lookup">
                 <input
+                  className="cr-input"
                   value={confirmText}
                   onChange={(e) => setConfirmText(e.target.value)}
                   placeholder={identifier}
                   aria-label="Type the phone number to confirm"
                 />
-                <button className="btn destructive" onClick={clearNow} disabled={!armed || busy}>
+                <button className="btn cr-destructive" onClick={clearNow} disabled={!armed || busy}>
                   {busy ? "Clearing…" : `Clear ${selectedTotal} record${selectedTotal === 1 ? "" : "s"}`}
                 </button>
-                {datasets.length === 0 && !resetOnboarding && !resetRoles ? (
-                  <p className="muted">Nothing is selected, so there is nothing to clear.</p>
-                ) : null}
               </div>
-            </>
-          )}
-        </section>
-      )}
+              {datasets.length === 0 && !resetOnboarding && !resetRoles ? (
+                <p className="cr-note">Nothing is selected, so there is nothing to clear.</p>
+              ) : null}
+            </section>
+          ) : null}
+        </>
+      ) : null}
 
-      {done && (
-        <section className="card done">
-          <h2>Cleared</h2>
-          <p className="muted">
-            {done.user.full_name} · {done.user.phone} — {done.total} row{done.total === 1 ? "" : "s"} removed.
-            The account and its basic profile are intact.
-          </p>
-          {done.deleted.length > 0 && (
-            <ul className="rows">
+      {done ? (
+        <section className="panel cr-done">
+          <div className="panel-header">
+            <div>
+              <h2>Cleared</h2>
+              <p>
+                {done.user.full_name} · {done.user.phone} — {done.total} row{done.total === 1 ? "" : "s"} removed.
+                The account and its basic profile are intact.
+              </p>
+            </div>
+            <span className="status-pill green">Done</span>
+          </div>
+          {done.deleted.length > 0 ? (
+            <ul className="cr-rows cr-rows-flat">
               {done.deleted.map((r) => (
                 <li key={r.table}><span>{TABLE_LABEL[r.table] ?? r.table}</span><strong>{r.rows}</strong></li>
               ))}
             </ul>
-          )}
-          {done.reset.length > 0 && <p className="muted">Also reset: {done.reset.join(", ")}.</p>}
-          <p className="muted">The phone is now signed out — log in again in the app to start fresh.</p>
+          ) : null}
+          <p className="cr-note">
+            {done.reset.length > 0 ? `Also reset: ${done.reset.join(", ")}. ` : ""}
+            The phone is signed out — log in again in the app to start fresh.
+          </p>
         </section>
-      )}
-
-      <style jsx>{`
-        .head { margin-bottom: 18px; }
-        .eyebrow { text-transform:uppercase; letter-spacing:.08em; font-size:11px; font-weight:700; color:#9B5173; margin:0 0 4px; }
-        h1 { margin:0 0 6px; font-size:28px; }
-        .sub { margin:0; color:#6b6b6b; max-width:760px; line-height:1.55; }
-        .card { background:#fff; border:1px solid #E8D7DF; border-radius:14px; padding:20px; margin-bottom:16px; }
-        .card h2 { margin:0 0 10px; font-size:18px; }
-        .lbl { display:block; font-size:13px; color:#6b6b6b; margin-bottom:6px; }
-        .row { display:flex; gap:10px; }
-        input { flex:1; padding:10px 12px; border:1px solid #E8D7DF; border-radius:9px; font-size:15px; }
-        .btn { padding:10px 18px; border-radius:9px; border:1px solid #871449; background:#871449; color:#fff;
-               font-weight:700; font-size:14px; cursor:pointer; }
-        .btn:disabled { opacity:.5; cursor:not-allowed; }
-        .btn.destructive { background:#B4443C; border-color:#B4443C; margin-top:10px; width:100%; }
-        .rows { list-style:none; padding:0; margin:12px 0; border-top:1px solid #F4E8EE; }
-        .rows li { display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid #F4E8EE; font-size:14px; }
-        .opts { margin:16px 0; display:grid; gap:12px; }
-        .opts label { display:flex; gap:10px; align-items:flex-start; cursor:pointer; }
-        .opts span { display:block; font-size:14px; }
-        .opts em { display:block; font-style:normal; color:#6b6b6b; font-size:12.5px; margin-top:2px; line-height:1.5; }
-        .optsHead { margin:6px 0 0; font-size:12px; font-weight:700; letter-spacing:.4px; text-transform:uppercase; color:#9B5173; }
-        .rows li.out { opacity:.45; }
-        .rows li.out strong { font-weight:500; font-style:italic; }
-        .danger { background:#FEF2F2; border:1px solid #F3C7C4; border-radius:12px; padding:14px; margin-top:14px; }
-        .danger p { margin:0 0 10px; color:#8A2F28; font-size:14px; }
-        code { background:#fff; padding:1px 6px; border-radius:5px; border:1px solid #F3C7C4; }
-        .muted { color:#6b6b6b; font-size:13.5px; line-height:1.55; }
-        .ok { color:#1E9E5A; font-weight:600; }
-        .error { color:#B4443C; background:#FEF2F2; border:1px solid #F3C7C4; border-radius:10px; padding:12px 14px; }
-        .done { border-color:#BFE3CE; background:#F5FBF7; }
-      `}</style>
+      ) : null}
     </AdminShell>
   );
 }

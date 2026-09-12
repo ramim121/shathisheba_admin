@@ -2438,3 +2438,39 @@ td { font-size: 13px; }
   .mobile-nav button { background: none; border: 0; font-family: inherit; display: grid; place-items: center; gap: 4px; cursor: pointer; }
   .mobile-nav a.active { color: #fff; background: rgba(255,255,255,0.1); }
 }
+
+/* Clear records (app/users/clear-records) --------------------------------
+   Was styled-jsx, where a scoped `input { flex: 1 }` meant for the lookup box
+   also stretched every checkbox, staircasing the option rows. */
+.cr-lookup { display: flex; gap: 10px; padding: 14px; flex-wrap: wrap; }
+.cr-input { flex: 1 1 240px; min-width: 0; height: 40px; padding: 0 12px; border: 1px solid var(--rose-line); border-radius: 9px; font-size: 14px; background: #fff; color: var(--ink); }
+.cr-input:focus { outline: 2px solid rgba(123, 21, 54, 0.25); outline-offset: 1px; }
+.cr-body { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(260px, 0.6fr); gap: 18px; padding: 14px; }
+.cr-head { margin: 4px 0 8px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--brand); }
+.cr-opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 8px; margin-bottom: 16px; }
+.cr-opt { display: flex; align-items: flex-start; gap: 10px; padding: 11px 12px; border: 1px solid var(--rose-line); border-radius: 10px; background: #fff; cursor: pointer; }
+.cr-opt:hover { border-color: rgba(123, 21, 54, 0.35); }
+.cr-opt:has(input:checked) { border-color: var(--brand); background: #fdf6f9; box-shadow: inset 0 0 0 1px rgba(123, 21, 54, 0.12); }
+.cr-opt input[type="checkbox"] { flex: none; width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--brand); cursor: pointer; }
+.cr-opt-text { display: block; min-width: 0; }
+.cr-opt-text strong { display: block; font-size: 13.5px; font-weight: 650; color: var(--ink); }
+.cr-opt-text em { display: block; font-style: normal; margin-top: 3px; font-size: 12px; line-height: 1.5; color: var(--muted); }
+.cr-side { border: 1px solid var(--rose-line); border-radius: 12px; padding: 12px 14px; background: var(--canvas); align-self: start; }
+.cr-rows { list-style: none; margin: 0; padding: 0; }
+.cr-rows li { display: flex; justify-content: space-between; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--rose-line); font-size: 13px; }
+.cr-rows li:last-child { border-bottom: 0; }
+.cr-rows li strong { font-variant-numeric: tabular-nums; }
+.cr-rows li.out { opacity: 0.45; }
+.cr-rows li.out strong { font-weight: 500; font-style: italic; }
+.cr-rows-flat { padding: 0 14px 4px; }
+.cr-note { margin: 10px 0 0; color: var(--muted); font-size: 12.5px; line-height: 1.5; }
+.cr-ok { margin: 0; padding: 16px 14px; color: #17803d; font-weight: 600; font-size: 13.5px; }
+.cr-error { margin-bottom: 14px; border: 1px solid #f8cfcf; background: #fdecec; color: #b42323; border-radius: 10px; padding: 11px 14px; font-size: 13px; font-weight: 600; }
+.cr-danger { border: 1px solid #f3c7c4; background: #fef2f2; border-radius: 12px; padding: 14px 14px 4px; margin-bottom: 16px; }
+.cr-danger p { margin: 0 0 10px; color: #8a2f28; font-size: 13.5px; }
+.cr-danger code { background: #fff; padding: 1px 6px; border-radius: 5px; border: 1px solid #f3c7c4; font-size: 12.5px; }
+.cr-danger .cr-lookup { padding: 0 0 10px; }
+.btn.cr-destructive { background: #b4443c; color: #fff; border: 1px solid #b4443c; min-width: 180px; }
+.btn.cr-destructive:disabled { opacity: 0.5; cursor: not-allowed; }
+.cr-done { border-color: #bfe3ce; }
+@media (max-width: 1000px) { .cr-body { grid-template-columns: minmax(0, 1fr); } }

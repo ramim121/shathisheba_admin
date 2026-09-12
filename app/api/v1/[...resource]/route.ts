@@ -176,6 +176,7 @@ import {
 } from "@/lib/notify";
 import { notifyListing } from "@/lib/notices";
 import { getAppMarketOverview, getAppPartners, reorderPartners } from "@/lib/endpoints/engagement";
+import { getDashboardOverview } from "@/lib/endpoints/dashboard";
 
 // App-facing list reads. The mobile app hits these generic resource paths and
 // needs raw bilingual/detail columns; the admin panel reads lib/db-resources
@@ -234,6 +235,7 @@ const appReadHandlers: Record<string, AppReadHandler> = {
   "app/partners": () => getAppPartners(),
   "app/market/overview": (q) => getAppMarketOverview(q.get("user_id")),
   "admin/notifications/status": () => notificationStatus(),
+  "admin/dashboard/overview": () => getDashboardOverview(),
   "admin/notifications/audience": (q) =>
     audienceSummary(q.get("target") ?? "all", (q.get("roles") ?? "").split(",").filter(Boolean), (q.get("user_ids") ?? "").split(",").filter(Boolean)),
   // Catalogue sticker: is the first-purchase offer still this buyer's.

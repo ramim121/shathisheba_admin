@@ -65,6 +65,33 @@ const DETAIL_ROUTES: Record<string, (id: string) => string> = {
   "loan/applications": (id) => `/loan/applications/${encodeURIComponent(id)}`
 };
 
+const CODE_RE = /^[A-Z]{2,6}(-[A-Z0-9]+){1,4}$/;
+const MONEY_RE = /৳\s?(-?\d+(?:\.\d+)?)/g;
+
+/** ৳151200.00 → ৳1,51,200 (Bangladeshi grouping, paisa only when non-zero). */
+function formatMoney(text: string): string {
+  return text.replace(MONEY_RE, (_, n: string) => {
+    const v = Number(n);
+    return `৳${v.toLocaleString("en-IN", { minimumFractionDigits: 0, maximumFractionDigits: Number.isInteger(v) ? 0 : 2 })}`;
+  });
+}
+
+/** Presentation only — sorting, filtering and CSV export still use the raw value. */
+function renderCell(value: unknown): ReactNode {
+  if (value === undefined || value === null || String(value).trim() === "") return <span className="cell-muted">—</span>;
+  const raw = String(value);
+  if (CODE_RE.test(raw)) return <span className="cell-code">{raw}</span>;
+  if (raw.includes("৳")) {
+    const parts = formatMoney(raw).split(" · ");
+    return (
+      <span className="cell-money">
+        {parts.map((part, i) => <span key={i}>{i ? <span className="cell-sep">·</span> : null}{part}</span>)}
+      </span>
+    );
+  }
+  return raw;
+}
+
 // Treats values that look numeric (incl. ৳ / commas / %) as numbers for sorting.
 function asSortable(value: unknown): number | string {
   if (value === undefined || value === null) return "";
@@ -240,7 +267,7 @@ export function ManagementPage({
           <div className="panel-header">
             <div>
               <h2>{entityName} Records</h2>
-              <p>Sort, filter, paginate and export what the mobile app receives from <code>{endpoint}</code>.</p>
+              <p>Click a row to open it. Sort by any column, filter, or export to CSV.</p>
             </div>
             <Status label={loading ? "Loading" : `${filteredRows.length}${filteredRows.length !== rows.length ? ` of ${rows.length}` : ""} records`} />
           </div>
@@ -295,7 +322,7 @@ export function ManagementPage({
                     }}
                   >
                     {columns.map((column) => (
-                      <td key={column.key}>{row[column.key]}</td>
+                      <td key={column.key}>{renderCell(row[column.key])}</td>
                     ))}
                     <td><Status label={row.status ?? "Active"} /></td>
                     <td>

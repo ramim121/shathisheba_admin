@@ -87,8 +87,8 @@ export async function getAppLearningOverview(userId?: string | null) {
     const nx = await queryRows<Row>(
       `
         SELECT CAST(ct.id AS CHAR) AS id, ct.title_en, ct.title_bn, ct.content_type,
-               m.title_en AS module_title, CAST(m.id AS CHAR) AS module_id, m.level,
-               c.name_en AS category_name, CAST(c.id AS CHAR) AS category_id, c.interest_slug
+               m.title_en AS module_title, m.title_bn AS module_title_bn, CAST(m.id AS CHAR) AS module_id, m.level,
+               c.name_en AS category_name, c.name_bn AS category_name_bn, CAST(c.id AS CHAR) AS category_id, c.interest_slug
         FROM learning_contents ct
         JOIN learning_modules m ON m.id = ct.learning_module_id AND m.status = 'published'
         JOIN learning_categories c ON c.id = m.learning_category_id AND c.is_active = 1
@@ -152,6 +152,7 @@ export async function getAppLearningModuleContents(moduleId?: string | null, use
       SELECT CAST(ct.id AS CHAR) AS id, ct.content_type, ct.title_en, ct.title_bn,
              ct.points, ct.image_url, ct.duration_seconds,
              LEFT(COALESCE(ct.body_en, ''), 160) AS excerpt,
+             LEFT(COALESCE(ct.body_bn, ''), 160) AS excerpt_bn,
              ct.video_url IS NOT NULL AS has_video,
              ct.quiz_json IS NOT NULL AS has_quiz,
              ct.sort_order,
@@ -186,8 +187,8 @@ export async function getAppLearningContent(contentId?: string | null, userId?: 
              ct.body_en, ct.body_bn, ct.video_url, ct.duration_seconds, ct.points,
              ct.image_url, ct.summary_en, ct.summary_bn, ct.quiz_json,
              CAST(ct.learning_module_id AS CHAR) AS module_id,
-             m.title_en AS module_title, m.level,
-             c.name_en AS category_name, CAST(c.id AS CHAR) AS category_id,
+             m.title_en AS module_title, m.title_bn AS module_title_bn, m.level,
+             c.name_en AS category_name, c.name_bn AS category_name_bn, CAST(c.id AS CHAR) AS category_id,
              COALESCE(p.status, 'not_started') AS status,
              COALESCE(p.progress_pct, 0) AS progress_pct,
              p.quiz_score, COALESCE(p.quiz_passed, 0) AS quiz_passed

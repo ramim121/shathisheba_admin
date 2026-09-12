@@ -9,6 +9,8 @@ import {
   LayoutDashboard,
   ListChecks,
   LogOut,
+  Menu,
+  X,
   MapPin,
   Megaphone,
   MessageSquareText,
@@ -285,37 +287,55 @@ function AdminIdentity() {
 }
 
 export function AdminShell({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname() ?? "";
+  const [drawer, setDrawer] = useState(false);
+  // A tap on any destination navigates; close the drawer behind it.
+  useEffect(() => { setDrawer(false); }, [pathname]);
+  const sidebarBody = (
+    <>
+      <Link className="brand" href="/dashboard">
+        <div className="brand-mark" />
+        <div>
+          <h1>Shathi Sheba</h1>
+          <p>Admin Backend</p>
+        </div>
+      </Link>
+
+      <div className="sidebar-summary">
+        <span>Live MySQL</span>
+        <strong>Admin Console</strong>
+      </div>
+
+      <SidebarNav />
+
+      <AdminIdentity />
+    </>
+  );
+
   return (
     <div className="app-shell">
-      <aside className="sidebar">
-        <Link className="brand" href="/dashboard">
-          <div className="brand-mark" />
-          <div>
-            <h1>Shathi Sheba</h1>
-            <p>Admin Backend</p>
-          </div>
-        </Link>
-
-        <div className="sidebar-summary">
-          <span>Live MySQL</span>
-          <strong>Admin Console</strong>
-        </div>
-
-        <SidebarNav />
-
-        <AdminIdentity />
-      </aside>
+      <aside className="sidebar">{sidebarBody}</aside>
 
       <main className="main">
         <SectionTabs />
         {children}
       </main>
 
+      {/* Phones and tablets: the sidebar lives in a drawer behind "Menu". */}
+      {drawer ? (
+        <div className="mobile-drawer" role="dialog" aria-modal="true" aria-label="Menu" onClick={() => setDrawer(false)}>
+          <aside className="sidebar mobile-drawer-panel" onClick={(e) => e.stopPropagation()}>
+            <button type="button" className="mobile-drawer-close" onClick={() => setDrawer(false)} aria-label="Close menu"><X size={20} /></button>
+            {sidebarBody}
+          </aside>
+        </div>
+      ) : null}
+
       <nav className="mobile-nav">
-        <Link href="/dashboard"><LayoutDashboard size={18} />Home</Link>
-        <Link href="/sale"><Store size={18} />Sale</Link>
-        <Link href="/community"><MessageSquareText size={18} />Community</Link>
-        <Link href="/api-viewer"><ScrollText size={18} />API</Link>
+        <Link href="/dashboard" className={pathname === "/dashboard" ? "active" : ""}><LayoutDashboard size={18} />Home</Link>
+        <Link href="/approvals" className={pathname.startsWith("/approvals") ? "active" : ""}><ListChecks size={18} />Approvals</Link>
+        <Link href="/orders" className={pathname.startsWith("/orders") ? "active" : ""}><ShoppingCart size={18} />Orders</Link>
+        <button type="button" onClick={() => setDrawer(true)}><Menu size={18} />Menu</button>
       </nav>
     </div>
   );

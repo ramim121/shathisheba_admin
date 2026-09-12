@@ -178,7 +178,7 @@ const configs: Record<string, ResourceConfig> = {
         CAST(l.id AS CHAR) AS id,
         l.listing_code AS code,
         u.full_name AS farmer,
-        CONCAT(COALESCE(sc.name_en, ''), ' / ', COALESCE(si.name_en, ''), ' / ', COALESCE(b.name_en, '')) AS item,
+        CONCAT_WS(' / ', NULLIF(sc.name_en, ''), NULLIF(si.name_en, ''), NULLIF(b.name_en, '')) AS item,
         CONCAT('৳', COALESCE(l.farmer_expected_price, 0), ' · ৳', COALESCE(l.estimated_earning, 0)) AS price,
         l.status
       FROM sale_listings l
@@ -507,12 +507,17 @@ const configs: Record<string, ResourceConfig> = {
         CAST(o.id AS CHAR) AS id,
         o.order_code AS code,
         u.full_name AS customer,
-        CONCAT(COUNT(oi.id), ' item(s)') AS product,
+        CASE
+          WHEN COUNT(oi.id) = 0 THEN ''
+          WHEN COUNT(oi.id) = 1 THEN CONCAT(MAX(p.name_en), ' × ', TRIM(TRAILING '.' FROM TRIM(TRAILING '0' FROM MAX(oi.quantity))))
+          ELSE CONCAT(MIN(p.name_en), ' +', COUNT(oi.id) - 1, ' more')
+        END AS product,
         CONCAT('৳', o.payable_amount) AS amount,
         o.fulfillment_status AS status
       FROM orders o
       JOIN app_users u ON u.id = o.user_id
       LEFT JOIN order_items oi ON oi.order_id = o.id
+      LEFT JOIN products p ON p.id = oi.product_id
       GROUP BY o.id
       ORDER BY o.created_at DESC
     `,
@@ -986,7 +991,7 @@ const configs: Record<string, ResourceConfig> = {
         CAST(u.id AS CHAR) AS id,
         u.full_name AS name,
         u.phone,
-        CONCAT(COALESCE(u.district, ''), ' / ', COALESCE(u.upazila, '')) AS location,
+        CONCAT_WS(' / ', NULLIF(u.district, ''), NULLIF(u.upazila, '')) AS location,
         COALESCE(GROUP_CONCAT(r.role ORDER BY r.role SEPARATOR ', '), 'shathisheba_buyer') AS roles,
         u.status
       FROM app_users u
@@ -1060,6 +1065,10 @@ const configs: Record<string, ResourceConfig> = {
         category,
         question_en AS question,
         COALESCE(question_bn, '') AS bangla,
+        question_en,
+        question_bn,
+        answer_en,
+        answer_bn,
         IF(is_active = 1, 'Active', 'Inactive') AS status
       FROM faq_items
       ORDER BY sort_order, id
@@ -1075,7 +1084,7 @@ const configs: Record<string, ResourceConfig> = {
         CAST(id AS CHAR) AS id,
         name,
         officer_role AS role,
-        CONCAT(COALESCE(district, ''), ' / ', COALESCE(upazila, '')) AS zone,
+        CONCAT_WS(' / ', NULLIF(district, ''), NULLIF(upazila, '')) AS zone,
         COALESCE(phone, '') AS phone,
         IF(is_active = 1, 'Active', 'Inactive') AS status
       FROM zone_officers

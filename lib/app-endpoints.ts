@@ -690,12 +690,16 @@ export async function getAppPartnerProjects() {
              summary_en, summary_bn, market_overview_en, market_overview_bn,
              investment_amount, duration_label, duration_label_bn, region_based, is_active,
              income_amount, income_label_en, income_label_bn,
-             model_en, model_bn, loan_partners_en, loan_partners_bn,
+             model_en, model_bn, loan_partners_en, loan_partners_bn, loan_partner_logos,
+             -- Bangla place names and the lenders' logos, as the area tab has.
+             (SELECT name_bn FROM geo_upazilas WHERE id = p.upazila_id) AS upazila_bn,
+             (SELECT name_bn FROM geo_districts WHERE id = p.district_id) AS district_bn,
+             (SELECT name_bn FROM geo_divisions WHERE id = p.division_id) AS division_bn,
              capacity_label_en, capacity_label_bn, terms_json,
              platform_fee, logistics_fee, warehouse_vet_fee,
              status, capacity, lender_name, max_credit_amount,
              start_date, end_date, steps_json
-      FROM partner_projects
+      FROM partner_projects p
       ORDER BY created_at DESC, id DESC
     `
   );
@@ -889,6 +893,8 @@ export async function getAppCommunityPosts(scope?: string | null, _district?: st
                JSON_UNQUOTE(JSON_EXTRACT(l.media_json, '$[0]')) AS image_url,
                0 AS is_official, 0 AS like_count, 0 AS comment_count,
                l.district, l.upazila, 'district' AS scope, 'visible' AS status, l.created_at,
+               (SELECT name_bn FROM geo_districts WHERE id = l.district_id) AS district_bn,
+               (SELECT name_bn FROM geo_upazilas WHERE id = l.upazila_id) AS upazila_bn,
                1 AS is_listing
         FROM sale_listings l
         JOIN app_users u ON u.id = l.user_id
@@ -910,6 +916,8 @@ export async function getAppCommunityPosts(scope?: string | null, _district?: st
       SELECT CAST(p.id AS CHAR) AS id, u.full_name AS farmer_name,
              p.post_type, p.body, p.image_url, p.is_official, p.like_count, p.comment_count,
              p.district, p.upazila, p.scope, p.status, p.created_at,
+             (SELECT name_bn FROM geo_districts WHERE id = p.district_id) AS district_bn,
+             (SELECT name_bn FROM geo_upazilas WHERE id = p.upazila_id) AS upazila_bn,
              (p.post_type = 'notice' AND p.body LIKE '🏷️%') AS is_listing
       FROM community_posts p
       JOIN app_users u ON u.id = p.user_id

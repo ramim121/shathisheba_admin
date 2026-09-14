@@ -763,6 +763,48 @@ export async function getAppActiveProjects(userId?: string | null) {
   );
 }
 
+// GET /api/v1/app/projects/public
+// The public project showcase, for the DigiGram marketing website.
+//
+// WHY A SEPARATE HANDLER RATHER THAN OPENING UP app/projects/active.
+// `active` is a *personalised* read: it takes a user_id, resolves that farmer's
+// geography and interests, and filters the list to their area. None of that
+// means anything to an anonymous web visitor, and making user_id optional there
+// would leave a personal-data endpoint reachable without a token — the exact
+// class of bug SEC-01 was about.
+//
+// This returns the same rows with the personal dimension removed: no user, no
+// region filter, no interest flag, and no `enrolled` count (how many farmers
+// applied is an operating figure, not brochure copy). Every column below is
+// already public-facing — it is what the app prints on the project card.
+//
+// Region-based projects are included but carry their district so the website
+// can label them ("Natore, Rajshahi"); the site is a showcase, not an
+// application path, so there is nobody to filter them for.
+export async function getPublicProjects() {
+  return queryRows<Row>(
+    `
+      SELECT CAST(p.id AS CHAR) AS id, p.project_code, p.name_en, p.name_bn,
+             p.interest_slug, p.division, p.district, p.upazila, p.image_url,
+             p.summary_en, p.summary_bn, p.market_overview_en, p.market_overview_bn,
+             p.duration_label, p.duration_label_bn, p.lender_name,
+             p.income_amount, p.income_label_en, p.income_label_bn,
+             p.model_en, p.model_bn, p.loan_partners_en, p.loan_partners_bn,
+             p.loan_partner_logos,
+             (SELECT name_bn FROM geo_upazilas WHERE id = p.upazila_id) AS upazila_bn,
+             (SELECT name_bn FROM geo_districts WHERE id = p.district_id) AS district_bn,
+             (SELECT name_bn FROM geo_divisions WHERE id = p.division_id) AS division_bn,
+             p.capacity_label_en, p.capacity_label_bn, p.capacity,
+             p.status, p.start_date, p.end_date
+      FROM partner_projects p
+      WHERE p.is_active = 1
+        AND p.status IN ('open', 'opening_soon')
+        AND (p.end_date IS NULL OR p.end_date >= CURDATE())
+      ORDER BY FIELD(p.status,'open','opening_soon'), p.start_date, p.id
+    `
+  );
+}
+
 // GET /api/v1/app/projects/mine?user_id=
 // "My Projects": the projects a user has enrolled in (via partner_applications).
 export async function getAppMyProjects(userId?: string | null) {

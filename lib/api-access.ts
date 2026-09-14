@@ -41,7 +41,11 @@ export const PUBLIC_READS = new Set<string>([
   "market-updates",
   "app/market-updates",
   // The partner strip is public brand information.
-  "app/partners"
+  "app/partners",
+  // The project showcase on digigramventures.com. Deliberately NOT
+  // "app/projects/active", which is region- and interest-personalised and
+  // takes a user_id; this one carries no personal dimension at all.
+  "app/projects/public"
 ]);
 
 export const PUBLIC_WRITES = new Set<string>(["app/auth/request-otp", "app/auth/verify-otp"]);

@@ -57,6 +57,7 @@ import {
   getAppPartnerLedgers,
   getAppPartnerProjects,
   getAppActiveProjects,
+  getPublicProjects,
   getAppMyProjects,
   getSaleCategoryAvailability,
   getProjectPrevRates,
@@ -218,6 +219,8 @@ const appReadHandlers: Record<string, AppReadHandler> = {
   "partners/projects": () => getAppPartnerProjects(),
   "partners/ledgers": () => getAppPartnerLedgers(),
   "app/projects/active": (q) => getAppActiveProjects(q.get("user_id")),
+  // Anonymous showcase read for the marketing website. See getPublicProjects.
+  "app/projects/public": () => getPublicProjects(),
   "app/projects/mine": (q) => getAppMyProjects(q.get("user_id")),
   "app/projects/prev-rates": (q) => getProjectPrevRates(q.get("animal_id"), q.get("breed_id"), q.get("district")),
   "app/sale/category-availability": (q) => getSaleCategoryAvailability(q.get("user_id")),

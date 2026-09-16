@@ -15,7 +15,12 @@ import { resolveCaller, unauthorized } from "@/lib/app-auth";
 // Requires an identified caller (mobile bearer token or admin cookie). While this
 // was open, anyone on the internet could push 8MB objects into the production
 // bucket for as long as they cared to, at the bucket owner's expense.
-const ALLOWED = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+// Photos, plus the paperwork a listing carries: contracts, waybills and
+// vaccination certificates arrive as PDFs far more often than as images.
+const ALLOWED = new Set([
+  "image/jpeg", "image/png", "image/webp", "image/gif",
+  "application/pdf"
+]);
 const MAX_BYTES = 8 * 1024 * 1024;
 
 export async function POST(request: NextRequest) {

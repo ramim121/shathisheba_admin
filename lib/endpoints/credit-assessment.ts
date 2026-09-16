@@ -175,7 +175,7 @@ export async function loadAssessmentInput(tx: Tx, applicationId: number) {
   const [txCounts] = [await tx.query<Row>(
     `SELECT
        (SELECT COUNT(*) FROM orders WHERE user_id = ?) +
-       (SELECT COUNT(*) FROM sale_listings WHERE user_id = ? AND status = 'sold') AS n`,
+       (SELECT COUNT(*) FROM sale_listings WHERE user_id = ? AND status = 'paid') AS n`,
     [app.user_id, app.user_id]
   )];
 

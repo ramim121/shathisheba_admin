@@ -39,16 +39,23 @@ type Decision = {
 const FLASH_MS = 4000;
 
 const QUEUE_OF: Record<string, QueueKey> = {
-  listing: "listings", enrollment: "enrollments", kyc: "kyc", user: "users", order: "orders"
+  enrollment: "enrollments", kyc: "kyc", user: "users", order: "orders"
 };
-
-// Detail columns that the listing's publish form shows under another name, so
-// a changed seller price also lights up the price box the admin is about to set.
-const PUBFORM_FIELD = { price: "farmer_expected_price", stock: "quantity", description: "description" } as const;
 
 function humanStatus(s: string | null | undefined) {
   return String(s ?? "").replace(/_/g, " ");
 }
+
+// What the officer opens the listing workspace to do next. Listings are never
+// approved — the status is a consequence of the section that gets recorded.
+const LISTING_NEXT: Record<string, string> = {
+  draft: "not submitted yet",
+  submitted: "record field verification",
+  field_verification: "finish field verification",
+  verified: "record the purchase contract",
+  contracted: "record shipping",
+  shipped: "record the payment to the farmer"
+};
 
 function transitionText(d: { previousStatus: string | null; status: string }) {
   return d.previousStatus && d.previousStatus !== d.status
@@ -80,8 +87,10 @@ const DOC_LABEL: Record<string, string> = {
   trade_license: "Trade License", passbook: "Bank Passbook", other: "Other"
 };
 
+// Listings are a worklist, not a decision queue: a row opens the listing
+// workspace, where each section is recorded and the status follows from it.
 const QUEUE_META = {
-  listings: { title: "List-for-sale Listings", icon: Store, viewAll: "/sale", note: "Seller listings awaiting marketplace approval" },
+  listings: { title: "List-for-sale Listings", icon: Store, viewAll: "/sale", note: "Worklist — open one to record the next section" },
   enrollments: { title: "Project Enrollments", icon: HandCoins, viewAll: "/partners", note: "Partner project applications" },
   kyc: { title: "KYC Documents", icon: ScrollText, viewAll: "/users/kyc", note: "Uploaded identity documents to verify" },
   users: { title: "New Users", icon: UsersRound, viewAll: "/users", note: "New registrations — approval grants seller role" },
@@ -90,7 +99,7 @@ const QUEUE_META = {
 
 // Resource keys for the generic edit form, so admins can fill missing fields in place.
 const EDIT_RESOURCE: Record<string, string> = {
-  listing: "sale/listings", enrollment: "partners/applications", kyc: "app/user-kyc", user: "users", order: "buy/orders"
+  enrollment: "partners/applications", kyc: "app/user-kyc", user: "users", order: "buy/orders"
 };
 
 const REQUIRABLE_DOCS: Array<[string, string]> = [
@@ -125,8 +134,6 @@ export default function ApprovalsPage() {
   const [detail, setDetail] = useState<Detail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [acting, setActing] = useState(false);
-  const [categories, setCategories] = useState<Row[]>([]);
-  const [pub, setPub] = useState({ price: "", stock: "", buy_category_id: "", description: "" });
   const [reqDocs, setReqDocs] = useState<string[]>([]);
   const [reqMsg, setReqMsg] = useState("");
   const [decideError, setDecideError] = useState("");
@@ -164,10 +171,6 @@ export default function ApprovalsPage() {
   useEffect(() => {
     loadQueues();
     fetch("/api/admin/me").then((r) => (r.ok ? r.json() : null)).then((j) => { if (j?.ok) setAdminId(j.admin.id); });
-    // All active buy categories (admin surface — includes empty ones) for the publish dropdown.
-    fetch("/api/v1/buy/categories?surface=admin").then((r) => (r.ok ? r.json() : null)).then((j) => {
-      if (Array.isArray(j?.data)) setCategories(j.data.filter((c: Row) => Number(c.is_active ?? 1) === 1));
-    });
   }, [loadQueues]);
 
   const openDetail = useCallback(async (sel: Selected) => {
@@ -183,15 +186,6 @@ export default function ApprovalsPage() {
         setReqMsg("");
         setNote("");
         setDocDecision(null);
-        if (sel.type === "listing") {
-          const it = json.data.item as Row;
-          setPub({
-            price: it.farmer_expected_price ? String(it.farmer_expected_price) : "",
-            stock: it.quantity ? String(it.quantity) : "",
-            buy_category_id: "",
-            description: (it.description as string) || ""
-          });
-        }
         if (sel.type === "enrollment") {
           const raw = (json.data.item as Row).required_docs;
           const parsed = Array.isArray(raw) ? raw.map(String)
@@ -279,20 +273,10 @@ export default function ApprovalsPage() {
 
   async function decide(action: "approve" | "reject") {
     if (!selected) return;
-    if (selected.type === "listing" && action === "approve" && !(Number(pub.price) > 0)) {
-      alert("Set a product price (> 0) before approving — it publishes to Buy-from-Shathi.");
-      return;
-    }
     setActing(true);
     try {
       const body: Record<string, unknown> = { type: selected.type, id: selected.id, action, admin_id: adminId };
       if (note.trim()) body.note = note.trim();
-      if (selected.type === "listing" && action === "approve") {
-        body.price = Number(pub.price);
-        body.stock = Number(pub.stock || 0);
-        body.description = pub.description || null;
-        if (pub.buy_category_id) body.buy_category_id = Number(pub.buy_category_id);
-      }
       const res = await fetch("/api/v1/app/admin/approve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -376,13 +360,29 @@ export default function ApprovalsPage() {
               `${fmt(it.full_name)} · ${fmt(it.phone)} · ${fmtDate(it.created_at)}`;
             const kycOk = Number(it.is_kyc_verified) === 1;
             const stockOk = Number(it.stock_ok) === 1;
+            // A listing row is a link into its workspace, not a decision.
+            if (key === "listings") {
+              return (
+                <Link className="aq-item" key={id} href={`/sale/${encodeURIComponent(id)}`} style={{ textDecoration: "none" }}>
+                  <div className="aq-item-main">
+                    <span className="aq-item-title">{title}</span>
+                    <span className="aq-item-sub">{sub}</span>
+                  </div>
+                  <span className="aq-kyc ok" style={{ background: "#f4eef7", color: "#6b3f7a" }}>
+                    {humanStatus(String(it.status ?? ""))} · {LISTING_NEXT[String(it.status)] ?? "open the workspace"}
+                  </span>
+                  <span className={`aq-kyc ${kycOk ? "ok" : "warn"}`}>{kycOk ? <BadgeCheck size={13} /> : <AlertTriangle size={13} />}{kycOk ? "KYC" : "no KYC"}</span>
+                  <ChevronRight size={16} className="aq-chev" />
+                </Link>
+              );
+            }
             return (
               <button className="aq-item" key={id} onClick={() => openDetail({ type: queueItemType(key), id, title })}>
                 <div className="aq-item-main">
                   <span className="aq-item-title">{title}</span>
                   <span className="aq-item-sub">{sub}</span>
                 </div>
-                {(key === "listings" || key === "enrollments") ? (
+                {key === "enrollments" ? (
                   <span className={`aq-kyc ${kycOk ? "ok" : "warn"}`}>{kycOk ? <BadgeCheck size={13} /> : <AlertTriangle size={13} />}{kycOk ? "KYC" : "no KYC"}</span>
                 ) : null}
                 {key === "orders" ? (
@@ -402,7 +402,11 @@ export default function ApprovalsPage() {
       <div className="page-head">
         <div>
           <h1 className="page-title"><ListChecks size={22} style={{ verticalAlign: "-4px", marginRight: 8 }} />Approvals</h1>
-          <p className="page-sub">Decisional to-do queue. Review each applicant&apos;s KYC verification, then approve or reject. {queues ? <strong>{queues.counts.total} pending.</strong> : null}</p>
+          <p className="page-sub">
+            Decisional to-do queue. Review each applicant&apos;s KYC verification, then approve or reject.
+            {" "}Sale listings are not approved — their rows open the listing workspace, where each section is recorded.
+            {" "}{queues ? <strong>{queues.counts.total} open.</strong> : null}
+          </p>
         </div>
         <button className="aq-refresh" onClick={() => loadQueues()} disabled={loading}>
           {loading ? <Loader2 size={13} className="spin" style={{ verticalAlign: "-2px", marginRight: 5 }} /> : null}Refresh
@@ -581,28 +585,6 @@ export default function ApprovalsPage() {
                       </>
                     ) : <p className="pubform-note" style={{ marginTop: 8 }}>No prior stock movements for these products.</p>}
                     <p className="pubform-note" style={{ marginTop: 8 }}>Approving confirms the order and deducts the quantities above from inventory.</p>
-                  </div>
-                ) : null}
-
-                {detail.type === "listing" ? (
-                  <div className="pubform">
-                    <h3 className="vpanel-title"><Store size={15} /> Publish to Buy-from-Shathi</h3>
-                    <p className="pubform-note">On approval this listing becomes a priced product buyers can order.</p>
-                    <div className="pubform-grid">
-                      <label className={changedFields.has(PUBFORM_FIELD.price) ? "is-changed" : undefined}>Price (৳) *<input type="number" min="0" value={pub.price} onChange={(e) => setPub({ ...pub, price: e.target.value })} /></label>
-                      <label className={changedFields.has(PUBFORM_FIELD.stock) ? "is-changed" : undefined}>Stock<input type="number" min="0" value={pub.stock} onChange={(e) => setPub({ ...pub, stock: e.target.value })} /></label>
-                    </div>
-                    <div className="pubform-block">Category
-                      <Select
-                        aria-label="Buy category"
-                        value={pub.buy_category_id}
-                        onChange={(v) => setPub({ ...pub, buy_category_id: v })}
-                        options={[{ value: "", label: "Livestock (default)" }, ...categories.map((c) => ({ value: String(c.id), label: String(c.name_en) }))]}
-                      />
-                    </div>
-                    <label className={`pubform-block${changedFields.has(PUBFORM_FIELD.description) ? " is-changed" : ""}`}>Description
-                      <textarea rows={2} value={pub.description} onChange={(e) => setPub({ ...pub, description: e.target.value })} placeholder="Shown to buyers" />
-                    </label>
                   </div>
                 ) : null}
 

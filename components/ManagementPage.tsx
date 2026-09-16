@@ -7,6 +7,7 @@ import { ArrowDown, ArrowUp, ChevronsUpDown, Download, Edit3, Eye, Filter, Plus,
 import { AdminShell } from "@/components/AdminShell";
 import { Status } from "@/components/Status";
 import { Select } from "@/components/Select";
+import { DeleteDialog } from "@/components/DeleteDialog";
 
 export type ManagementColumn = {
   key: string;
@@ -122,6 +123,7 @@ export function ManagementPage({
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
+  const [pendingDelete, setPendingDelete] = useState<{ id: string; title: string } | null>(null);
   const resource = useMemo(() => endpoint.replace(/^\/api\/v1\//, ""), [endpoint]);
   const createHref = `/manage/form?resource=${encodeURIComponent(resource)}`;
   const detailHref = (id: string) =>
@@ -214,21 +216,29 @@ export function ManagementPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [endpoint]);
 
-  async function deleteRow(id: string) {
-    if (typeof window !== "undefined" && !window.confirm("Delete this record? This cannot be undone.")) return;
-    setLoading(true);
-    setMessage("");
-    try {
-      const response = await fetch(`${endpoint}?id=${encodeURIComponent(id)}`, { method: "DELETE" });
-      const json = await response.json();
-      if (!response.ok || !json.ok) throw new Error(json.message ?? "Delete failed.");
-      setMessage("Record deleted from MySQL.");
-      await loadRows();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Delete failed.");
-    } finally {
-      setLoading(false);
+  // The first non-empty cell is the closest thing a generic table has to a
+  // name; the modal replaces it with the record's real title once it loads.
+  function rowTitle(row: ManagementRow) {
+    for (const column of columns) {
+      const value = row[column.key];
+      if (value !== undefined && value !== null && String(value).trim() !== "") return String(value);
     }
+    return `#${row.id}`;
+  }
+
+  function askDelete(row: ManagementRow) {
+    setMessage("");
+    setPendingDelete({ id: row.id, title: rowTitle(row) });
+  }
+
+  async function afterDelete(id: string) {
+    setPendingDelete(null);
+    // Drop the row immediately so the table matches what just happened, then
+    // refresh to pick up anything else the delete changed. The confirmation is
+    // set last because loadRows() clears the message as it starts.
+    setRows((current) => current.filter((row) => row.id !== id));
+    await loadRows();
+    setMessage("Record deleted from MySQL.");
   }
 
   const activeFilterCount = Object.values(colFilters).filter((v) => v.trim() !== "").length;
@@ -329,7 +339,7 @@ export function ManagementPage({
                       <div className="row-actions">
                         <Link href={detailHref(row.id)} title="View details"><Eye size={16} /></Link>
                         <Link href={`/manage/form?resource=${encodeURIComponent(resource)}&id=${encodeURIComponent(row.id)}`} title="Edit"><Edit3 size={16} /></Link>
-                        <button onClick={() => void deleteRow(row.id)} title="Delete" type="button"><Trash2 size={16} /></button>
+                        <button onClick={() => askDelete(row)} title="Delete" type="button"><Trash2 size={16} /></button>
                       </div>
                     </td>
                   </tr>
@@ -367,6 +377,20 @@ export function ManagementPage({
           </div>
         </div>
       </section>
+
+      {pendingDelete ? (
+        <DeleteDialog
+          // A handful of pages carry a filter in the endpoint; the impact
+          // lookup wants the bare resource key.
+          resource={resource.split("?")[0]}
+          endpoint={endpoint}
+          entityName={entityName}
+          id={pendingDelete.id}
+          fallbackTitle={pendingDelete.title}
+          onCancel={() => setPendingDelete(null)}
+          onDeleted={(deletedId) => void afterDelete(deletedId)}
+        />
+      ) : null}
     </AdminShell>
   );
 }

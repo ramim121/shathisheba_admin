@@ -7,6 +7,7 @@ import { invalidateSettings } from "@/lib/settings";
 import { syncOrderPromotion } from "@/lib/promotions";
 import { recordOrderEvent } from "@/lib/order-events";
 import { notifyOrder } from "@/lib/notices";
+import { postOrderCompleted } from "@/lib/community-posts";
 
 const ORDER_STATUS_EVENT: Record<string, string> = {
   confirmed: "order_confirmed",
@@ -58,11 +59,22 @@ function simpleConfig(
   };
 }
 
+/**
+ * A unique code for a new record. Defaults used to embed `Date.now()` directly,
+ * which is evaluated once when this module loads — so the second record created
+ * in the same server process collided on the unique index and the save failed
+ * with a bare "database error". Defaults may now be functions, evaluated per
+ * insert; this is the generator they use.
+ */
+function code(prefix: string) {
+  return () => `${prefix}-${Date.now()}${Math.floor(Math.random() * 90 + 10)}`;
+}
+
 const configs: Record<string, ResourceConfig> = {
   "admin/users": simpleConfig(
     "admin_users",
     ["name", "email", "phone", "password_hash", "role", "district", "upazila", "is_active", "last_login_at"],
-    { name: "New admin", email: `admin-${Date.now()}@shathisheba.local`, password_hash: "change-me", role: "hq_admin", is_active: 1 }
+    { name: "New admin", email: () => `admin-${Date.now()}@shathisheba.local`, password_hash: "change-me", role: "hq_admin", is_active: 1 }
   ),
   interests: {
     table: "interest_categories",
@@ -190,7 +202,7 @@ const configs: Record<string, ResourceConfig> = {
     `,
     allowedInsert: ["listing_code", "user_id", "sale_item_id", "animal_id", "breed_id", "title_en", "title_bn", "description", "age_months", "weight_kg", "meat_weight_kg", "dressing_pct", "quantity", "unit", "farmer_expected_price", "estimated_earning", "contact_phone", "contact_name", "contact_nid", "contact_is_self", "address_text", "division", "district", "upazila", "ai_analysis_json", "media_json", "status", "pricing_rule_id"],
     allowedUpdate: ["sale_item_id", "animal_id", "breed_id", "title_en", "title_bn", "description", "age_months", "weight_kg", "meat_weight_kg", "dressing_pct", "quantity", "unit", "farmer_expected_price", "estimated_earning", "contact_phone", "contact_name", "contact_nid", "contact_is_self", "address_text", "division", "district", "upazila", "ai_analysis_json", "media_json", "status", "approved_by", "approved_at", "field_visit_date", "field_visit_note", "verified_weight_kg", "paid_at", "paid_amount", "payment_method", "payment_reference", "pricing_rule_id"],
-    defaults: { listing_code: `SAL-${Date.now()}`, quantity: 1, unit: "piece", status: "submitted" }
+    defaults: { listing_code: code("SAL"), quantity: 1, unit: "piece", status: "submitted" }
   },
   "sale/items": {
     table: "sale_items",
@@ -478,7 +490,7 @@ const configs: Record<string, ResourceConfig> = {
     `,
     allowedInsert: ["buy_category_id", "sku", "name_en", "name_bn", "short_description_en", "short_description_bn", "unit", "package_size", "price", "stock_qty", "low_stock_threshold", "delivery_window", "status", "metadata", "manufacturer_id", "package_size_bn", "delivery_window_bn"],
     allowedUpdate: ["buy_category_id", "sku", "name_en", "name_bn", "short_description_en", "short_description_bn", "unit", "package_size", "price", "stock_qty", "low_stock_threshold", "delivery_window", "status", "metadata", "manufacturer_id", "package_size_bn", "delivery_window_bn"],
-    defaults: { sku: `SKU-${Date.now()}`, name_en: "New product", unit: "piece", price: 0, stock_qty: 0, status: "draft" },
+    defaults: { sku: code("SKU"), name_en: "New product", unit: "piece", price: 0, stock_qty: 0, status: "draft" },
     blankAs: { manufacturer_id: null },
     // Distributors live in a join table; the form sends them as "1,2".
     afterSave: async (id, payload) => {
@@ -523,7 +535,7 @@ const configs: Record<string, ResourceConfig> = {
     `,
     allowedInsert: ["order_code", "user_id", "total_amount", "delivery_fee", "payable_amount", "payment_method", "payment_status", "fulfillment_status", "delivery_address", "district", "upazila", "notes"],
     allowedUpdate: ["total_amount", "delivery_fee", "payable_amount", "payment_method", "payment_status", "fulfillment_status", "delivery_address", "district", "upazila", "notes"],
-    defaults: { order_code: `ORD-${Date.now()}`, total_amount: 0, delivery_fee: 0, payable_amount: 0, payment_method: "cash", payment_status: "pending", fulfillment_status: "placed", delivery_address: "Address" }
+    defaults: { order_code: code("ORD"), total_amount: 0, delivery_fee: 0, payable_amount: 0, payment_method: "cash", payment_status: "pending", fulfillment_status: "placed", delivery_address: "Address" }
   },
   "orders/items": simpleConfig(
     "order_items",
@@ -546,12 +558,12 @@ const configs: Record<string, ResourceConfig> = {
     `,
     allowedInsert: ["order_code", "user_id", "total_amount", "delivery_fee", "payable_amount", "payment_method", "payment_status", "fulfillment_status", "delivery_address", "district", "upazila", "notes"],
     allowedUpdate: ["payment_method", "payment_status", "notes"],
-    defaults: { order_code: `PAY-${Date.now()}`, total_amount: 0, delivery_fee: 0, payable_amount: 0, payment_method: "cash", payment_status: "pending", fulfillment_status: "placed", delivery_address: "Address" }
+    defaults: { order_code: code("PAY"), total_amount: 0, delivery_fee: 0, payable_amount: 0, payment_method: "cash", payment_status: "pending", fulfillment_status: "placed", delivery_address: "Address" }
   },
   "learning/categories": simpleConfig(
     "learning_categories",
     ["slug", "name_en", "name_bn", "emoji", "description_en", "description_bn", "interest_slug", "section", "sort_order", "is_active"],
-    { slug: `learning-${Date.now()}`, name_en: "New learning category", sort_order: 0, is_active: 1 }
+    { slug: () => `learning-${Date.now()}`, name_en: "New learning category", sort_order: 0, is_active: 1 }
   ),
   "learning/modules": {
     table: "learning_modules",
@@ -616,7 +628,7 @@ const configs: Record<string, ResourceConfig> = {
     `,
     allowedInsert: ["project_code", "name_en", "name_bn", "interest_slug", "lender_name", "division", "district", "upazila", "image_url", "summary_en", "summary_bn", "market_overview_en", "market_overview_bn", "investment_amount", "income_amount", "income_label_en", "income_label_bn", "model_en", "model_bn", "loan_partners_en", "loan_partners_bn", "loan_partner_logos", "capacity_label_en", "capacity_label_bn", "terms_json", "duration_label", "duration_label_bn", "region_based", "is_active", "platform_fee", "logistics_fee", "warehouse_vet_fee", "start_date", "end_date", "capacity", "max_credit_amount", "status", "steps_json"],
     allowedUpdate: ["name_en", "name_bn", "interest_slug", "lender_name", "division", "district", "upazila", "image_url", "summary_en", "summary_bn", "market_overview_en", "market_overview_bn", "investment_amount", "income_amount", "income_label_en", "income_label_bn", "model_en", "model_bn", "loan_partners_en", "loan_partners_bn", "loan_partner_logos", "capacity_label_en", "capacity_label_bn", "terms_json", "duration_label", "duration_label_bn", "region_based", "is_active", "platform_fee", "logistics_fee", "warehouse_vet_fee", "start_date", "end_date", "capacity", "max_credit_amount", "status", "steps_json"],
-    defaults: { project_code: `PRJ-${Date.now()}`, name_en: "New partner project", capacity: 0, region_based: 1, is_active: 1, status: "draft" }
+    defaults: { project_code: code("PRJ"), name_en: "New partner project", capacity: 0, region_based: 1, is_active: 1, status: "draft" }
   },
   "partners/applications": {
     table: "partner_applications",
@@ -635,7 +647,7 @@ const configs: Record<string, ResourceConfig> = {
     `,
     allowedInsert: ["application_code", "user_id", "partner_project_id", "current_step", "full_name_per_nid", "nid_number", "total_land_decimals", "livestock_count", "primary_income_source", "annual_household_income", "mobile_banking_provider", "banking_json", "farm_assessment_json", "verification_notes", "status", "assigned_officer_id", "field_visit_date", "field_visit_note", "docs_verified_at", "contract_started_at", "progress_note"],
     allowedUpdate: ["current_step", "full_name_per_nid", "nid_number", "total_land_decimals", "livestock_count", "primary_income_source", "annual_household_income", "mobile_banking_provider", "banking_json", "farm_assessment_json", "verification_notes", "status", "assigned_officer_id", "approved_by", "approved_at", "field_visit_date", "field_visit_note", "docs_verified_at", "contract_started_at", "progress_note"],
-    defaults: { application_code: `KYC-${Date.now()}`, current_step: "project_selection", status: "draft" }
+    defaults: { application_code: code("KYC"), current_step: "project_selection", status: "draft" }
   },
   "partners/ledgers": simpleConfig(
     "project_ledgers",
@@ -1001,7 +1013,7 @@ const configs: Record<string, ResourceConfig> = {
     `,
     allowedInsert: ["full_name", "display_name", "phone", "email", "gender", "date_of_birth", "district", "upazila", "union_name", "village", "latitude", "longitude", "status", "profile_json"],
     allowedUpdate: ["full_name", "display_name", "phone", "email", "gender", "date_of_birth", "district", "upazila", "union_name", "village", "latitude", "longitude", "status", "profile_json"],
-    defaults: { full_name: "New user", phone: `01${Date.now().toString().slice(-9)}`, status: "active" }
+    defaults: { full_name: "New user", phone: () => `01${Date.now().toString().slice(-9)}`, status: "active" }
   },
   "app/user-roles": {
     table: "app_user_roles",
@@ -1201,7 +1213,11 @@ function normalizePayload(payload: Record<string, unknown>, config: ResourceConf
     if (aliased[key] === "") aliased[key] = blank;
   }
 
-  const source = mode === "insert" ? { ...config.defaults, ...aliased } : aliased;
+  // Defaults may be functions (unique codes), evaluated per insert.
+  const defaults = mode === "insert"
+    ? Object.fromEntries(Object.entries(config.defaults ?? {}).map(([k, v]) => [k, typeof v === "function" ? (v as () => unknown)() : v]))
+    : {};
+  const source = mode === "insert" ? { ...defaults, ...aliased } : aliased;
   const entries = Object.entries(source)
     .filter(([key, value]) => allowed.includes(key) && value !== undefined && value !== "")
     .map(([key, value]) => {
@@ -1485,6 +1501,8 @@ export async function updateResource(resource: string, id: string, payload: Reco
       const event = ORDER_STATUS_EVENT[data.fulfillment_status];
       const alreadyOnTheWay = ["assigned", "in_transit"].includes(String(before?.fulfillment_status));
       if (event && !(event === "order_on_the_way" && alreadyOnTheWay)) await notifyOrder(id, event);
+      // A completed purchase is worth telling the neighbourhood about.
+      if (data.fulfillment_status === "delivered") await postOrderCompleted(id);
     }
     if (typeof data.payment_status === "string" && data.payment_status !== before?.payment_status) {
       await recordOrderEvent(id, data.payment_status, { kind: "payment" });
@@ -1494,6 +1512,11 @@ export async function updateResource(resource: string, id: string, payload: Reco
     await syncOrderPromotion(id);
   }
   return { affectedRows: result.affectedRows, changedRows: (result as ResultSetHeader).changedRows };
+}
+
+/** The table behind a resource key, for read-only schema questions. */
+export function resourceTable(resource: string): string | null {
+  return configs[resource]?.table ?? null;
 }
 
 export async function deleteResource(resource: string, id: string) {

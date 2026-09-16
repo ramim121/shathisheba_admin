@@ -57,21 +57,22 @@ function buildSteps(
 // Sale listing
 // ---------------------------------------------------------------------------
 
-// The six milestones a farmer is told about. The number is the step the
-// listing is standing on (0-based): `submitted` means step 1 is done and field
-// verification is next. `sold` is the old word for a contracted animal.
+// The six milestones a farmer is told about, as the count of completed steps:
+// `submitted` means step 1 is done and field verification is next. There is no
+// approval step — verification is the milestone. `active`/`sold` are the old
+// words, kept so listings created before the change still read correctly.
 const LISTING_STAGE_BY_STATUS: Record<string, number> = {
   draft: 0,
   submitted: 1,
   field_verification: 1,
-  verified: 2,
+  verified: 3,
   active: 3,
   contracted: 4,
   sold: 4,
   shipped: 5,
   paid: 6,
-  rejected: 1,
-  cancelled: 1
+  cancelled: 1,
+  rejected: 5
 };
 
 // GET /api/v1/app/sale/listing-progress?listing_id=&user_id=
@@ -82,7 +83,8 @@ export async function getListingProgress(listingId?: string | null, userId?: str
       SELECT CAST(l.id AS CHAR) AS id, l.listing_code, l.title_en, l.title_bn,
              l.status, l.weight_kg, l.meat_weight_kg, l.dressing_pct,
              l.quantity, l.unit, l.farmer_expected_price, l.estimated_earning,
-             l.created_at, l.approved_at, l.field_visit_date, l.field_visit_note,
+             l.created_at, l.field_visit_date, l.field_visit_note,
+             l.cancelled_at, l.cancel_reason, l.rejected_at, l.reject_reason,
              l.verified_weight_kg, l.paid_at, l.paid_amount, l.payment_method,
              l.payment_reference, l.media_json,
              l.verified_at, l.contracted_at, l.shipped_at,
@@ -114,6 +116,34 @@ export async function getListingProgress(listingId?: string | null, userId?: str
   const listing = rows[0];
   if (!listing) return null;
 
+  // Everything the field officer has recorded so far. The app shows each block
+  // as it appears, so the farmer watches their listing being filled in.
+  const [verification] = await queryRows<Row>(
+    `SELECT visit_date, verified_at, verified_weight_kg, result, tag_number, unique_mark,
+            dentition, estimated_age_months, legs_condition, body_condition_score, health_notes,
+            (SELECT name FROM zone_officers WHERE id = listing_field_verifications.officer_id) AS officer_name
+       FROM listing_field_verifications WHERE listing_id = ? LIMIT 1`,
+    [listingId]
+  );
+  const vaccinations = await queryRows<Row>(
+    `SELECT CAST(id AS CHAR) AS id, vaccine_name, dose_no, given_on, next_due_on, vet_name, notes
+       FROM listing_vaccinations WHERE listing_id = ? ORDER BY COALESCE(given_on, created_at) DESC, id DESC`,
+    [listingId]
+  );
+  const [animalProfile] = await queryRows<Row>(
+    `SELECT deworming_on, last_treatment_on, last_treatment_note, feed_type, feeding_note, housing_type,
+            horn_status, is_castrated, temperament, colour, distinguishing_marks, insurance_ref,
+            vet_name, vet_phone, health_notes
+       FROM listing_animal_profile WHERE listing_id = ? LIMIT 1`,
+    [listingId]
+  );
+  const [shipment] = await queryRows<Row>(
+    `SELECT dispatched_at, vehicle_type, vehicle_ref, driver_name, driver_phone, transporter,
+            expected_arrival_at, arrived_at, loading_weight_kg, condition_note
+       FROM listing_shipments WHERE listing_id = ? LIMIT 1`,
+    [listingId]
+  );
+
   const status = String(listing.status ?? "submitted");
   const rejected = status === "rejected" || status === "cancelled";
   const reached = LISTING_STAGE_BY_STATUS[status] ?? 1;
@@ -143,12 +173,12 @@ export async function getListingProgress(listingId?: string | null, userId?: str
         note: (listing.field_visit_note as string) ?? null
       },
       {
-        key: "profile_approved",
-        title_en: "Product profile approved",
-        title_bn: "পণ্য প্রোফাইল অনুমোদিত",
-        desc_en: "Photos, identity and weight confirmed",
-        desc_bn: "ছবি, পরিচয় ও ওজন নিশ্চিত",
-        date: isoDay(listing.approved_at),
+        key: "verified",
+        title_en: "Verified",
+        title_bn: "যাচাই সম্পন্ন",
+        desc_en: "Photos, identity and weight confirmed by the officer",
+        desc_bn: "কর্মকর্তা ছবি, পরিচয় ও ওজন নিশ্চিত করেছেন",
+        date: isoDay(listing.verified_at),
         note: listing.verified_weight_kg ? `Verified ${Number(listing.verified_weight_kg)} kg` : null,
         note_bn: listing.verified_weight_kg ? `যাচাইকৃত ${bnDigits(Number(listing.verified_weight_kg))} কেজি` : null
       },
@@ -198,6 +228,29 @@ export async function getListingProgress(listingId?: string | null, userId?: str
     reference: listing.listing_code,
     status,
     rejected,
+    // Closed listings stay visible to the farmer, with the reason.
+    closed: status === "cancelled" || status === "rejected"
+      ? {
+          kind: status,
+          at: listing.cancelled_at ?? listing.rejected_at ?? null,
+          reason: (listing.cancel_reason ?? listing.reject_reason ?? null) as string | null
+        }
+      : null,
+    field_verification: verification ?? null,
+    vaccinations,
+    animal_profile: animalProfile ?? null,
+    shipment: shipment ?? null,
+    contract: listing.contract_ref
+      ? {
+          contract_ref: listing.contract_ref,
+          agreed_rate_per_kg: listing.agreed_rate_per_kg,
+          contract_amount: listing.contract_amount,
+          advance_amount: listing.advance_amount,
+          handover_at: listing.handover_at,
+          dispatched_at: listing.dispatched_at,
+          received_at: listing.received_at
+        }
+      : null,
     steps,
     // The officer covering the listing's own area — the place the animal is.
     officer: await findFieldOfficer({

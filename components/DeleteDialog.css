@@ -1,0 +1,326 @@
+/* The delete-impact modal. Rendered into <body> through a portal, so the
+   table's own overflow and stacking context cannot clip it. */
+
+.ddlg-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(27, 16, 24, 0.55);
+  backdrop-filter: blur(2px);
+  overscroll-behavior: contain;
+}
+
+.ddlg {
+  display: flex;
+  flex-direction: column;
+  width: min(720px, 100%);
+  max-height: min(86vh, 760px);
+  border-radius: 16px;
+  border: 1px solid var(--rose-line, #ead8e3);
+  background: var(--surface, #fff);
+  box-shadow: 0 32px 80px rgba(27, 16, 24, 0.35);
+  overflow: hidden;
+}
+
+.ddlg:focus {
+  outline: none;
+}
+
+.ddlg-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 20px 22px 16px;
+  border-bottom: 1px solid #F0E5EC;
+}
+
+.ddlg-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: #FDEEEE;
+  color: #C0362C;
+}
+
+.ddlg-head h2 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 750;
+  line-height: 1.25;
+  color: var(--ink, #21151d);
+}
+
+.ddlg-head p {
+  margin: 4px 0 0;
+  color: var(--muted, #76576b);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.ddlg-close {
+  margin-left: auto;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  border: 1px solid transparent;
+  background: none;
+  color: var(--muted, #76576b);
+  cursor: pointer;
+}
+
+.ddlg-close:hover {
+  background: #F6EEF2;
+  color: var(--ink, #21151d);
+}
+
+.ddlg-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 18px 22px;
+  display: grid;
+  gap: 14px;
+}
+
+.ddlg-record {
+  border: 1px solid var(--rose-line, #ead8e3);
+  border-radius: 12px;
+  background: #FCF8FA;
+  padding: 12px 14px;
+}
+
+.ddlg-record-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 750;
+  color: var(--ink, #21151d);
+  word-break: break-word;
+}
+
+.ddlg-record-meta {
+  margin: 4px 0 0;
+  color: var(--muted, #76576b);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ddlg-record-meta code {
+  background: #F1E7ED;
+  border-radius: 5px;
+  padding: 1px 5px;
+  font-size: 11.5px;
+}
+
+.ddlg-group h3 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 8px;
+  font-size: 13.5px;
+  font-weight: 750;
+  color: var(--ink, #21151d);
+}
+
+.ddlg-group.is-danger h3 {
+  color: #8A1F1F;
+}
+
+.ddlg-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+
+.ddlg-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  border: 1px solid #EFE6EB;
+  border-radius: 10px;
+  padding: 9px 12px;
+  background: #fff;
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+
+.ddlg-group.is-danger .ddlg-list li {
+  border-color: #F2C9C6;
+  background: #FFF8F8;
+}
+
+.ddlg-count {
+  flex: none;
+  min-width: 46px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: #C0362C;
+}
+
+.ddlg-table {
+  margin-left: auto;
+  flex: none;
+  color: #9C8794;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.ddlg-note {
+  margin: 0;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.ddlg-note.is-plain {
+  border: 1px dashed var(--rose-line, #ead8e3);
+  background: #FCFAFB;
+  color: var(--muted, #76576b);
+}
+
+.ddlg-note.is-warn {
+  border: 1px solid #F2D891;
+  background: #FFF8E6;
+  color: #7A5A06;
+  font-weight: 600;
+}
+
+.ddlg-note.is-error {
+  border: 1px solid #F2B8B8;
+  background: #FDEEEE;
+  color: #8A1F1F;
+  font-weight: 650;
+}
+
+.ddlg-loading {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--muted, #76576b);
+  font-size: 13px;
+  padding: 10px 0;
+}
+
+.ddlg-spin {
+  animation: ddlg-spin 0.9s linear infinite;
+}
+
+@keyframes ddlg-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ddlg-spin { animation: none; }
+}
+
+.ddlg-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 22px;
+  border-top: 1px solid #F0E5EC;
+  background: #FCFAFB;
+}
+
+.ddlg-foot-note {
+  margin-right: auto;
+  color: var(--muted, #76576b);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ddlg-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border-radius: 10px;
+  padding: 9px 15px;
+  font-size: 13.5px;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1px solid var(--rose-line, #ead8e3);
+  background: #fff;
+  color: var(--ink, #21151d);
+}
+
+.ddlg-btn:hover:not(:disabled) {
+  background: #F6EEF2;
+}
+
+.ddlg-btn.is-danger {
+  border-color: #A32B22;
+  background: #C0362C;
+  color: #fff;
+}
+
+.ddlg-btn.is-danger:hover:not(:disabled) {
+  background: #A32B22;
+}
+
+.ddlg-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.ddlg-btn:focus-visible,
+.ddlg-close:focus-visible {
+  outline: 2px solid var(--brand, #7B1536);
+  outline-offset: 2px;
+}
+
+@media (max-width: 640px) {
+  .ddlg-backdrop {
+    padding: 0;
+    align-items: flex-end;
+  }
+
+  .ddlg {
+    width: 100%;
+    max-height: 92vh;
+    border-radius: 16px 16px 0 0;
+  }
+
+  .ddlg-head,
+  .ddlg-body,
+  .ddlg-foot {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+
+  .ddlg-foot {
+    flex-wrap: wrap;
+  }
+
+  .ddlg-foot-note {
+    width: 100%;
+    margin: 0 0 4px;
+  }
+
+  .ddlg-btn {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+
+  .ddlg-list li {
+    flex-wrap: wrap;
+  }
+
+  .ddlg-table {
+    margin-left: 0;
+    width: 100%;
+  }
+}

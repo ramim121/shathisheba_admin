@@ -3,13 +3,20 @@ import type { Row } from "./shared";
 import { getListingProgress } from "./progress";
 import { ruleFees } from "@/lib/pricing";
 import { notifyListing, reasonVars } from "@/lib/notices";
+import { postListingMilestone } from "@/lib/community-posts";
 import type { Vars } from "@/lib/notify";
 
 /**
  * The admin side of a sale listing's six steps:
  *
- *   1 Submitted -> 2 Field verification -> 3 Product profile approved
- *   -> 4 Purchase contract accepted -> 5 Product shipped -> 6 Payment
+ *   1 Submitted -> 2 Field verification -> 3 Verified
+ *   -> 4 Purchase contract -> 5 Shipped -> 6 Payment
+ *
+ * There is no approval step and a listing never becomes a Buy-from-Shathi
+ * product: the console records each section, and the status follows from what
+ * has been saved. Cancel closes a listing at any point; Reject is the
+ * post-shipping outcome. Both stay in the database, stay visible to the farmer,
+ * and are excluded from every count.
  *
  * Step 2 is the field officer's photo checklist. Steps 4-6 carry the post-sale
  * flow: A handover (farmer signs custody transfer after the advance) -> B
@@ -43,7 +50,7 @@ export const CHECKLIST_ITEMS = [
   { key: "tag_mark", label: "Tag / mark", detail: "Ear tag or unique visible feature" }
 ] as const;
 
-const MANUAL_STATUSES = ["submitted", "field_verification", "verified", "active", "contracted", "shipped", "paid", "rejected", "cancelled"];
+const MANUAL_STATUSES = ["draft", "submitted", "field_verification", "verified", "contracted", "shipped", "paid", "cancelled", "rejected"];
 
 // Marks a column to be written as NOW() on the database clock.
 const NOW = Symbol("now");
@@ -79,6 +86,21 @@ function required<T>(v: T | null, label: string): T {
   return v;
 }
 
+/** Accepts ["url", ...] or [{url,name}, ...] from the console. */
+function docs(v: unknown): { url: string; name: string }[] {
+  const raw = typeof v === "string" ? (() => { try { return JSON.parse(v); } catch { return []; } })() : v;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((entry) => {
+      if (typeof entry === "string") return { url: entry, name: entry.split("/").pop() ?? "document" };
+      const e = entry as Row;
+      const url = String(e.url ?? "");
+      return url ? { url, name: String(e.name ?? url.split("/").pop() ?? "document").slice(0, 190) } : null;
+    })
+    .filter(Boolean)
+    .slice(0, 20) as { url: string; name: string }[];
+}
+
 function parseJson(v: unknown): Row {
   if (!v) return {};
   if (typeof v === "object") return v as Row;
@@ -87,7 +109,7 @@ function parseJson(v: unknown): Row {
 
 // Insert-or-update of the one row a listing has in a side table. Column names
 // come from this file only, never from the request.
-async function upsert(tx: Tx, table: "listing_contracts" | "listing_field_verifications", listingId: number, fields: Record<string, unknown>) {
+async function upsert(tx: Tx, table: "listing_contracts" | "listing_field_verifications" | "listing_animal_profile" | "listing_shipments", listingId: number, fields: Record<string, unknown>) {
   const cols = Object.keys(fields).filter((k) => fields[k] !== undefined);
   const values = cols.filter((c) => fields[c] !== NOW).map((c) => fields[c]);
   const marks = cols.map((c) => (fields[c] === NOW ? "NOW()" : "?"));
@@ -104,6 +126,18 @@ function netFarmerRate(r: Row): number | null {
   return ruleFees(r).net;
 }
 
+// The sections the console saves one at a time, and the status each one leaves
+// behind. Nothing here is an "approval": a section is saved, and the listing's
+// status is a consequence of what has been recorded so far.
+export const SECTIONS = [
+  { key: "field_verification", label: "Field verification", status_after: "verified", hint: "Visit, photos, checklist, verified weight" },
+  { key: "vaccination", label: "Vaccination & health", status_after: null, hint: "Doses given, next due, vet — all optional" },
+  { key: "animal_profile", label: "Animal profile", status_after: null, hint: "Feed, housing, marks, insurance — all optional" },
+  { key: "contract", label: "Purchase contract", status_after: "contracted", hint: "Buyer, agreed rate and weight, advance, papers" },
+  { key: "shipping", label: "Shipping", status_after: "shipped", hint: "Dispatch, vehicle, driver, arrival, documents" },
+  { key: "payment", label: "Payment to farmer", status_after: "paid", hint: "Amount, method, reference" }
+] as const;
+
 // GET /api/v1/admin/sale/listing-workflow?listing_id=
 export async function getListingWorkflow(listingId?: string | number | null) {
   if (!listingId) throw new Error("listing_id is required.");
@@ -111,9 +145,10 @@ export async function getListingWorkflow(listingId?: string | number | null) {
     `SELECT CAST(l.id AS CHAR) AS id, l.listing_code, l.title_en, l.title_bn, l.status, l.description,
             l.age_months, l.weight_kg, l.meat_weight_kg, l.dressing_pct, l.quantity, l.unit,
             l.farmer_expected_price, l.estimated_earning, l.contact_phone, l.contact_name, l.address_text,
-            l.media_json, l.ai_analysis_json, l.created_at, l.approved_at, l.field_visit_date, l.field_visit_note,
+            l.media_json, l.ai_analysis_json, l.created_at, l.field_visit_date, l.field_visit_note,
             l.verified_weight_kg, l.verified_at, l.contracted_at, l.shipped_at,
             l.paid_at, l.paid_amount, l.payment_method, l.payment_reference,
+            l.cancelled_at, l.cancel_reason, l.rejected_at, l.reject_reason,
             CAST(l.user_id AS CHAR) AS user_id, u.full_name AS farmer_name, u.phone AS farmer_phone,
             si.name_en AS item_name, sc.name_en AS category_name, a.name_en AS animal_name, b.name_en AS breed_name,
             gu.name_en AS upazila_name, gd.name_en AS district_name, gv.name_en AS division_name,
@@ -145,11 +180,20 @@ export async function getListingWorkflow(listingId?: string | number | null) {
 
   const [verification] = await queryRows<Row>("SELECT * FROM listing_field_verifications WHERE listing_id = ? LIMIT 1", [listingId]);
   const [contract] = await queryRows<Row>("SELECT * FROM listing_contracts WHERE listing_id = ? LIMIT 1", [listingId]);
+  const [profile] = await queryRows<Row>("SELECT * FROM listing_animal_profile WHERE listing_id = ? LIMIT 1", [listingId]);
+  const [shipment] = await queryRows<Row>("SELECT * FROM listing_shipments WHERE listing_id = ? LIMIT 1", [listingId]);
+  const vaccinations = await queryRows<Row>(
+    `SELECT CAST(id AS CHAR) AS id, vaccine_name, dose_no, given_on, next_due_on, vet_name, batch_no, notes,
+            document_url, created_at, updated_at
+       FROM listing_vaccinations WHERE listing_id = ? ORDER BY COALESCE(given_on, created_at) DESC, id DESC`,
+    [listingId]
+  );
   const officers = await queryRows<Row>(
     `SELECT CAST(id AS CHAR) AS id, name, phone, district, upazila FROM zone_officers
       WHERE is_active = 1 AND officer_role = 'field_officer' ORDER BY name`
   );
   const progress = await getListingProgress(String(listingId), null);
+  const status = String(listing.status);
 
   return {
     listing,
@@ -173,12 +217,29 @@ export async function getListingWorkflow(listingId?: string | number | null) {
     verification: verification
       ? { ...verification, photos_json: parseJson(verification.photos_json), checklist_json: parseJson(verification.checklist_json) }
       : null,
-    contract: contract ?? null,
+    contract: contract ? { ...contract, documents_json: docs(contract.documents_json) } : null,
+    animal_profile: profile ?? null,
+    shipment: shipment ? { ...shipment, documents_json: docs(shipment.documents_json) } : null,
+    vaccinations,
     officers,
     steps: progress?.steps ?? [],
     photo_slots: PHOTO_SLOTS,
     checklist_items: CHECKLIST_ITEMS,
-    statuses: MANUAL_STATUSES
+    sections: SECTIONS.map((s) => ({
+      ...s,
+      saved_at:
+        s.key === "field_verification" ? verification?.updated_at ?? null
+          : s.key === "contract" ? contract?.updated_at ?? null
+          : s.key === "shipping" ? shipment?.updated_at ?? null
+          : s.key === "animal_profile" ? profile?.updated_at ?? null
+          : s.key === "vaccination" ? vaccinations[0]?.updated_at ?? null
+          : listing.paid_at ?? null
+    })),
+    statuses: MANUAL_STATUSES,
+    closed: status === "cancelled" || status === "rejected",
+    can_cancel: !["cancelled", "rejected"].includes(status),
+    // Rejection is the post-shipping outcome: the buyer refused what arrived.
+    can_reject: ["shipped", "paid"].includes(status)
   };
 }
 
@@ -188,6 +249,8 @@ export async function saveListingWorkflow(payload: Row, adminId: unknown) {
   if (!listingId) throw new Error("listing_id is required.");
   const action = String(payload.action ?? "");
   const d = (payload.data ?? {}) as Row;
+  // What the action ended up doing, for the notification/community step below.
+  let outcome = "";
 
   await withTransaction(async (tx) => {
     const [l] = await tx.query<Row>(
@@ -200,18 +263,17 @@ export async function saveListingWorkflow(payload: Row, adminId: unknown) {
     const [c] = await tx.query<Row>("SELECT * FROM listing_contracts WHERE listing_id = ? LIMIT 1", [listingId]);
     const setListing = (sql: string, values: unknown[]) => tx.execute(`UPDATE sale_listings SET ${sql} WHERE id = ?`, [...values, listingId]);
     const need = (ok: boolean, message: string) => { if (!ok) throw new Error(message); };
+    // A closed listing is a record, not a workspace.
+    const open = () => need(!["cancelled", "rejected"].includes(status), "This listing is closed; reopen it by setting a status before editing.");
 
     switch (action) {
-      // --- Step 2: field verification -----------------------------------
-      case "schedule_visit": {
-        need(["draft", "submitted", "field_verification"].includes(status), "Field verification is already complete for this listing.");
-        const visit = required(dt(d.visit_date, true), "Visit date");
-        await upsert(tx, "listing_field_verifications", listingId, { visit_date: visit, officer_id: num(d.officer_id, "Officer") });
-        await setListing("status = 'field_verification', field_visit_date = ?", [visit]);
-        return;
-      }
+      // --- Field verification -------------------------------------------
+      // One section: schedule the visit, record the visit, or both. The result
+      // decides whether the listing becomes verified.
+      case "schedule_visit":
+      case "save_field_verification":
       case "save_verification": {
-        need(["submitted", "field_verification", "verified"].includes(status), "The profile is already approved; verification can no longer change.");
+        open();
         const photos: Record<string, string> = {};
         const inPhotos = parseJson(d.photos);
         for (const slot of PHOTO_SLOTS) {
@@ -229,17 +291,14 @@ export async function saveListingWorkflow(payload: Row, adminId: unknown) {
         }
         const result = ["pending", "passed", "failed", "recheck"].includes(String(d.result)) ? String(d.result) : "pending";
         const weight = num(d.verified_weight_kg, "Verified weight");
-        if (result === "passed") {
-          const missing = PHOTO_SLOTS.filter((s) => !photos[s.key]).map((s) => s.label);
-          need(!missing.length, `Photos still needed: ${missing.join(", ")}.`);
-          const unchecked = CHECKLIST_ITEMS.filter((i) => !checklist[i.key].ok).map((i) => i.label);
-          need(!unchecked.length, `Checklist items not confirmed: ${unchecked.join(", ")}.`);
-          need(weight !== null && weight > 0, "Verified weight is required to pass verification.");
-        }
+        // Only the weight is insisted on, and only to pass: everything else is
+        // evidence the officer adds as they get it.
+        if (result === "passed") need(weight !== null && weight > 0, "Record the verified weight before marking verification passed.");
         const legs = ["good", "minor_issue", "lame", "injured"].includes(String(d.legs_condition)) ? String(d.legs_condition) : null;
+        const visit = dt(d.visit_date, true) ?? (v?.visit_date ? String(v.visit_date).slice(0, 10) : null);
         await upsert(tx, "listing_field_verifications", listingId, {
           officer_id: num(d.officer_id, "Officer") ?? v?.officer_id ?? null,
-          visit_date: dt(d.visit_date, true) ?? v?.visit_date ?? null,
+          visit_date: visit,
           photos_json: JSON.stringify(photos),
           checklist_json: JSON.stringify(checklist),
           dentition: text(d.dentition, 80),
@@ -255,69 +314,176 @@ export async function saveListingWorkflow(payload: Row, adminId: unknown) {
           verified_at: result === "passed" ? NOW : null
         });
         if (result === "passed") {
-          await setListing("status = 'verified', verified_weight_kg = ?, verified_at = NOW(), field_visit_note = COALESCE(?, field_visit_note)", [weight, text(d.health_notes, 5000)]);
-        } else if (result === "failed") {
-          await setListing("status = 'rejected', field_visit_note = COALESCE(?, field_visit_note)", [text(d.health_notes, 5000)]);
+          await setListing(
+            "status = 'verified', verified_weight_kg = ?, verified_at = NOW(), field_visit_date = COALESCE(?, field_visit_date), field_visit_note = COALESCE(?, field_visit_note)",
+            [weight, visit, text(d.health_notes, 5000)]
+          );
+          outcome = "verified";
         } else {
-          await setListing("status = 'field_verification'", []);
+          // Anything short of a pass keeps the listing in verification; a failed
+          // check is a note, not a rejection (rejection is a deliberate button).
+          const wasScheduled = Boolean(v?.visit_date);
+          await setListing(
+            "status = IF(status IN ('draft','submitted','field_verification'), 'field_verification', status), field_visit_date = COALESCE(?, field_visit_date), field_visit_note = COALESCE(?, field_visit_note)",
+            [visit, text(d.health_notes, 5000)]
+          );
+          if (visit && !wasScheduled) outcome = "visit_scheduled";
         }
         return;
       }
-      // --- Step 3: product profile approved ------------------------------
-      case "approve_profile": {
-        need(status === "verified", "Pass field verification before approving the product profile.");
-        need(String(v?.result) === "passed", "Field verification has not passed.");
-        await setListing("status = 'active', approved_by = ?, approved_at = NOW()", [adminId ?? null]);
+
+      // --- Vaccination & health ------------------------------------------
+      case "save_vaccination": {
+        open();
+        const name = required(text(d.vaccine_name, 160), "Vaccine name");
+        const fields = {
+          vaccine_name: name,
+          dose_no: text(d.dose_no, 40),
+          given_on: dt(d.given_on, true),
+          next_due_on: dt(d.next_due_on, true),
+          vet_name: text(d.vet_name, 160),
+          batch_no: text(d.batch_no, 80),
+          notes: text(d.notes, 500),
+          document_url: text(d.document_url, 500),
+          recorded_by: adminId ?? null
+        };
+        const id = d.id ? Number(d.id) : 0;
+        if (id) {
+          const cols = Object.keys(fields);
+          await tx.execute(
+            `UPDATE listing_vaccinations SET ${cols.map((c) => `\`${c}\` = ?`).join(", ")} WHERE id = ? AND listing_id = ?`,
+            [...cols.map((c) => (fields as Row)[c]), id, listingId]
+          );
+        } else {
+          const cols = Object.keys(fields);
+          await tx.execute(
+            `INSERT INTO listing_vaccinations (listing_id, ${cols.map((c) => `\`${c}\``).join(", ")})
+             VALUES (?, ${cols.map(() => "?").join(", ")})`,
+            [listingId, ...cols.map((c) => (fields as Row)[c])]
+          );
+        }
         return;
       }
-      // --- Step 4: purchase contract accepted ----------------------------
+      case "delete_vaccination": {
+        open();
+        const id = required(num(d.id, "Vaccination"), "Vaccination");
+        await tx.execute("DELETE FROM listing_vaccinations WHERE id = ? AND listing_id = ?", [id, listingId]);
+        return;
+      }
+
+      // --- Animal profile (every field optional) ---------------------------
+      case "save_animal_profile": {
+        open();
+        const horn = ["intact", "dehorned", "polled"].includes(String(d.horn_status)) ? String(d.horn_status) : null;
+        const temperament = ["calm", "normal", "aggressive"].includes(String(d.temperament)) ? String(d.temperament) : null;
+        await upsert(tx, "listing_animal_profile", listingId, {
+          deworming_on: dt(d.deworming_on, true),
+          last_treatment_on: dt(d.last_treatment_on, true),
+          last_treatment_note: text(d.last_treatment_note, 400),
+          feed_type: text(d.feed_type, 160),
+          feeding_note: text(d.feeding_note, 400),
+          housing_type: text(d.housing_type, 160),
+          horn_status: horn,
+          is_castrated: flag(d.is_castrated),
+          temperament,
+          colour: text(d.colour, 120),
+          distinguishing_marks: text(d.distinguishing_marks, 400),
+          insurance_ref: text(d.insurance_ref, 120),
+          vet_name: text(d.vet_name, 160),
+          vet_phone: text(d.vet_phone, 32),
+          health_notes: text(d.health_notes, 5000),
+          updated_by: adminId ?? null
+        });
+        return;
+      }
+
+      // --- Purchase contract ------------------------------------------------
+      case "save_contract":
       case "accept_contract": {
-        need(["active", "contracted"].includes(status), "Approve the product profile before recording a contract.");
-        const rate = required(num(d.agreed_rate_per_kg, "Agreed rate"), "Agreed rate per kg");
+        open();
+        const rate = num(d.agreed_rate_per_kg, "Agreed rate");
         const weight = num(d.agreed_weight_kg, "Agreed weight") ?? (l.verified_weight_kg === null ? null : Number(l.verified_weight_kg));
-        required(weight, "Agreed weight");
+        const buyer = required(text(d.buyer_name, 190), "Buyer name");
         await upsert(tx, "listing_contracts", listingId, {
           contract_ref: text(d.contract_ref, 60) ?? c?.contract_ref ?? `PC-${l.listing_code}`,
-          buyer_name: required(text(d.buyer_name, 190), "Buyer name"),
+          buyer_name: buyer,
           buyer_phone: text(d.buyer_phone, 32),
           buyer_org: text(d.buyer_org, 190),
           agreed_rate_per_kg: rate,
           agreed_weight_kg: weight,
-          contract_amount: num(d.contract_amount, "Contract amount") ?? Math.round(rate * Number(weight) * 100) / 100,
-          weight_tolerance_pct: num(d.weight_tolerance_pct, "Weight tolerance") ?? 3,
+          contract_amount: num(d.contract_amount, "Contract amount")
+            ?? (rate !== null && weight !== null ? Math.round(rate * Number(weight) * 100) / 100 : null),
+          weight_tolerance_pct: num(d.weight_tolerance_pct, "Weight tolerance") ?? c?.weight_tolerance_pct ?? 3,
           advance_amount: num(d.advance_amount, "Advance"),
+          advance_paid_at: dt(d.advance_paid_at),
           payment_terms_days: num(d.payment_terms_days, "Payment terms"),
+          payment_due_at: dt(d.payment_due_at, true),
+          bank_account_ref: text(d.bank_account_ref, 120),
+          signed_by: text(d.signed_by, 190),
+          signed_at: dt(d.signed_at),
+          contract_file_url: text(d.contract_file_url, 500),
+          documents_json: d.documents === undefined ? undefined : JSON.stringify(docs(d.documents)),
+          notes: text(d.notes, 5000),
           accepted_at: c?.accepted_at ? undefined : NOW
         });
-        await setListing("status = 'contracted', contracted_at = COALESCE(contracted_at, NOW())", []);
+        // A contract exists, so the listing is contracted — unless it has
+        // already moved further down the line.
+        if (!["shipped", "paid"].includes(status)) {
+          await setListing("status = 'contracted', contracted_at = COALESCE(contracted_at, NOW())", []);
+          outcome = "contracted";
+        }
         return;
       }
-      // --- A. Handover ----------------------------------------------------
+
+      // --- Shipping -----------------------------------------------------------
+      case "save_shipping":
+      case "dispatch": {
+        open();
+        need(Boolean(c?.buyer_name) || Boolean(d.allow_without_contract), "Record the purchase contract before shipping.");
+        await upsert(tx, "listing_shipments", listingId, {
+          dispatched_at: dt(d.dispatched_at) ?? NOW,
+          vehicle_type: text(d.vehicle_type, 80),
+          vehicle_ref: text(d.vehicle_ref, 80),
+          driver_name: text(d.driver_name, 160),
+          driver_phone: text(d.driver_phone, 32),
+          transporter: text(d.transporter, 190),
+          from_address: text(d.from_address, 400),
+          to_address: text(d.to_address, 400),
+          expected_arrival_at: dt(d.expected_arrival_at),
+          arrived_at: dt(d.arrived_at),
+          loading_weight_kg: num(d.loading_weight_kg, "Loading weight"),
+          condition_note: text(d.condition_note, 5000),
+          documents_json: d.documents === undefined ? undefined : JSON.stringify(docs(d.documents)),
+          updated_by: adminId ?? null
+        });
+        // Keep the older contract-side dispatch columns in step for the
+        // post-sale reports that already read them.
+        await upsert(tx, "listing_contracts", listingId, {
+          dispatched_at: dt(d.dispatched_at) ?? NOW,
+          vehicle_ref: text(d.vehicle_ref, 80),
+          driver_phone: text(d.driver_phone, 32),
+          digital_record_ref: text(d.digital_record_ref, 80) ?? c?.digital_record_ref ?? `${l.listing_code}${v?.tag_number ? `/${v.tag_number}` : ""}`
+        });
+        if (status !== "paid") {
+          await setListing("status = 'shipped', shipped_at = COALESCE(shipped_at, NOW())", []);
+          outcome = "shipped";
+        }
+        return;
+      }
+
+      // --- Post-sale detail kept from the older flow -------------------------
       case "handover": {
-        need(status === "contracted" && Boolean(c), "Record the purchase contract first.");
+        open();
         await upsert(tx, "listing_contracts", listingId, {
           advance_paid_at: dt(d.advance_paid_at) ?? NOW,
           handover_at: dt(d.handover_at) ?? NOW,
-          handover_signed_by: required(text(d.handover_signed_by, 190), "Signed by"),
+          handover_signed_by: text(d.handover_signed_by, 190),
           handover_note: text(d.handover_note, 5000)
         });
         return;
       }
-      // --- B. Transport = step 5, product shipped -------------------------
-      case "dispatch": {
-        need(Boolean(c?.handover_at), "Complete the handover (A) before dispatch.");
-        await upsert(tx, "listing_contracts", listingId, {
-          dispatched_at: dt(d.dispatched_at) ?? NOW,
-          vehicle_ref: required(text(d.vehicle_ref, 80), "Vehicle"),
-          driver_phone: text(d.driver_phone, 32),
-          digital_record_ref: text(d.digital_record_ref, 80) ?? `${l.listing_code}${v?.tag_number ? `/${v.tag_number}` : ""}`
-        });
-        await setListing("status = 'shipped', shipped_at = COALESCE(shipped_at, NOW())", []);
-        return;
-      }
-      // --- C. Receive -----------------------------------------------------
       case "receive": {
-        need(Boolean(c?.dispatched_at), "Dispatch (B) comes before the buyer receives.");
+        open();
         const received = required(num(d.received_weight_kg, "Received weight"), "Received weight");
         const agreed = Number(c?.agreed_weight_kg ?? 0);
         const tolerance = Number(c?.weight_tolerance_pct ?? 3);
@@ -330,11 +496,11 @@ export async function saveListingWorkflow(payload: Row, adminId: unknown) {
           weight_within_tolerance: within === null ? null : within ? 1 : 0,
           receive_note: text(d.receive_note, 5000)
         });
+        await upsert(tx, "listing_shipments", listingId, { arrived_at: dt(d.received_at) ?? NOW });
         return;
       }
-      // --- D. Invoice -----------------------------------------------------
       case "invoice": {
-        need(Boolean(c?.received_at), "The buyer must receive (C) before invoicing.");
+        open();
         const amount = num(d.invoice_amount, "Invoice amount")
           ?? Math.round(Number(c?.received_weight_kg ?? 0) * Number(c?.agreed_rate_per_kg ?? 0) * 100) / 100;
         await upsert(tx, "listing_contracts", listingId, {
@@ -343,7 +509,6 @@ export async function saveListingWorkflow(payload: Row, adminId: unknown) {
           invoiced_at: dt(d.invoiced_at) ?? NOW,
           payment_due_at: dt(d.payment_due_at, true)
         });
-        // Acceptance starts the payment clock: due = invoice date + agreed terms.
         await tx.execute(
           `UPDATE listing_contracts SET payment_due_at = DATE_ADD(DATE(invoiced_at), INTERVAL COALESCE(payment_terms_days, 0) DAY)
             WHERE listing_id = ? AND payment_due_at IS NULL`,
@@ -351,9 +516,8 @@ export async function saveListingWorkflow(payload: Row, adminId: unknown) {
         );
         return;
       }
-      // --- E. Collection --------------------------------------------------
       case "collect": {
-        need(Boolean(c?.invoiced_at), "Invoice (D) the buyer before recording collection.");
+        open();
         await upsert(tx, "listing_contracts", listingId, {
           collected_at: dt(d.collected_at) ?? NOW,
           collected_amount: required(num(d.collected_amount, "Collected amount"), "Collected amount"),
@@ -362,9 +526,11 @@ export async function saveListingWorkflow(payload: Row, adminId: unknown) {
         });
         return;
       }
-      // --- Step 6: payment to the farmer ---------------------------------
+
+      // --- Payment to the farmer ---------------------------------------------
+      case "save_payment":
       case "pay_farmer": {
-        need(["shipped", "paid"].includes(status), "The animal must be shipped before the farmer is paid.");
+        open();
         const method = ["cash", "cheque", "bank_transfer", "bkash", "nagad"].includes(String(d.payment_method)) ? String(d.payment_method) : null;
         await setListing("status = 'paid', paid_at = COALESCE(?, NOW()), paid_amount = ?, payment_method = ?, payment_reference = ?", [
           dt(d.paid_at),
@@ -372,13 +538,35 @@ export async function saveListingWorkflow(payload: Row, adminId: unknown) {
           required(method, "Payment method"),
           text(d.payment_reference, 80)
         ]);
+        outcome = "paid";
         return;
       }
+
+      // --- Closing a listing ---------------------------------------------------
+      case "cancel_listing": {
+        need(!["cancelled", "rejected"].includes(status), "This listing is already closed.");
+        await setListing("status = 'cancelled', cancelled_at = NOW(), cancel_reason = ?", [text(d.reason, 400)]);
+        outcome = "cancelled";
+        return;
+      }
+      case "reject_listing": {
+        need(["shipped", "paid"].includes(status), "A listing can only be rejected once it has been shipped.");
+        await setListing("status = 'rejected', rejected_at = NOW(), reject_reason = ?", [text(d.reason, 400)]);
+        outcome = "rejected";
+        return;
+      }
+
       // --- Manual correction ----------------------------------------------
       case "set_status": {
         const next = String(d.status ?? "");
         need(MANUAL_STATUSES.includes(next), "Unknown status.");
-        await setListing("status = ?", [next]);
+        // Reopening a closed listing must not leave last week's cancellation
+        // reason on the row — the app would still show it as closed.
+        if (next === "cancelled" || next === "rejected") {
+          await setListing("status = ?", [next]);
+        } else {
+          await setListing("status = ?, cancelled_at = NULL, cancel_reason = NULL, rejected_at = NULL, reject_reason = NULL", [next]);
+        }
         return;
       }
       default:
@@ -386,18 +574,28 @@ export async function saveListingWorkflow(payload: Row, adminId: unknown) {
     }
   });
 
-  // Tell the farmer what just happened on their listing.
+  // Tell the farmer what just happened, and put the milestones the community
+  // cares about on the feed. Neither may break the save that already committed.
   const EVENT: Record<string, string> = {
-    schedule_visit: "listing_visit_scheduled",
-    approve_profile: "listing_approved",
-    accept_contract: "listing_contracted",
-    dispatch: "listing_shipped",
-    pay_farmer: "listing_paid"
+    visit_scheduled: "listing_visit_scheduled",
+    verified: "listing_verified",
+    contracted: "listing_contracted",
+    shipped: "listing_shipped",
+    paid: "listing_paid",
+    cancelled: "listing_cancelled",
+    rejected: "listing_cancelled"
   };
-  const event = action === "save_verification"
-    ? d.result === "passed" ? "listing_verified" : d.result === "failed" ? "listing_rejected" : null
-    : EVENT[action] ?? null;
-  if (event) await notifyListing(listingId, event, listingEventVars(action, d));
+  const event = EVENT[outcome];
+  if (event) {
+    try {
+      await notifyListing(listingId, event, listingEventVars(outcome, d));
+    } catch {
+      /* delivery is best-effort */
+    }
+  }
+  if (outcome === "verified") await postListingMilestone(listingId, "verified");
+  if (outcome === "paid") await postListingMilestone(listingId, "paid");
+
   return getListingWorkflow(listingId);
 }
 
@@ -405,13 +603,13 @@ const METHOD: Record<string, [string, string]> = {
   cash: ["cash", "নগদ"], cheque: ["cheque", "চেক"], bank_transfer: ["bank transfer", "ব্যাংক ট্রান্সফার"], bkash: ["bKash", "বিকাশ"], nagad: ["Nagad", "নগদ (মোবাইল)"]
 };
 
-function listingEventVars(action: string, d: Row): Vars {
-  if (action === "schedule_visit" && d.visit_date) {
+function listingEventVars(outcome: string, d: Row): Vars {
+  if (outcome === "visit_scheduled" && d.visit_date) {
     const date = new Date(`${String(d.visit_date).slice(0, 10)}T00:00:00`);
     const opts = { day: "numeric", month: "long", year: "numeric" } as const;
     return { visit_date: { en: date.toLocaleDateString("en-GB", opts), bn: date.toLocaleDateString("bn-BD", opts) } };
   }
-  if (action === "accept_contract") {
+  if (outcome === "contracted") {
     const advance = Number(d.advance_amount ?? 0);
     return {
       buyer: String(d.buyer_org || d.buyer_name || ""),
@@ -419,12 +617,11 @@ function listingEventVars(action: string, d: Row): Vars {
       advance: advance > 0 ? { en: ` An advance of ৳${advance.toLocaleString("en-IN")} is on its way.`, bn: ` ৳${advance.toLocaleString("en-IN")} অগ্রিম পাঠানো হচ্ছে।` } : ""
     };
   }
-  if (action === "pay_farmer") {
+  if (outcome === "paid") {
     const [en, bn] = METHOD[String(d.payment_method)] ?? [String(d.payment_method ?? ""), String(d.payment_method ?? "")];
     return { amount: Number(d.paid_amount ?? 0), method: { en, bn }, reference: String(d.payment_reference || "—") };
   }
-  if (action === "save_verification") {
-    return { weight: Number(d.verified_weight_kg ?? 0), ...(d.result === "failed" ? reasonVars(d.health_notes) : {}) };
-  }
+  if (outcome === "verified") return { weight: Number(d.verified_weight_kg ?? 0) };
+  if (outcome === "cancelled" || outcome === "rejected") return reasonVars(d.reason);
   return {};
 }

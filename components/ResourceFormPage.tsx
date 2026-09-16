@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState, type KeyboardEvent } f
 import Link from "next/link";
 import {
   AlertCircle,
+  AlertTriangle,
   ArrowLeft,
   Check,
   ChevronLeft,
@@ -23,6 +24,8 @@ import type { LookupOption } from "@/lib/admin-lookups";
 import { GeoFields, type GeoValue } from "@/components/GeoFields";
 import { Select, fromLookup, type SelectOption } from "@/components/Select";
 import { MultiSelect, splitIds } from "@/components/MultiSelect";
+import { checkShape, feeKind, fieldFromMessage, formatNote, kindOf } from "@/lib/form-validation";
+import "@/components/admin-forms.css";
 
 type Props = {
   config: ManagementPageProps;
@@ -253,8 +256,15 @@ export function ResourceFormPage({ config, resource, id }: Props) {
   const formRef = useRef<HTMLFormElement>(null);
   const isEdit = Boolean(id);
   const listHref = useMemo(() => getListRoute(resource), [resource]);
-  const sections = useMemo(() => buildSections(config.formFields), [config.formFields]);
-  const wizard = sections.length > 1 && config.formFields.length > SINGLE_PAGE_MAX_FIELDS;
+  // The page is a server component, so every RSC re-render hands us a fresh
+  // `formFields` array with the same contents. Keying the effects below on the
+  // field names instead of that identity stops a stray re-render from blanking
+  // a half-filled form (and wiping the "Record created" confirmation with it).
+  const fieldsKey = useMemo(() => config.formFields.map((field) => `${field.name}:${field.type ?? ""}`).join("|"), [config.formFields]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const formFields = useMemo(() => config.formFields, [fieldsKey]);
+  const sections = useMemo(() => buildSections(formFields), [formFields]);
+  const wizard = sections.length > 1 && formFields.length > SINGLE_PAGE_MAX_FIELDS;
   const [step, setStep] = useState(0);
   const [visited, setVisited] = useState<Set<number>>(() => new Set([0]));
   useEffect(() => { setStep(0); setVisited(new Set([0])); }, [resource, id]);
@@ -272,7 +282,7 @@ export function ResourceFormPage({ config, resource, id }: Props) {
 
   function blankValues() {
     const values: Record<string, string> = {};
-    for (const field of config.formFields) {
+    for (const field of formFields) {
       values[field.name] = "";
       if (field.type === "fee") values[pctKeyOf(field)] = "";
     }
@@ -281,7 +291,7 @@ export function ResourceFormPage({ config, resource, id }: Props) {
 
   function adoptValues(values: Record<string, string>) {
     setFormValues(values);
-    setFeeModes(modesFromValues(config.formFields, values));
+    setFeeModes(modesFromValues(formFields, values));
     setErrors({});
   }
 
@@ -290,11 +300,11 @@ export function ResourceFormPage({ config, resource, id }: Props) {
     setMessage("");
     adoptValues(blankValues());
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config.formFields, resource, id]);
+  }, [formFields, resource, id]);
 
   const lookupKeys = useMemo(
-    () => Array.from(new Set(config.formFields.map((field) => field.lookup).filter(Boolean) as string[])),
-    [config.formFields]
+    () => Array.from(new Set(formFields.map((field) => field.lookup).filter(Boolean) as string[])),
+    [formFields]
   );
 
   useEffect(() => {
@@ -342,7 +352,7 @@ export function ResourceFormPage({ config, resource, id }: Props) {
         if (!response.ok || !json.ok) throw new Error(json.message ?? "Could not load record.");
         const row = json.data?.row ?? {};
         setRecord(row);
-        adoptValues(valuesFromRow(config.formFields, row));
+        adoptValues(valuesFromRow(formFields, row));
       } catch (error) {
         say(error instanceof Error ? error.message : "Could not load record.", "error");
       } finally {
@@ -352,7 +362,7 @@ export function ResourceFormPage({ config, resource, id }: Props) {
 
     void loadRecord();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config.endpoint, config.formFields, id]);
+  }, [config.endpoint, formFields, id]);
 
   // Scroll to and focus a flagged field once its section is on screen.
   useEffect(() => {
@@ -372,7 +382,7 @@ export function ResourceFormPage({ config, resource, id }: Props) {
   }, [focusRequest, step]);
 
   function resetForm() {
-    adoptValues(isEdit ? valuesFromRow(config.formFields, record) : blankValues());
+    adoptValues(isEdit ? valuesFromRow(formFields, record) : blankValues());
     setGeoKey((key) => key + 1);
     setMessage("");
   }
@@ -397,29 +407,57 @@ export function ResourceFormPage({ config, resource, id }: Props) {
     return formValues[field.name] ?? "";
   }
 
-  function missingIn(fields: FormField[]) {
-    return fields.filter((field) => isRequired(field) && !valueOf(field).trim());
+  // The shape a field's value must have. A `fee` field flips between a
+  // percentage and a flat ৳/kg amount, so its rule follows the active half.
+  function kindFor(field: FormField) {
+    if (field.type === "fee") return feeKind(feeModes[field.name] ?? "pct");
+    return kindOf(field, lookupState === "failed");
+  }
+
+  /** "" when the field is fine, otherwise the message to show under it. */
+  function checkField(field: FormField): string {
+    const value = valueOf(field).trim();
+    if (!value) return isRequired(field) ? REQUIRED_MESSAGE : "";
+    return checkShape(kindFor(field), value);
+  }
+
+  function problemsIn(fields: FormField[]) {
+    const found: { field: FormField; message: string }[] = [];
+    for (const field of fields) {
+      const message = checkField(field);
+      if (message) found.push({ field, message });
+    }
+    return found;
   }
 
   function sectionIndexOf(field: FormField) {
     return sections.findIndex((section) => section.fields.includes(field));
   }
 
-  function flag(missing: FormField[]) {
+  function flag(problems: { field: FormField; message: string }[]) {
     setErrors((current) => {
       const next = { ...current };
-      for (const field of missing) next[field.name] = REQUIRED_MESSAGE;
+      for (const problem of problems) next[problem.field.name] = problem.message;
       return next;
     });
-    setFocusRequest({ name: missing[0].name, at: Date.now() });
+    jumpTo(problems[0].field);
+  }
+
+  /** Opens the field's section if the form is a wizard, then focuses the box. */
+  function jumpTo(field: FormField) {
+    if (wizard) {
+      const index = sectionIndexOf(field);
+      if (index >= 0 && index !== step) goTo(index);
+    }
+    setFocusRequest({ name: field.name, at: Date.now() });
   }
 
   // Next checks only the step being left; the tabs themselves stay free to
   // click, so an admin can look ahead without filling everything first.
   function goNext() {
-    const missing = missingIn(sections[step]?.fields ?? []);
-    if (missing.length) {
-      flag(missing);
+    const problems = problemsIn(sections[step]?.fields ?? []);
+    if (problems.length) {
+      flag(problems);
       return;
     }
     goTo(step + 1);
@@ -429,16 +467,15 @@ export function ResourceFormPage({ config, resource, id }: Props) {
     event.preventDefault();
     // Browser validation cannot reach a field on a hidden tab — it silently
     // refuses to submit. Check here instead, and open the section with the gap.
-    const missing = missingIn(config.formFields);
-    if (missing.length) {
-      flag(missing);
-      if (wizard) {
-        const first = sectionIndexOf(missing[0]);
-        if (first >= 0) goTo(first);
-      }
-      say(`Fill in ${missing.length === 1 ? "the required field" : `${missing.length} required fields`} marked in red.`, "error");
+    const problems = problemsIn(formFields);
+    if (problems.length) {
+      // The summary panel below is the message; a banner saying the same thing
+      // twice, one on top of the other, is noise.
+      setMessage("");
+      flag(problems);
       return;
     }
+    setErrors({});
     const formData = new FormData(event.currentTarget);
     const payload = Object.fromEntries(formData.entries());
     const url = isEdit ? `${config.endpoint}?id=${encodeURIComponent(id ?? "")}` : config.endpoint;
@@ -460,7 +497,21 @@ export function ResourceFormPage({ config, resource, id }: Props) {
         warnings.length ? "warn" : "ok"
       );
     } catch (error) {
-      say(error instanceof Error ? error.message : "Save failed.", "error");
+      // The server writes its refusals for a human ("Buyer name is required.",
+      // "Agreed rate must be a positive number."). When the message names one of
+      // our fields, put it on that field instead of only in the banner — the
+      // typed values are left untouched either way.
+      const text = error instanceof Error ? error.message : "Save failed.";
+      const culprit = fieldFromMessage(text, formFields);
+      if (culprit) {
+        setErrors((current) => ({ ...current, [culprit.name]: text }));
+        jumpTo(culprit);
+        // The summary below carries the server's own wording, so the banner
+        // only says who refused and that the form is intact.
+        say("The server refused this save. Nothing you typed was lost — fix the field marked below.", "error");
+      } else {
+        say(text, "error");
+      }
     } finally {
       setLoading(false);
     }
@@ -490,7 +541,24 @@ export function ResourceFormPage({ config, resource, id }: Props) {
 
   function stepDone(index: number) {
     if (!visited.has(index) || index === step) return false;
-    return missingIn(sections[index].fields).length === 0 && errorCount(sections[index]) === 0;
+    return problemsIn(sections[index].fields).length === 0 && errorCount(sections[index]) === 0;
+  }
+
+  /** Every flagged field, in form order, for the summary above the fields. */
+  const issues = formFields
+    .filter((field) => errors[field.name])
+    .map((field) => ({ field, message: errors[field.name], section: sections[sectionIndexOf(field)]?.name }));
+
+  /** Re-check one field as the admin leaves it, so a fix clears the flag. */
+  function revalidate(field: FormField) {
+    const message = checkField(field);
+    setErrors((current) => {
+      if (!message && !(field.name in current)) return current;
+      const next = { ...current };
+      if (message) next[field.name] = message;
+      else delete next[field.name];
+      return next;
+    });
   }
 
   function placeholderOf(field: FormField) {
@@ -575,6 +643,7 @@ export function ResourceFormPage({ config, resource, id }: Props) {
                 value={formValues[activeKey] ?? ""}
                 placeholder={mode === "pct" ? "e.g. 2" : "e.g. 8.5"}
                 onChange={(event) => setValue(activeKey, event.target.value, field.name)}
+                onBlur={() => revalidate(field)}
               />
               <span className="affix" aria-hidden="true">{mode === "pct" ? "%" : "৳/kg"}</span>
             </div>
@@ -611,6 +680,7 @@ export function ResourceFormPage({ config, resource, id }: Props) {
               value={value}
               placeholder="https://… or upload a file"
               onChange={(event) => setValue(field.name, event.target.value)}
+              onBlur={() => revalidate(field)}
             />
             {readOnly ? null : (
               <label className={`btn ghost btn-ctl${uploading === field.name ? " is-busy" : ""}`} aria-disabled={uploading === field.name || undefined}>
@@ -654,7 +724,7 @@ export function ResourceFormPage({ config, resource, id }: Props) {
 
       case "textarea":
         return (
-          <textarea {...common} className="input" name={name} disabled={readOnly} value={value} placeholder={placeholderOf(field)} onChange={(event) => setValue(field.name, event.target.value)} />
+          <textarea {...common} className="input" name={name} disabled={readOnly} value={value} placeholder={placeholderOf(field)} onChange={(event) => setValue(field.name, event.target.value)} onBlur={() => revalidate(field)} />
         );
 
       default:
@@ -711,6 +781,7 @@ export function ResourceFormPage({ config, resource, id }: Props) {
         value={value}
         placeholder={field.type === "date" || field.type === "datetime" ? undefined : field.lookup ? "Id (options did not load)" : placeholderOf(field)}
         onChange={(event) => setValue(field.name, event.target.value)}
+        onBlur={() => revalidate(field)}
       />
     );
   }
@@ -720,8 +791,14 @@ export function ResourceFormPage({ config, resource, id }: Props) {
     const error = errors[field.name];
     const control = `field-${field.name}`;
     const label = `${control}-label`;
-    const hint = field.type === "fee" ? field.hint ?? FEE_HINT : field.hint;
-    const describedBy = [error ? `${control}-error` : "", hint ? `${control}-hint` : ""].filter(Boolean).join(" ") || undefined;
+    // "Required" belongs in the help text as well as on the label: the asterisk
+    // is easy to miss, and the format note says what a valid value looks like
+    // before the admin finds out by being refused.
+    const hint = field.type === "fee" ? field.hint ?? FEE_HINT : field.hint ?? (field.readOnly ? "" : formatNote(kindFor(field)));
+    // With an error showing, a "Required" chip under the same box says nothing
+    // the red message above it has not already said.
+    const showHintRow = Boolean(hint) || (required && !error);
+    const describedBy = [error ? `${control}-error` : "", showHintRow ? `${control}-hint` : ""].filter(Boolean).join(" ") || undefined;
     const wide = field.type === "textarea" || field.type === "geo" || field.type === "multi-lookup";
     return (
       <div
@@ -741,7 +818,12 @@ export function ResourceFormPage({ config, resource, id }: Props) {
             <AlertCircle size={13} aria-hidden="true" /> {error}
           </small>
         ) : null}
-        {hint ? <small className="field-hint" id={`${control}-hint`}>{hint}</small> : null}
+        {showHintRow ? (
+          <small className="field-hint" id={`${control}-hint`}>
+            {required ? <span className="req-tag">Required</span> : null}
+            {hint}
+          </small>
+        ) : null}
       </div>
     );
   }
@@ -793,6 +875,27 @@ export function ResourceFormPage({ config, resource, id }: Props) {
             <Status label={isEdit ? "Editing" : "New record"} />
           </div>
           {message ? <div className={`notice is-${tone}`} role={tone === "error" ? "alert" : "status"}>{message}</div> : null}
+          {/* One place that names every problem, because a flagged field can sit
+              on a tab that is not open. Each entry jumps to its field. */}
+          {issues.length ? (
+            <div className="form-issues" role="alert" tabIndex={-1}>
+              <p className="form-issues-head">
+                <AlertTriangle size={15} aria-hidden="true" />
+                {issues.length === 1 ? "1 field needs attention" : `${issues.length} fields need attention`}
+              </p>
+              <ul className="form-issues-list">
+                {issues.map((issue) => (
+                  <li key={issue.field.name}>
+                    <button className="form-issues-jump" type="button" onClick={() => jumpTo(issue.field)}>
+                      {issue.field.label}
+                    </button>
+                    <span>{issue.message}</span>
+                    {wizard && issue.section ? <span className="form-issues-where">in {issue.section}</span> : null}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
           {/* Every section stays mounted so the form submits all of it; only
               the active one is shown. */}
           {wizard ? (
@@ -802,7 +905,7 @@ export function ResourceFormPage({ config, resource, id }: Props) {
               </div>
             ))
           ) : (
-            <div className="form-grid">{config.formFields.map(renderField)}</div>
+            <div className="form-grid">{formFields.map(renderField)}</div>
           )}
         </section>
 

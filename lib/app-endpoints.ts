@@ -122,7 +122,7 @@ export async function getHomeFeed(userId?: string | null, gpsDistrictId?: string
         SELECT
           (SELECT COUNT(*) FROM sale_listings WHERE user_id = ?) AS listings,
           (SELECT COUNT(*) FROM orders WHERE user_id = ?) AS orders,
-          (SELECT COALESCE(SUM(estimated_earning), 0) FROM sale_listings WHERE user_id = ? AND status IN ('active','sold')) AS earning
+          (SELECT COALESCE(SUM(estimated_earning), 0) FROM sale_listings WHERE user_id = ? AND status IN ('contracted','shipped','paid')) AS earning
       `,
       [userId, userId, userId]
     );
@@ -643,7 +643,7 @@ export async function verifyOtp(payload: Row) {
       "UPDATE payment_confirmations SET status = 'confirmed', confirmed_at = NOW() WHERE id = ?",
       [confirmation.id]
     );
-    await tx.execute("UPDATE sale_listings SET status = 'sold' WHERE id = ?", [listingId]);
+    await tx.execute("UPDATE sale_listings SET status = 'paid', paid_at = COALESCE(paid_at, NOW()) WHERE id = ?", [listingId]);
   });
 
   return { confirmation_id: confirmation.id, sale_listing_id: listingId, status: "confirmed" };
@@ -940,7 +940,7 @@ export async function getAppCommunityPosts(scope?: string | null, _district?: st
                1 AS is_listing
         FROM sale_listings l
         JOIN app_users u ON u.id = l.user_id
-        WHERE l.status = 'active' AND ${area.sql}
+        WHERE l.status NOT IN ('draft','cancelled','rejected') AND ${area.sql}
         ORDER BY l.created_at DESC
         LIMIT 50
       `,
@@ -1071,7 +1071,9 @@ export async function getMyListings(userId?: string | null) {
       SELECT CAST(l.id AS CHAR) AS id, l.listing_code, l.title_en, l.title_bn,
              l.description, l.quantity, l.unit, l.weight_kg, l.meat_weight_kg,
              l.farmer_expected_price, l.estimated_earning,
-             l.status, l.approved_at, l.created_at, l.media_json,
+             l.status, l.created_at, l.media_json,
+             l.cancelled_at, l.cancel_reason, l.rejected_at, l.reject_reason,
+             l.verified_at, l.contracted_at, l.shipped_at,
              -- Progress fields so the card can show the live stage without a
              -- second round trip per listing.
              l.field_visit_date, l.verified_weight_kg, l.paid_at, l.paid_amount,
@@ -1132,8 +1134,8 @@ export async function getAdminStats() {
     `SELECT
        (SELECT COUNT(*) FROM app_users) AS farmers,
        (SELECT COUNT(*) FROM app_users WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)) AS farmers_30d,
-       (SELECT COUNT(*) FROM sale_listings WHERE status = 'active') AS listings_active,
-       (SELECT COUNT(*) FROM sale_listings) AS listings_total,
+       (SELECT COUNT(*) FROM sale_listings WHERE status IN ('submitted','field_verification','verified','contracted','shipped')) AS listings_active,
+       (SELECT COUNT(*) FROM sale_listings WHERE status NOT IN ('cancelled','rejected')) AS listings_total,
        (SELECT COUNT(*) FROM orders) AS orders_total,
        (SELECT COUNT(*) FROM orders WHERE fulfillment_status = 'delivered') AS orders_delivered,
        (SELECT COUNT(*) FROM products WHERE status = 'active') AS products_active`

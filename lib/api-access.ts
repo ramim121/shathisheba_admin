@@ -69,6 +69,7 @@ export const ADMIN_ONLY = new Set<string>([
   "brands/distributors",
   // Notifications and the home partner strip (the app reads app/partners).
   "admin/dashboard/overview",
+  "admin/delete-impact",
   "admin/notifications/status",
   "admin/notifications/audience",
   "admin/notifications/preview",

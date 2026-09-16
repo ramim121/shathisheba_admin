@@ -174,7 +174,7 @@ export async function detectSignals(userId: string | number): Promise<string[]> 
   if (await one("SELECT COUNT(*) AS n FROM app_user_farm WHERE user_id = ?")) signals.push("S3");
   if (await one(
     `SELECT (SELECT COUNT(*) FROM orders WHERE user_id = ?)
-          + (SELECT COUNT(*) FROM sale_listings WHERE user_id = ? AND status IN ('active','sold')) AS n`,
+          + (SELECT COUNT(*) FROM sale_listings WHERE user_id = ? AND status IN ('contracted','shipped','paid')) AS n`,
     [userId, userId]
   )) signals.push("S4");
   if (await one("SELECT COUNT(*) AS n FROM partner_applications WHERE user_id = ?")) signals.push("S5");

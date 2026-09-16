@@ -176,8 +176,10 @@ import {
   type BroadcastInput
 } from "@/lib/notify";
 import { notifyListing } from "@/lib/notices";
+import { assertCanPost, postListingMilestone, postsLeftToday, shareListingToCommunity } from "@/lib/community-posts";
 import { getAppMarketOverview, getAppPartners, reorderPartners } from "@/lib/endpoints/engagement";
 import { getDashboardOverview } from "@/lib/endpoints/dashboard";
+import { getDeleteImpact } from "@/lib/endpoints/delete-impact";
 
 // App-facing list reads. The mobile app hits these generic resource paths and
 // needs raw bilingual/detail columns; the admin panel reads lib/db-resources
@@ -235,10 +237,14 @@ const appReadHandlers: Record<string, AppReadHandler> = {
   "app/orders/detail": (q) => getAppOrderDetail(q.get("order_id"), q.get("user_id")),
   // Notifications inbox, home partner strip, market overview.
   "app/notifications": (q) => getInbox(q.get("user_id")),
+  "app/community/quota": async (q) => ({ posts_left_today: await postsLeftToday(q.get("user_id")) }),
   "app/partners": () => getAppPartners(),
   "app/market/overview": (q) => getAppMarketOverview(q.get("user_id")),
   "admin/notifications/status": () => notificationStatus(),
   "admin/dashboard/overview": () => getDashboardOverview(),
+  // `target`/`target_id`, not `resource`/`id`: a bare ?id= means "one record"
+  // to the generic resolver and would never reach this handler.
+  "admin/delete-impact": (q) => getDeleteImpact(q.get("target"), q.get("target_id")),
   "admin/notifications/audience": (q) =>
     audienceSummary(q.get("target") ?? "all", (q.get("roles") ?? "").split(",").filter(Boolean), (q.get("user_ids") ?? "").split(",").filter(Boolean)),
   // Catalogue sticker: is the first-purchase offer still this buyer's.
@@ -868,6 +874,14 @@ export async function POST(request: NextRequest, { params }: Params) {
       return NextResponse.json({ ok: true, source: "mysql", action: "authenticated", result: await verifyOtpLogin(payload) }, { status: 200 });
     }
     // ---- Notifications ------------------------------------------------------
+    if (exact === "app/community/share-listing") {
+      const p = payload as Record<string, unknown>;
+      return NextResponse.json({
+        ok: true,
+        action: "listing_shared",
+        result: await shareListingToCommunity(p.user_id, p.listing_id, p.note)
+      });
+    }
     if (exact === "app/notifications/read") {
       const p = payload as Record<string, unknown>;
       return NextResponse.json({ ok: true, action: "notifications_read", result: await markRead(p.user_id, p.id) });
@@ -1028,9 +1042,18 @@ export async function POST(request: NextRequest, { params }: Params) {
         });
         if (quote.rule) input.pricing_rule_id = quote.rule.id;
       }
+      if (resource === "community/posts" && caller.kind === "app") {
+        // Three posts per person per day. The platform's own milestone posts
+        // carry is_system and are exempt; an app caller cannot set either flag.
+        await assertCanPost(caller.user.id);
+        delete input.is_system;
+        delete input.is_official;
+      }
       const result = await createResource(resource, input);
       if (resource === "sale/listings" && caller.kind === "app" && result?.insertId) {
         await notifyListing(result.insertId, "listing_submitted");
+        // A new listing announces itself in the regional feed.
+        await postListingMilestone(result.insertId, "submitted");
       }
       const warnings = resource === "sale/pricing" && result?.insertId ? await pricingWarningsFor(result.insertId) : [];
       return NextResponse.json({ ok: true, source: "mysql", action: "created", resource, result, warnings }, { status: 201 });

@@ -6,7 +6,9 @@ type Props = {
 };
 
 // One screen per listing: its facts, the price rule it is attached to, and the
-// six steps from submission to the farmer being paid.
+// sections the console records — field verification, vaccination, animal
+// profile, contract, shipping, payment. There is no approval step; the status
+// follows from what has been saved, and Cancel/Reject close the listing.
 export default async function SaleDetailPage({ params }: Props) {
   const { id } = await params;
   return (

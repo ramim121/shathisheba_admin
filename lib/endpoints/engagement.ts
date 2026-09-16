@@ -34,7 +34,7 @@ export async function reorderPartners(ids: unknown) {
 // Market overview
 // ---------------------------------------------------------------------------
 
-const OPEN_LISTING = "'submitted','field_verification','verified','active','contracted','sold'";
+const OPEN_LISTING = "'submitted','field_verification','verified','contracted','shipped'";
 
 /**
  * GET /api/v1/app/market/overview — what the market looks like from the

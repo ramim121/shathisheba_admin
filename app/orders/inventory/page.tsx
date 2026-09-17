@@ -49,13 +49,13 @@ export default function InventoryPage() {
     <AdminShell>
       <div className="page-head">
         <div>
-          <h1 className="page-title"><Boxes size={22} style={{ verticalAlign: "-4px", marginRight: 8 }} />Product Inventory</h1>
+          <h1 className="page-title"><Boxes size={22} />Product Inventory</h1>
           <p className="page-sub">
             Live stock, pending demand from placed orders, and the movement ledger.
             {lowCount ? <strong className="txt-warn"> {lowCount} product(s) low on stock.</strong> : null}
           </p>
         </div>
-        <button className="aq-refresh" onClick={load}><RefreshCw size={14} style={{ verticalAlign: "-2px", marginRight: 5 }} />Refresh</button>
+        <button className="aq-refresh" onClick={load}><RefreshCw size={14} />Refresh</button>
       </div>
 
       {error ? <p className="drawer-error" style={{ margin: "0 0 14px" }}><AlertTriangle size={14} /> {error}</p> : null}

@@ -149,7 +149,7 @@ function SaveRow({ label, busy, note, children }: { label: string; busy: boolean
 function Docs({ title, docs, onAdd, onRemove, busy }: { title: string; docs: Doc[]; onAdd: (file: File) => void; onRemove: (index: number) => void; busy: boolean }) {
   return (
     <div className="lw-docs">
-      <p className="lw-hint" style={{ margin: "0 0 7px" }}><Paperclip size={13} style={{ verticalAlign: "-2px" }} /> {title}</p>
+      <p className="lw-hint" style={{ margin: "0 0 7px" }}><Paperclip size={13} /> {title}</p>
       {docs.length ? (
         <ul className="lw-docs-list">
           {docs.map((d, i) => (
@@ -598,7 +598,7 @@ export function ListingWorkflow({ listingId }: { listingId: string }) {
                 <label className="wide">Notes<textarea name="notes" rows={2} defaultValue={s(vax?.notes)} /></label>
               </div>
               <div className="lw-docs">
-                <p className="lw-hint" style={{ margin: "0 0 7px" }}><Paperclip size={13} style={{ verticalAlign: "-2px" }} /> Vaccination card or certificate (optional)</p>
+                <p className="lw-hint" style={{ margin: "0 0 7px" }}><Paperclip size={13} /> Vaccination card or certificate (optional)</p>
                 {vaxDoc ? (
                   <ul className="lw-docs-list">
                     <li>
@@ -704,7 +704,7 @@ export function ListingWorkflow({ listingId }: { listingId: string }) {
             </div>
 
             <div className="lw-docs">
-              <p className="lw-hint" style={{ margin: "0 0 7px" }}><Paperclip size={13} style={{ verticalAlign: "-2px" }} /> Signed contract file</p>
+              <p className="lw-hint" style={{ margin: "0 0 7px" }}><Paperclip size={13} /> Signed contract file</p>
               {cFile ? (
                 <ul className="lw-docs-list">
                   <li>

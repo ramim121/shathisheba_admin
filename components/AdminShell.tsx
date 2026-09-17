@@ -195,7 +195,13 @@ function SidebarNav() {
         <nav className="nav-search-results">
           {results.length === 0 ? <p className="nav-search-empty">No menu items match “{q}”.</p> : null}
           {results.map((item) => (
-            <Link className={`nav-item${here?.tab.href === item.href ? " active" : ""}`} href={item.href} key={item.href + item.group} title={item.group}>
+            <Link
+              className={`nav-item${here?.tab.href === item.href ? " active" : ""}`}
+              aria-current={here?.tab.href === item.href ? "page" : undefined}
+              href={item.href}
+              key={item.href + item.group}
+              title={item.group}
+            >
               <item.icon />
               <span className="nav-item-label">{item.label}</span>
               <span className="nav-item-group">{item.group}</span>
@@ -207,6 +213,7 @@ function SidebarNav() {
           {groups.map((group) => (
             <Link
               className={`nav-item${here?.group === group ? " active" : ""}`}
+              aria-current={here?.group === group ? "page" : undefined}
               href={group.tabs[0].href}
               key={group.label}
             >
@@ -229,7 +236,12 @@ function SectionTabs() {
   return (
     <nav className="section-tabs" aria-label={`${here.group.label} pages`}>
       {here.group.tabs.map((tab) => (
-        <Link key={tab.href} href={tab.href} className={here.tab.href === tab.href ? "active" : ""}>
+        <Link
+          key={tab.href}
+          href={tab.href}
+          className={here.tab.href === tab.href ? "active" : ""}
+          aria-current={here.tab.href === tab.href ? "page" : undefined}
+        >
           {tab.label}
         </Link>
       ))}
@@ -302,8 +314,8 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
       </Link>
 
       <div className="sidebar-summary">
-        <span>Live MySQL</span>
-        <strong>Admin Console</strong>
+        <span>Live</span>
+        <strong>MySQL · production data</strong>
       </div>
 
       <SidebarNav />

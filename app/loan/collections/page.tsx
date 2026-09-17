@@ -222,29 +222,29 @@ export default function CollectionsPage() {
 
       <style jsx>{`
         .head { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; flex-wrap:wrap; margin-bottom:16px; }
-        .eyebrow { margin:0 0 4px; font-size:11.5px; font-weight:700; letter-spacing:.5px; text-transform:uppercase; color:#9B5173; }
-        h1 { margin:0; font-size:22px; color:#2B0B1E; }
-        .h2 { margin:0 0 10px; font-size:15px; color:#2B0B1E; }
-        .muted { color:#7A6570; font-size:13px; margin:4px 0 0; }
-        .msg { color:#871449; font-size:13.5px; margin:0; }
+        .eyebrow { margin:0 0 4px; font-size:11.5px; font-weight:700; letter-spacing:.5px; text-transform:uppercase; color:var(--brand-500); }
+        h1 { margin:0; font-size:22px; color:var(--ink-900); }
+        .h2 { margin:0 0 10px; font-size:15px; color:var(--ink-900); }
+        .muted { color:var(--ink-500); font-size:var(--fs-sm); margin:4px 0 0; }
+        .msg { color:var(--brand-600); font-size:13.5px; margin:0; }
         .head-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-        .head-actions input { padding:8px 10px; border:1px solid #EBDDE4; border-radius:8px; font-size:13.5px; }
+        .head-actions input { padding:8px 10px; border:1px solid var(--line); border-radius:8px; font-size:13.5px; }
         .stats { display:grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap:12px; margin-bottom:16px; }
-        .stat { background:#fff; border:1px solid #F4E8EE; border-radius:12px; padding:14px; }
-        .stat-label { display:block; font-size:12px; color:#7A6570; }
-        .stat-value { display:block; font-size:19px; color:#2B0B1E; margin-top:4px; }
+        .stat { background:var(--surface); border:1px solid var(--line); border-radius:var(--r-lg); padding:14px; box-shadow:var(--e1); }
+        .stat-label { display:block; font-size:var(--fs-xs); color:var(--ink-500); }
+        .stat-value { display:block; font-size:19px; color:var(--ink-900); margin-top:4px; }
         .scroll { overflow-x:auto; }
-        .table { width:100%; border-collapse:collapse; font-size:13px; }
-        .table th { text-align:left; color:#7A6570; font-weight:600; padding:8px; border-bottom:1px solid #F4E8EE; white-space:nowrap; }
-        .table td { padding:8px; border-bottom:1px solid #FAF4F7; color:#2B0B1E; vertical-align:top; }
-        .late { color:#B4443C; font-weight:600; }
-        .btn { padding:9px 16px; border-radius:8px; border:1px solid #EBDDE4; background:#fff; color:#871449; font-size:13.5px; font-weight:600; cursor:pointer; }
-        .btn.primary { background:#871449; color:#fff; border-color:#871449; }
-        .btn.small { padding:6px 10px; font-size:12.5px; white-space:nowrap; }
+        .table { width:100%; border-collapse:collapse; font-size:var(--fs-sm); }
+        .table th { text-align:left; padding:10px 16px; background:var(--surface-sunken); border-bottom:1px solid var(--line); font-size:var(--fs-2xs); font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--ink-500); white-space:nowrap; }
+        .table td { padding:10px 16px; border-bottom:1px solid var(--line); vertical-align:top; font-size:var(--fs-sm); color:var(--ink-800); }
+        .late { color:var(--bad-fg); font-weight:600; }
+        .btn { padding:9px 16px; border-radius:8px; border:1px solid var(--line); background:var(--surface); color:var(--brand-600); font-size:13.5px; font-weight:600; cursor:pointer; }
+        .btn.primary { background:var(--brand-600); color:#fff; border-color:var(--brand-600); }
+        .btn.small { padding:6px 10px; font-size:var(--fs-sm); white-space:nowrap; }
         .btn:disabled { opacity:.5; cursor:not-allowed; }
-        .pay { display:grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap:12px; margin-top:12px; }
-        .pay label { display:flex; flex-direction:column; gap:5px; font-size:12.5px; color:#7A6570; }
-        .pay input, .pay select { padding:8px 10px; border:1px solid #EBDDE4; border-radius:8px; font-size:13.5px; }
+        .pay { display:grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap:12px; margin-top:12px; box-shadow:var(--e1); }
+        .pay label { display:flex; flex-direction:column; gap:5px; font-size:var(--fs-sm); color:var(--ink-500); }
+        .pay input, .pay select { padding:8px 10px; border:1px solid var(--line); border-radius:8px; font-size:13.5px; }
         .pay-actions { display:flex; gap:10px; margin-top:14px; }
       `}</style>
     </AdminShell>

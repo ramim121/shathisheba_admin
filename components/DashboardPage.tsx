@@ -133,7 +133,7 @@ export function DashboardPage() {
           <div className="chart-legend">
             {SERIES.map((s) => <span key={s.key}><i style={{ background: s.color }} />{s.label}</span>)}
           </div>
-          <div style={{ height: 300, padding: "8px 18px 18px" }}>
+          <div className="chart-box">
             {overview ? (
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={overview.trend} margin={{ left: -18, right: 8, top: 16, bottom: 0 }}>
@@ -197,8 +197,8 @@ export function DashboardPage() {
         </aside>
       </section>
 
-      <section className="dashboard-layout" style={{ marginTop: 12 }}>
-        <section className="feature-grid" style={{ margin: 0 }}>
+      <section className="dashboard-layout">
+        <section className="feature-grid is-flush">
           <article className="feature-card">
             <h3>Sale verification</h3>
             <p>Listings waiting for a field visit, weight check and approval.</p>

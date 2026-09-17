@@ -8,6 +8,15 @@ Rules:
 - For cross-module "how does X relate to Y" questions, prefer `graphify query "<question>"`, `graphify path "<A>" "<B>"`, or `graphify explain "<concept>"` over grep — these traverse the graph's EXTRACTED + INFERRED edges instead of scanning files
 - After modifying code files in this session, run `graphify update .` to keep the graph current (AST-only, no API cost)
 
+## Styling
+
+The UI runs on a token-driven design system. Read `docs/design-system.md`
+before writing CSS or adding a screen: values live in `app/styles/tokens.css`,
+rules live in the layer that owns that surface (`shell`, `controls`, `layout`,
+`table`, `forms`, `feedback`, `modules`), and Tailwind is loaded as theme +
+utilities only (no Preflight). Do not add raw hex colours, one-off radii or
+ad-hoc font weights.
+
 <!-- BEGIN:nextjs-agent-rules -->
 
 # This is NOT the Next.js you know

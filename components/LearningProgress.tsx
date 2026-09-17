@@ -65,16 +65,16 @@ export function LearningProgress() {
               <thead><tr><th>User</th><th>Points</th><th>Completed</th><th>Attempted</th><th>Avg quiz</th><th></th></tr></thead>
               <tbody>
                 {rows.map((u) => (
-                  <tr key={u.user_id} style={{ cursor: "pointer", background: activeUser?.user_id === u.user_id ? "rgba(123,21,54,0.06)" : undefined }} onClick={() => void openUser(u)}>
-                    <td><strong>{u.full_name}</strong><div style={{ color: "#9ca3af", fontSize: 12 }}>{u.phone}</div></td>
+                  <tr key={u.user_id} style={{ cursor: "pointer", background: activeUser?.user_id === u.user_id ? "var(--brand-50)" : undefined }} onClick={() => void openUser(u)}>
+                    <td><strong>{u.full_name}</strong><div className="subtext">{u.phone}</div></td>
                     <td><span className="tag"><Trophy size={12} /> {u.learning_points}</span></td>
                     <td>{u.completed}</td>
                     <td>{u.attempted}</td>
                     <td>{u.avg_quiz != null ? `${u.avg_quiz}%` : "—"}</td>
-                    <td><ChevronRight size={16} color="#9ca3af" /></td>
+                    <td><ChevronRight size={16} color="var(--ink-400)" /></td>
                   </tr>
                 ))}
-                {!loading && rows.length === 0 ? <tr><td colSpan={6} style={{ color: "#9ca3af" }}>No learning activity yet.</td></tr> : null}
+                {!loading && rows.length === 0 ? <tr><td colSpan={6} className="table-empty">No learning activity yet.</td></tr> : null}
               </tbody>
             </table>
           </div>
@@ -92,7 +92,7 @@ export function LearningProgress() {
                 <tbody>
                   {(detail ?? []).map((d) => (
                     <tr key={d.content_id}>
-                      <td><strong>{d.title_en}</strong><div style={{ color: "#9ca3af", fontSize: 12 }}>{d.content_type} · {d.module_title}</div></td>
+                      <td><strong>{d.title_en}</strong><div className="subtext">{d.content_type} · {d.module_title}</div></td>
                       <td>{d.category_name}</td>
                       <td><Status label={d.status} /></td>
                       <td>{d.quiz_score != null ? `${d.quiz_score}%${d.quiz_passed ? " ✓" : ""}` : "—"}</td>
@@ -100,7 +100,7 @@ export function LearningProgress() {
                       <td>{fmt(d.completed_at)}</td>
                     </tr>
                   ))}
-                  {detail && detail.length === 0 ? <tr><td colSpan={6} style={{ color: "#9ca3af" }}>No content attempted.</td></tr> : null}
+                  {detail && detail.length === 0 ? <tr><td colSpan={6} className="table-empty">No content attempted.</td></tr> : null}
                 </tbody>
               </table>
             </div>

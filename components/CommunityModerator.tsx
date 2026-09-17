@@ -153,18 +153,20 @@ export function CommunityModerator() {
         </div>
       </section>
 
-      <section style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 14 }}>
-        <div className="panel" style={{ padding: 16 }}>
-          <p className="subtitle" style={{ margin: 0 }}>Total posts</p>
-          <h2 style={{ margin: "6px 0 0", fontSize: 28 }}>{posts.length}</h2>
+      {/* The same metric tile the dashboard uses, rather than three panels
+          hand-sized with inline styles. */}
+      <section className="grid metrics">
+        <div className="metric">
+          <span>Total posts</span>
+          <strong>{posts.length}</strong>
         </div>
-        <div className="panel" style={{ padding: 16 }}>
-          <p className="subtitle" style={{ margin: 0 }}>Needs attention</p>
-          <h2 style={{ margin: "6px 0 0", fontSize: 28, color: "#b33737" }}>{flaggedCount}</h2>
+        <div className="metric tone-red">
+          <span>Needs attention</span>
+          <strong>{flaggedCount}</strong>
         </div>
-        <div className="panel" style={{ padding: 16 }}>
-          <p className="subtitle" style={{ margin: 0 }}>Official</p>
-          <h2 style={{ margin: "6px 0 0", fontSize: 28, color: "#9b6610" }}>{posts.filter((p) => p.is_official).length}</h2>
+        <div className="metric tone-gold">
+          <span>Official</span>
+          <strong>{posts.filter((p) => p.is_official).length}</strong>
         </div>
       </section>
 
@@ -178,7 +180,7 @@ export function CommunityModerator() {
 
       {message ? <div className="notice">{message}</div> : null}
 
-      <section className="panel" style={{ marginTop: 12 }}>
+      <section className="panel">
         <div className="panel-header">
           <div><h2>Community Posts</h2><p>{loading ? "Loading…" : `${posts.length} posts in “${filter}”.`}</p></div>
           <Status label={loading ? "Loading" : `${posts.length}`} />
@@ -193,23 +195,23 @@ export function CommunityModerator() {
                 <tr key={p.id}>
                   <td>
                     <strong>{p.author}</strong>
-                    {p.is_official ? <span className="tag" style={{ marginLeft: 6 }}><Star size={11} /> Official</span> : null}
-                    <div style={{ color: "#9ca3af", fontSize: 11, marginTop: 2 }}>{fmt(p.created_at)}</div>
+                    {p.is_official ? <span className="tag"><Star size={11} /> Official</span> : null}
+                    <div className="subtext">{fmt(p.created_at)}</div>
                   </td>
-                  <td style={{ maxWidth: 320 }}>
-                    <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+                  <td className="cell-wrap">
+                    <div className="post-cell">
                       {p.image_url ? (
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img src={p.image_url} alt="" style={{ width: 44, height: 44, borderRadius: 8, objectFit: "cover", flex: "none" }} />
+                        <img src={p.image_url} alt="" className="post-thumb" />
                       ) : null}
-                      <span style={{ display: "block" }}>{p.body || <em style={{ color: "#9ca3af" }}>(no text)</em>}</span>
+                      <span className="post-body">{p.body || <em className="cell-muted">(no text)</em>}</span>
                     </div>
                   </td>
-                  <td>{p.scope}<div style={{ color: "#9ca3af", fontSize: 11 }}>{p.post_type}</div></td>
+                  <td>{p.scope}<div className="subtext">{p.post_type}</div></td>
                   <td>
                     <span className={aiClass(p.ai_flag)} title={p.ai_reason ?? ""}>{p.ai_flag ?? "—"}</span>
                   </td>
-                  <td>{p.report_count > 0 ? <strong style={{ color: "#b33737" }}>{p.report_count}</strong> : "0"}</td>
+                  <td>{p.report_count > 0 ? <strong className="cell-bad">{p.report_count}</strong> : "0"}</td>
                   <td><Status label={p.status} /></td>
                   <td>
                     <div className="row-actions">
@@ -226,7 +228,7 @@ export function CommunityModerator() {
                 </tr>
               ))}
               {!loading && posts.length === 0 ? (
-                <tr><td colSpan={7} style={{ color: "#9ca3af" }}>No posts match this filter.</td></tr>
+                <tr><td colSpan={7} className="table-empty"><strong>No posts match this filter.</strong><span>Try another tab above.</span></td></tr>
               ) : null}
             </tbody>
           </table>

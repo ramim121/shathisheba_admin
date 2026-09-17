@@ -1,0 +1,959 @@
+/* ===========================================================================
+   Controls — buttons, text inputs, the custom select and multi-select,
+   segmented toggles, search boxes, chips.
+
+   Everything interactive is one of three heights (--h-sm / --h-md / --h-lg)
+   and shares one border, radius, hover and focus treatment, so a toolbar of
+   mixed controls lines up instead of stair-stepping.
+   =========================================================================== */
+
+/* --- buttons ------------------------------------------------------------- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: var(--h-md);
+  padding: 0 13px;
+  /* The bare `.btn` is a usable secondary button, not an invisible one: a
+     dozen screens write `className="btn"` with no variant, and before this
+     they rendered as transparent text on the page background. */
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink-700);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  white-space: nowrap;
+  box-shadow: var(--e1);
+  transition: background var(--t-fast), border-color var(--t-fast), color var(--t-fast), box-shadow var(--t-fast);
+}
+
+.btn:hover {
+  border-color: var(--brand-300);
+  background: var(--brand-50);
+  color: var(--brand-700);
+}
+
+.btn svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+
+.btn:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+
+.btn:disabled,
+.btn[aria-disabled="true"] {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.btn.primary {
+  background: var(--brand-600);
+  border-color: var(--brand-700);
+  color: #fff;
+  box-shadow: var(--e1);
+}
+
+.btn.primary:hover {
+  background: var(--brand-700);
+}
+
+.btn.primary:active {
+  background: var(--brand-800);
+}
+
+.btn.ghost {
+  background: var(--surface);
+  border-color: var(--line-strong);
+  color: var(--ink-700);
+  box-shadow: var(--e1);
+}
+
+.btn.ghost:hover {
+  border-color: var(--brand-300);
+  background: var(--brand-50);
+  color: var(--brand-700);
+}
+
+.btn.ghost.active {
+  border-color: var(--brand-400);
+  background: var(--brand-50);
+  color: var(--brand-700);
+}
+
+.btn.subtle {
+  background: var(--surface-sunken);
+  color: var(--ink-600);
+}
+
+.btn.subtle:hover {
+  background: var(--ink-100);
+  color: var(--ink-800);
+}
+
+.btn.danger {
+  background: var(--bad-bg);
+  border-color: var(--bad-line);
+  color: var(--bad-fg);
+}
+
+.btn.danger:hover {
+  background: var(--bad-solid);
+  border-color: var(--bad-solid);
+  color: #fff;
+}
+
+/* `.small` is the spelling used by the loan and geo screens; same control. */
+.btn.sm,
+.btn.small {
+  height: var(--h-sm);
+  padding: 0 10px;
+  font-size: var(--fs-xs);
+  gap: 5px;
+}
+
+.btn.sm svg,
+.btn.small svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* "Add …" buttons read as an invitation rather than a committed action. */
+.btn.add {
+  border-style: dashed;
+  border-color: var(--brand-300);
+  color: var(--brand-700);
+  box-shadow: none;
+}
+
+.btn.add:hover {
+  border-style: solid;
+  background: var(--brand-50);
+}
+
+.btn.is-danger {
+  border-color: var(--bad-line);
+  background: var(--bad-bg);
+  color: var(--bad-fg);
+}
+
+.btn.is-danger:hover {
+  border-color: var(--bad-solid);
+  background: var(--bad-solid);
+  color: #fff;
+}
+
+.btn.lg {
+  height: var(--h-lg);
+  padding: 0 18px;
+  font-size: var(--fs-base);
+}
+
+.btn.icon {
+  width: var(--h-md);
+  padding: 0;
+}
+
+.btn.icon.sm {
+  width: var(--h-sm);
+}
+
+.btn.block {
+  width: 100%;
+}
+
+.btn.btn-ctl {
+  flex: none;
+  height: var(--h-md);
+  padding: 0 12px;
+  gap: 6px;
+}
+
+.btn.btn-ctl.is-busy {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+/* A text button that reads as a link but keeps a 24px hit area. */
+.link-clear {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--brand-600);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.link-clear:hover {
+  color: var(--brand-800);
+}
+
+.count-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: var(--s3);
+  height: var(--h-sm);
+  padding: 0 13px;
+  border-radius: var(--r-pill);
+  background: var(--brand-600);
+  color: #fff;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+}
+
+.count-btn:hover {
+  background: var(--brand-700);
+}
+
+.aq-refresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  align-self: flex-start;
+  height: var(--h-md);
+  padding: 0 13px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink-700);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  box-shadow: var(--e1);
+}
+
+.aq-refresh:hover {
+  border-color: var(--brand-300);
+  background: var(--brand-50);
+  color: var(--brand-700);
+}
+
+.aq-refresh:disabled {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+/* --- text inputs --------------------------------------------------------- */
+
+.input,
+.field input,
+.field select,
+.field textarea,
+.col-filter,
+.geo-edit input,
+.pcr-actions input,
+.wf-form input:not([type="hidden"]):not([type="checkbox"]):not([type="file"]),
+.wf-form select,
+.wf-form textarea,
+.wf-check input[type="text"],
+.pubform input,
+.pubform select,
+.pubform textarea,
+.rowform input,
+.rowform select {
+  width: 100%;
+  min-width: 0;
+  height: var(--h-md);
+  padding: 0 var(--ctl-px);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink-900);
+  font-size: var(--fs-base);
+  font-weight: var(--fw-regular);
+  transition: border-color var(--t-fast), box-shadow var(--t-fast), background var(--t-fast);
+}
+
+.input:hover:not(:disabled),
+.field input:hover:not(:disabled),
+.field textarea:hover:not(:disabled),
+.col-filter:hover {
+  border-color: var(--ink-300);
+}
+
+.input:focus,
+.field input:focus,
+.field select:focus,
+.field textarea:focus,
+.col-filter:focus,
+.geo-edit input:focus,
+.pcr-actions input:focus,
+.wf-form input:focus,
+.wf-form select:focus,
+.wf-form textarea:focus,
+.wf-check input[type="text"]:focus,
+.pubform input:focus,
+.pubform select:focus,
+.pubform textarea:focus,
+.rowform input:focus,
+.rowform select:focus {
+  outline: none;
+  border-color: var(--brand-500);
+  box-shadow: var(--ring);
+}
+
+.input:disabled,
+.field input:disabled,
+.field select:disabled,
+.field textarea:disabled {
+  background: var(--surface-sunken);
+  color: var(--ink-400);
+  cursor: not-allowed;
+}
+
+.input[aria-invalid="true"] {
+  border-color: var(--bad-solid);
+}
+
+.input[aria-invalid="true"]:focus {
+  box-shadow: var(--ring-bad);
+}
+
+textarea.input,
+.field textarea,
+.wf-form textarea,
+.pubform textarea {
+  height: auto;
+  min-height: 84px;
+  padding: 9px var(--ctl-px);
+  line-height: var(--lh-normal);
+  resize: vertical;
+}
+
+select.input,
+.field select,
+.wf-form select,
+.pubform select {
+  padding-right: 30px;
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%238e7b87' stroke-width='2.2' stroke-linecap='round'><path d='m6 9 6 6 6-6'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--brand-600);
+  cursor: pointer;
+}
+
+input[type="file"] {
+  font-size: var(--fs-sm);
+  color: var(--ink-500);
+}
+
+/* Value plus a fixed unit (৳/kg, %) inside one box. */
+.input-affix {
+  position: relative;
+  flex: 1 1 120px;
+  min-width: 110px;
+}
+
+.input-affix input.input {
+  padding-right: 52px;
+}
+
+.input-affix .affix {
+  position: absolute;
+  top: 50%;
+  right: var(--ctl-px);
+  transform: translateY(-50%);
+  color: var(--ink-400);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  pointer-events: none;
+}
+
+.image-field {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+
+.image-field input.input {
+  flex: 1;
+}
+
+.image-thumb {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: var(--h-md);
+  height: var(--h-md);
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface-sunken);
+  color: var(--ink-300);
+}
+
+.image-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* --- search boxes -------------------------------------------------------- */
+
+.search-box,
+.geo-search {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  height: var(--h-md);
+  padding: 0 var(--ctl-px);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink-400);
+  box-shadow: var(--e1);
+  transition: border-color var(--t-fast), box-shadow var(--t-fast);
+}
+
+.search-box:hover,
+.geo-search:hover {
+  border-color: var(--ink-300);
+}
+
+.search-box input,
+.geo-search input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--ink-900);
+  font-size: var(--fs-base);
+}
+
+.search-box input {
+  width: 190px;
+}
+
+.search-box input[type="search"]::-webkit-search-cancel-button {
+  cursor: pointer;
+}
+
+.search-box:focus-within,
+.geo-search:focus-within {
+  border-color: var(--brand-500);
+  box-shadow: var(--ring);
+  color: var(--brand-600);
+}
+
+.geo-search.wide {
+  min-width: 260px;
+  width: 100%;
+}
+
+.geo-hits {
+  list-style: none;
+  margin: var(--s1) 0 0;
+  padding: var(--s1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: var(--e3);
+  overflow: hidden;
+}
+
+.geo-hits button {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: var(--r-xs);
+  background: none;
+  text-align: left;
+}
+
+.geo-hits button:hover,
+.geo-hits button:focus-visible {
+  outline: none;
+  background: var(--brand-50);
+}
+
+.geo-hits strong {
+  color: var(--ink-900);
+  font-size: var(--fs-base);
+  font-weight: var(--fw-semibold);
+}
+
+.geo-hits span {
+  color: var(--ink-500);
+  font-size: var(--fs-xs);
+}
+
+.geo-hits.inline {
+  margin: 0 0 var(--s3);
+}
+
+/* --- chips and segmented toggles ----------------------------------------- */
+
+.filter-tabs {
+  display: inline-flex;
+  margin-bottom: var(--s3);
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: var(--e1);
+}
+
+.filter-tab {
+  border: 0;
+  border-radius: var(--r-xs);
+  background: transparent;
+  color: var(--ink-500);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  padding: 6px 13px;
+  transition: background var(--t-fast), color var(--t-fast);
+}
+
+.filter-tab:hover {
+  background: var(--brand-50);
+  color: var(--brand-600);
+}
+
+.filter-tab.active {
+  background: var(--brand-600);
+  color: #fff;
+  font-weight: var(--fw-semibold);
+}
+
+.chip-btn {
+  height: var(--h-sm);
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  color: var(--ink-600);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  text-transform: capitalize;
+  transition: background var(--t-fast), border-color var(--t-fast), color var(--t-fast);
+}
+
+.chip-btn:hover {
+  border-color: var(--brand-300);
+  color: var(--brand-600);
+}
+
+.chip-btn.active {
+  border-color: var(--brand-600);
+  background: var(--brand-600);
+  color: #fff;
+  font-weight: var(--fw-semibold);
+}
+
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.seg {
+  display: inline-flex;
+  flex: none;
+  gap: 2px;
+  height: var(--h-md);
+  padding: 3px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface-sunken);
+}
+
+.seg button {
+  padding: 0 11px;
+  border: 0;
+  border-radius: var(--r-xs);
+  background: transparent;
+  color: var(--ink-500);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  white-space: nowrap;
+}
+
+.seg button:hover:not(:disabled) {
+  color: var(--brand-600);
+}
+
+.seg button[aria-checked="true"] {
+  background: var(--surface);
+  color: var(--brand-700);
+  box-shadow: var(--e1), 0 0 0 1px rgb(123 21 54 / 0.1);
+}
+
+.seg button:focus-visible {
+  outline: 2px solid var(--brand-600);
+  outline-offset: 1px;
+}
+
+.seg button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.fee-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+}
+
+/* --- custom single select (components/Select.tsx) ------------------------ */
+
+.sel {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+
+.sel-trigger {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  width: 100%;
+  height: var(--h-md);
+  padding: 0 9px 0 var(--ctl-px);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink-900);
+  font-size: var(--fs-base);
+  text-align: left;
+  transition: border-color var(--t-fast), box-shadow var(--t-fast);
+}
+
+.sel-trigger:hover:not(:disabled) {
+  border-color: var(--ink-300);
+}
+
+.sel-trigger:focus {
+  outline: none;
+}
+
+.sel-trigger:focus-visible,
+.sel-trigger.open {
+  border-color: var(--brand-500);
+  box-shadow: var(--ring);
+}
+
+.sel-trigger:disabled {
+  background: var(--surface-sunken);
+  color: var(--ink-400);
+  cursor: not-allowed;
+}
+
+.sel-trigger[aria-invalid="true"] {
+  border-color: var(--bad-solid);
+}
+
+.sel-trigger[aria-invalid="true"]:focus-visible {
+  box-shadow: var(--ring-bad);
+}
+
+.sel-value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sel-value.placeholder {
+  color: var(--ink-400);
+}
+
+.sel-chevron {
+  flex: none;
+  color: var(--ink-400);
+  transition: transform var(--t-base);
+}
+
+.sel-trigger.open .sel-chevron {
+  transform: rotate(180deg);
+  color: var(--brand-600);
+}
+
+.sel-sm .sel-trigger {
+  height: var(--h-sm);
+  padding: 0 7px 0 10px;
+  border-radius: var(--r-xs);
+  font-size: var(--fs-sm);
+}
+
+.sel-pop {
+  position: absolute;
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 200px;
+  max-height: 340px;
+  margin-top: var(--s1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: var(--e3);
+  overflow: hidden;
+  animation: pop-in var(--t-fast) ease;
+}
+
+.sel-search {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  flex: none;
+  padding: var(--s2) var(--ctl-px);
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-400);
+}
+
+.sel-search input {
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--ink-900);
+  font-size: var(--fs-base);
+}
+
+.sel-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 280px;
+  padding: var(--s1);
+  outline: none;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.sel-group {
+  padding: 8px 10px 4px;
+  color: var(--ink-400);
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-bold);
+  text-transform: uppercase;
+  letter-spacing: var(--track-caps);
+}
+
+.sel-option {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: 7px 10px;
+  border-radius: var(--r-xs);
+  font-size: var(--fs-base);
+  line-height: var(--lh-snug);
+  cursor: pointer;
+}
+
+.sel-option-label {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.sel-option.active {
+  background: var(--brand-50);
+}
+
+.sel-option.selected {
+  color: var(--brand-700);
+  font-weight: var(--fw-semibold);
+}
+
+.sel-option.is-empty:not(.selected) .sel-option-label {
+  color: var(--ink-500);
+}
+
+.sel-option > svg {
+  flex: none;
+  color: var(--brand-600);
+}
+
+.sel-option[aria-disabled="true"] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.sel-empty {
+  padding: var(--s3) 10px;
+  color: var(--ink-400);
+  font-size: var(--fs-sm);
+}
+
+/* --- multi select (components/MultiSelect.tsx) --------------------------- */
+
+.msel {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+
+.msel-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  min-height: var(--h-md);
+  padding: 4px 30px 4px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink-900);
+  font-size: var(--fs-base);
+  text-align: left;
+  transition: border-color var(--t-fast), box-shadow var(--t-fast);
+}
+
+.msel-control:hover {
+  border-color: var(--ink-300);
+}
+
+.msel-control.focused {
+  border-color: var(--brand-500);
+  box-shadow: var(--ring);
+}
+
+.msel-control[aria-invalid="true"] {
+  border-color: var(--bad-solid);
+}
+
+.msel-control.disabled {
+  background: var(--surface-sunken);
+  color: var(--ink-400);
+  cursor: not-allowed;
+}
+
+.msel-chevron {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  transform: translateY(-50%);
+  color: var(--ink-400);
+  pointer-events: none;
+}
+
+.msel-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 2px 4px 2px 9px;
+  border: 1px solid var(--brand-200);
+  border-radius: var(--r-pill);
+  background: var(--brand-50);
+  color: var(--brand-700);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+}
+
+.msel-chip > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.msel-chip button {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 17px;
+  height: 17px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-xs);
+  background: transparent;
+  color: inherit;
+}
+
+.msel-chip button:hover,
+.msel-chip button:focus-visible {
+  outline: none;
+  background: rgb(123 21 54 / 0.12);
+}
+
+.msel-box {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border: 1.5px solid var(--ink-300);
+  border-radius: var(--r-xs);
+  background: var(--surface);
+  color: #fff;
+}
+
+.msel-box.on {
+  border-color: var(--brand-600);
+  background: var(--brand-600);
+}
+
+.msel-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: none;
+  padding: 7px var(--ctl-px);
+  border-top: 1px solid var(--line);
+  color: var(--ink-500);
+  font-size: var(--fs-xs);
+}
+
+.msel-foot button {
+  border: 0;
+  background: none;
+  color: var(--brand-600);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+}
+
+@keyframes pop-in {
+  from { opacity: 0; transform: translateY(-3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* "Edit this record" link on an approval card — an outline affordance rather
+   than a solid button, so it does not compete with Approve/Reject. */
+.aq-editlink {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-sm);
+  color: var(--brand-700);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+}
+
+.aq-editlink:hover {
+  border-style: solid;
+  border-color: var(--brand-300);
+  background: var(--brand-50);
+}

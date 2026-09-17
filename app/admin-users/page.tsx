@@ -58,14 +58,14 @@ export default function AdminUsersPage() {
     <AdminShell>
       <div className="page-head">
         <div>
-          <h1 className="page-title"><ShieldCheck size={22} style={{ verticalAlign: "-4px", marginRight: 8 }} />Admin Users</h1>
+          <h1 className="page-title"><ShieldCheck size={22} />Admin Users</h1>
           <p className="page-sub">Manage who can sign in to the admin console. New admins can also be created via the API: <code>POST /api/admin/users</code>.</p>
         </div>
       </div>
 
       <div className="au-grid">
         <form className="au-card" onSubmit={submit}>
-          <h2 className="au-card-title"><UserPlus size={17} style={{ verticalAlign: "-3px", marginRight: 6 }} />Add admin</h2>
+          <h2 className="au-card-title"><UserPlus size={17} />Add admin</h2>
           <label className="login-label">Full name</label>
           <input className="login-input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
           <label className="login-label">Email</label>

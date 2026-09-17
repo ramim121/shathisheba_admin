@@ -46,17 +46,17 @@
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--brand);
+  color: var(--brand-600);
 }
 .lw-why {
   margin: 0;
   font-size: 13px;
   line-height: 1.55;
-  color: #5E4E57;
+  color: var(--ink-700);
   max-width: 72ch;
 }
 .lw-why strong {
-  color: var(--ink);
+  color: var(--ink-900);
 }
 .lw-acts {
   display: flex;
@@ -64,9 +64,9 @@
   flex-wrap: wrap;
 }
 .lw-danger-btn {
-  border: 1px solid #F0C4C4;
-  background: #FFF6F6;
-  color: #9B2226;
+  border: 1px solid var(--bad-line);
+  background: var(--bad-bg);
+  color: var(--bad-fg);
   border-radius: 10px;
   padding: 8px 14px;
   font: inherit;
@@ -78,8 +78,8 @@
   cursor: pointer;
 }
 .lw-danger-btn:hover:not(:disabled) {
-  background: #FDEBEB;
-  border-color: #E0A2A2;
+  background: var(--bad-bg);
+  border-color: var(--bad-line);
 }
 .lw-danger-btn:disabled {
   opacity: 0.55;
@@ -92,12 +92,12 @@
   display: flex;
   gap: 12px;
   align-items: flex-start;
-  border: 1px solid #F0C4C4;
-  background: #FFF6F6;
+  border: 1px solid var(--bad-line);
+  background: var(--bad-bg);
   border-radius: 12px;
   padding: 13px 15px;
   margin-bottom: 14px;
-  color: #7A2126;
+  color: var(--bad-fg);
 }
 .lw-closed h3 {
   margin: 0 0 3px;
@@ -145,31 +145,31 @@
   border-radius: 999px;
   padding: 3px 10px;
   white-space: nowrap;
-  border: 1px solid var(--rose-line);
+  border: 1px solid var(--line);
   background: #fff;
-  color: var(--muted);
+  color: var(--ink-500);
 }
 .lw-chip.set {
-  background: #F3E6D8;
-  border-color: #DCC1A5;
-  color: #6B4423;
+  background: var(--warn-bg);
+  border-color: var(--warn-line);
+  color: var(--warn-fg);
 }
 .lw-chip.saved {
-  background: #EAF6EF;
-  border-color: #A9D8BA;
-  color: #1E6B3E;
+  background: var(--ok-bg);
+  border-color: var(--ok-line);
+  color: var(--ok-fg);
 }
 .lw-hint {
   margin: 0 0 10px;
   font-size: 12.5px;
-  color: var(--muted);
+  color: var(--ink-500);
   line-height: 1.55;
 }
 .lw-sub-h {
   margin: 16px 0 2px;
   font-size: 13px;
   font-weight: 700;
-  color: #5E4E57;
+  color: var(--ink-700);
 }
 
 /* "Nothing here is required" — said plainly rather than enforced. */
@@ -177,9 +177,9 @@
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  border: 1px dashed #CFE3D6;
-  background: #F4FBF6;
-  color: #23694A;
+  border: 1px dashed var(--ok-line);
+  background: var(--ok-bg);
+  color: var(--ok-fg);
   border-radius: 10px;
   padding: 9px 12px;
   font-size: 12.5px;
@@ -200,7 +200,7 @@
   flex-wrap: wrap;
   margin-top: 14px;
   padding-top: 12px;
-  border-top: 1px solid #F1EAEE;
+  border-top: 1px solid var(--line);
 }
 .lw-msg {
   font-size: 12.5px;
@@ -209,12 +209,12 @@
   padding: 5px 10px;
 }
 .lw-msg.ok {
-  background: #EAF6EF;
-  color: #1E6B3E;
+  background: var(--ok-bg);
+  color: var(--ok-fg);
 }
 .lw-msg.bad {
-  background: #FDEEEE;
-  color: #8A1F1F;
+  background: var(--bad-bg);
+  color: var(--bad-fg);
 }
 
 /* --- Vaccination list --------------------------------------------------- */
@@ -228,14 +228,14 @@
   display: flex;
   gap: 12px;
   align-items: flex-start;
-  border: 1px solid #EEE6EA;
+  border: 1px solid var(--line-strong);
   border-radius: 11px;
   padding: 10px 12px;
-  background: #FCFAFB;
+  background: var(--surface-sunken);
 }
 .lw-vax-row.editing {
-  border-color: #C9A27E;
-  background: #FFFBF6;
+  border-color: var(--warn-line);
+  background: var(--warn-bg);
 }
 .lw-vax-main {
   min-width: 0;
@@ -251,12 +251,12 @@
   gap: 4px 12px;
   margin-top: 3px;
   font-size: 12px;
-  color: var(--muted);
+  color: var(--ink-500);
 }
 .lw-vax-note {
   margin: 4px 0 0;
   font-size: 12px;
-  color: #5E4E57;
+  color: var(--ink-700);
 }
 .lw-vax-acts {
   display: flex;
@@ -264,9 +264,9 @@
   flex: none;
 }
 .lw-mini {
-  border: 1px solid var(--rose-line);
+  border: 1px solid var(--line);
   background: #fff;
-  color: var(--brand);
+  color: var(--brand-600);
   border-radius: 8px;
   padding: 5px 9px;
   font: inherit;
@@ -278,14 +278,14 @@
   gap: 5px;
 }
 .lw-mini:hover:not(:disabled) {
-  background: #FDF6F9;
+  background: var(--surface-sunken);
 }
 .lw-mini.bad {
-  color: #9B2226;
-  border-color: #F0C4C4;
+  color: var(--bad-fg);
+  border-color: var(--bad-line);
 }
 .lw-mini.bad:hover:not(:disabled) {
-  background: #FFF6F6;
+  background: var(--bad-bg);
 }
 .lw-mini:disabled {
   opacity: 0.5;
@@ -294,11 +294,11 @@
 .lw-empty {
   margin: 0 0 10px;
   font-size: 12.5px;
-  color: var(--muted);
+  color: var(--ink-500);
   font-style: italic;
 }
 .lw-vax-form {
-  border: 1px solid var(--rose-line);
+  border: 1px solid var(--line);
   border-radius: 12px;
   padding: 12px 14px;
   background: #fff;
@@ -307,10 +307,10 @@
 /* --- Document attachments ----------------------------------------------- */
 
 .lw-docs {
-  border: 1px dashed #D5C7CE;
+  border: 1px dashed var(--line);
   border-radius: 11px;
   padding: 10px 12px;
-  background: #FCFAFB;
+  background: var(--surface-sunken);
   margin-top: 10px;
 }
 .lw-docs-list {
@@ -326,7 +326,7 @@
   gap: 8px;
   font-size: 12.5px;
   background: #fff;
-  border: 1px solid var(--rose-line);
+  border: 1px solid var(--line);
   border-radius: 8px;
   padding: 5px 9px;
 }
@@ -336,14 +336,14 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--brand);
+  color: var(--brand-600);
 }
 .lw-docs-add {
   display: flex;
   align-items: center;
   gap: 8px;
   font-size: 12px;
-  color: var(--muted);
+  color: var(--ink-500);
   flex-wrap: wrap;
 }
 .lw-docs-add input[type="file"] {
@@ -353,14 +353,14 @@
 .lw-x {
   border: 0;
   background: none;
-  color: #9B2226;
+  color: var(--bad-fg);
   cursor: pointer;
   padding: 2px;
   line-height: 0;
   border-radius: 6px;
 }
 .lw-x:hover:not(:disabled) {
-  background: #FDEBEB;
+  background: var(--bad-bg);
 }
 
 /* --- Reason modal ------------------------------------------------------- */
@@ -388,14 +388,14 @@
 .lw-modal p {
   margin: 0 0 12px;
   font-size: 13px;
-  color: var(--muted);
+  color: var(--ink-500);
   line-height: 1.55;
 }
 .lw-modal textarea {
   width: 100%;
   font: inherit;
   padding: 9px 11px;
-  border: 1px solid #DDD3D8;
+  border: 1px solid var(--line-strong);
   border-radius: 10px;
   resize: vertical;
 }
@@ -425,7 +425,7 @@
 }
 .lw-more > summary::after {
   content: "▾";
-  color: var(--muted);
+  color: var(--ink-500);
   font-size: 12px;
 }
 .lw-more[open] > summary::after {

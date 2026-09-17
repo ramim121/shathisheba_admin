@@ -1,0 +1,385 @@
+/* ===========================================================================
+   Tables — the surface the console is mostly made of.
+
+   Rules: one hairline between rows and none around them, a sticky header that
+   survives scrolling (including the filter row under it), figures in tabular
+   numerals so columns of money line up, and row actions that stay quiet until
+   the row is hovered.
+   =========================================================================== */
+
+.table-wrap {
+  min-height: 200px;
+  max-height: calc(100vh - 300px);
+  overflow: auto;
+}
+
+.panel .table-wrap {
+  border-radius: 0;
+}
+
+table {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+th,
+td {
+  padding: 10px var(--s4);
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: middle;
+}
+
+th {
+  background: var(--surface-sunken);
+  color: var(--ink-500);
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-bold);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+td {
+  color: var(--ink-800);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-regular);
+}
+
+tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+tbody tr {
+  transition: background var(--t-fast);
+}
+
+tbody tr:hover td {
+  background: var(--brand-50);
+}
+
+.data-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--surface-sunken);
+  box-shadow: inset 0 -1px 0 var(--line);
+}
+
+/* Second sticky row: the per-column filters, pinned below the labels. */
+.data-table thead .filter-row th {
+  top: 35px;
+  z-index: 1;
+  padding-top: 0;
+  padding-bottom: 7px;
+  background: var(--surface-sunken);
+}
+
+.data-table td {
+  font-variant-numeric: tabular-nums;
+}
+
+/* A header cell is a sort button filling the cell, so the whole label is a
+   target rather than the four words in the middle of it. */
+.data-table .th-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  text-align: left;
+}
+
+.data-table .th-sort:hover {
+  color: var(--brand-600);
+}
+
+.data-table .th-sort svg {
+  flex: none;
+  color: var(--brand-600);
+}
+
+.data-table .th-sort .th-sort-idle {
+  color: var(--ink-300);
+  opacity: 0;
+  transition: opacity var(--t-fast);
+}
+
+.data-table th:hover .th-sort-idle {
+  opacity: 1;
+}
+
+.col-filter {
+  height: var(--h-sm);
+  padding: 0 8px;
+  border-radius: var(--r-xs);
+  font-size: var(--fs-xs);
+}
+
+.filter-row th {
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.row-link {
+  cursor: pointer;
+}
+
+/* --- cell presentation --------------------------------------------------- */
+
+.cell-code {
+  padding: 2px 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-xs);
+  background: var(--surface-sunken);
+  color: var(--brand-800);
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+
+.cell-money {
+  color: var(--ink-900);
+  font-weight: var(--fw-semibold);
+  white-space: nowrap;
+}
+
+.cell-muted {
+  color: var(--ink-300);
+}
+
+.cell-sep {
+  padding: 0 var(--s1);
+  color: var(--ink-300);
+}
+
+.table-count {
+  color: var(--ink-500);
+  font-size: var(--fs-xs);
+}
+
+.table-empty {
+  padding: var(--s7) var(--s4);
+  color: var(--ink-400);
+  font-size: var(--fs-sm);
+  text-align: center;
+}
+
+.table-empty strong {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--ink-700);
+  font-size: var(--fs-base);
+  font-weight: var(--fw-semibold);
+}
+
+/* Placeholder rows: the table keeps its height while the fetch is running. */
+.cell-skeleton {
+  display: block;
+  width: 100%;
+  max-width: 180px;
+  height: 10px;
+  border-radius: var(--r-pill);
+  background: linear-gradient(90deg, var(--ink-100), var(--ink-50) 40%, var(--ink-100) 80%);
+  background-size: 200% 100%;
+  animation: cell-shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes cell-shimmer {
+  from { background-position: 140% 0; }
+  to { background-position: -40% 0; }
+}
+
+/* --- active filter summary ---------------------------------------------- */
+
+.active-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: var(--s2) var(--s4);
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-sunken);
+}
+
+.active-filters-label {
+  color: var(--ink-500);
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-bold);
+  text-transform: uppercase;
+  letter-spacing: var(--track-caps);
+}
+
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 7px 0 10px;
+  border: 1px solid var(--brand-200);
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  color: var(--ink-600);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+}
+
+.filter-chip b {
+  color: var(--brand-700);
+  font-weight: var(--fw-semibold);
+  max-width: 14ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.filter-chip svg {
+  flex: none;
+  color: var(--ink-400);
+}
+
+.filter-chip:hover {
+  border-color: var(--brand-400);
+  background: var(--brand-50);
+}
+
+.filter-chip:hover svg {
+  color: var(--bad-fg);
+}
+
+.mono {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: var(--fs-xs);
+}
+
+.cell-bad {
+  color: var(--bad-fg);
+  font-weight: var(--fw-semibold);
+}
+
+/* A cell allowed to wrap — long prose in an otherwise nowrap table. */
+.cell-wrap {
+  max-width: 340px;
+  white-space: normal;
+}
+
+td > .tag {
+  margin-left: 6px;
+}
+
+.post-cell {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s2);
+}
+
+.post-thumb {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  object-fit: cover;
+}
+
+.post-body {
+  display: block;
+  min-width: 0;
+  line-height: var(--lh-snug);
+}
+
+/* --- row actions --------------------------------------------------------- */
+
+.row-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.row-actions button,
+.row-actions a {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid transparent;
+  border-radius: var(--r-xs);
+  background: none;
+  color: var(--ink-400);
+  transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
+}
+
+.row-actions button:hover,
+.row-actions a:hover {
+  border-color: var(--line-strong);
+  background: var(--surface);
+  color: var(--brand-600);
+}
+
+.row-actions button:last-child:hover {
+  border-color: var(--bad-line);
+  background: var(--bad-bg);
+  color: var(--bad-fg);
+}
+
+.row-actions button:disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+/* --- footer: page size and pager ---------------------------------------- */
+
+.table-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+  flex: none;
+  flex-wrap: wrap;
+  padding: var(--s2) var(--s4);
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.table-footer .page-size,
+.table-footer .pager {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  color: var(--ink-500);
+  font-size: var(--fs-sm);
+}
+
+.table-footer .page-size .sel {
+  width: 74px;
+}
+
+.table-footer .page-indicator {
+  padding: 0 var(--s1);
+  color: var(--ink-700);
+  font-weight: var(--fw-semibold);
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .table-wrap {
+    max-height: none;
+  }
+
+  th,
+  td {
+    padding: 10px var(--s3);
+  }
+
+  .table-footer {
+    justify-content: center;
+  }
+}

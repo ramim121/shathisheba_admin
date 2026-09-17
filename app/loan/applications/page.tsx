@@ -72,10 +72,10 @@ const STATUS_TONE: Record<string, string> = {
   approved: "#1E9E5A",
   disbursed: "#1E9E5A",
   repaying: "#1E9E5A",
-  overdue: "#B4443C",
-  lender_declined: "#B4443C",
-  hard_stopped: "#B4443C",
-  ineligible: "#B4443C",
+  overdue: "var(--bad-fg)",
+  lender_declined: "var(--bad-fg)",
+  hard_stopped: "var(--bad-fg)",
+  ineligible: "var(--bad-fg)",
 };
 
 const taka = (n: unknown) => `৳${Number(n || 0).toLocaleString("en-IN")}`;
@@ -190,7 +190,7 @@ export default function LoanApplicationsPage() {
                       {r.tenure_months} mo · {r.repayment_mode.replace("_", " ")}
                     </td>
                     <td>
-                      <span className="chip" style={{ color: STATUS_TONE[r.status] ?? "#6b6b6b",
+                      <span className="chip" style={{ color: STATUS_TONE[r.status] ?? "var(--ink-500)",
                         borderColor: (STATUS_TONE[r.status] ?? "#ccc") + "55" }}>
                         {STATUS_LABEL[r.status] ?? r.status}
                       </span>
@@ -220,32 +220,31 @@ export default function LoanApplicationsPage() {
 
       <style jsx>{`
         .head { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; margin-bottom:18px; }
-        .eyebrow { text-transform:uppercase; letter-spacing:.08em; font-size:11px; font-weight:700; color:#9B5173; margin:0 0 4px; }
-        h1 { margin:0 0 6px; font-size:28px; }
-        .sub { margin:0; color:#6b6b6b; max-width:680px; }
+        .eyebrow { text-transform:uppercase; letter-spacing:.08em; font-size:var(--fs-2xs); font-weight:700; color:var(--brand-500); margin:0 0 4px; }
+        h1 { margin:0 0 6px; font-size:var(--fs-2xl); }
+        .sub { margin:0; color:var(--ink-500); max-width:680px; }
         .kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:14px; margin-bottom:18px; }
         .filters { display:flex; align-items:center; gap:12px; margin-bottom:12px; }
         .filter-select { width:240px; max-width:100%; }
-        .count { color:#6b6b6b; font-size:13px; }
-        .table-wrap { overflow-x:auto; background:#fff; border:1px solid #E8D7DF; border-radius:14px; }
-        table { width:100%; border-collapse:collapse; font-size:14px; }
-        th { text-align:left; padding:12px 14px; border-bottom:1px solid #E8D7DF; font-size:12px;
-             text-transform:uppercase; letter-spacing:.04em; color:#9B5173; white-space:nowrap; }
-        td { padding:12px 14px; border-bottom:1px solid #F4E8EE; vertical-align:top; }
+        .count { color:var(--ink-500); font-size:var(--fs-sm); }
+        .table-wrap { overflow-x:auto; background:var(--surface); border:1px solid var(--line); border-radius:var(--r-lg); box-shadow:var(--e2); }
+        table { width:100%; border-collapse:collapse; font-size:var(--fs-base); }
+        th { text-align:left; padding:10px 16px; background:var(--surface-sunken); border-bottom:1px solid var(--line); font-size:var(--fs-2xs); font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--ink-500); white-space:nowrap; }
+        td { padding:10px 16px; border-bottom:1px solid var(--line); vertical-align:top; font-size:var(--fs-sm); color:var(--ink-800); }
         tr:last-child td { border-bottom:none; }
-        .mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12.5px; }
+        .mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:var(--fs-sm); }
         .who { font-weight:600; }
-        .phone { color:#6b6b6b; font-size:12.5px; }
+        .phone { color:var(--ink-500); font-size:var(--fs-sm); }
         .num { font-weight:700; white-space:nowrap; }
-        .terms { color:#6b6b6b; white-space:nowrap; }
+        .terms { color:var(--ink-500); white-space:nowrap; }
         .chip { display:inline-block; border:1px solid; border-radius:999px; padding:3px 10px;
-                font-size:12px; font-weight:600; white-space:nowrap; }
-        .late { color:#B4443C; font-weight:700; }
-        .open { color:#871449; font-weight:600; text-decoration:none; white-space:nowrap; }
-        .pager { display:flex; align-items:center; gap:14px; justify-content:center; margin-top:16px; color:#6b6b6b; font-size:13px; }
-        .empty { background:#fff; border:1px solid #E8D7DF; border-radius:14px; padding:28px; text-align:center; }
-        .muted { color:#6b6b6b; }
-        .error { color:#B4443C; background:#FEF2F2; border:1px solid #F3C7C4; border-radius:10px; padding:12px 14px; }
+                font-size:var(--fs-xs); font-weight:600; white-space:nowrap; }
+        .late { color:var(--bad-fg); font-weight:700; }
+        .open { color:var(--brand-600); font-weight:600; text-decoration:none; white-space:nowrap; }
+        .pager { display:flex; align-items:center; gap:14px; justify-content:center; margin-top:16px; color:var(--ink-500); font-size:var(--fs-sm); }
+        .empty { background:var(--surface); border:1px solid var(--line); border-radius:var(--r-lg); padding:28px; text-align:center; box-shadow:var(--e1); }
+        .muted { color:var(--ink-500); }
+        .error { color:var(--bad-fg); background:var(--bad-bg); border:1px solid var(--bad-line); border-radius:var(--r-md); padding:12px 14px; }
       `}</style>
     </AdminShell>
   );
@@ -255,11 +254,11 @@ function Kpi({ label, value, tone }: { label: string; value: number; tone?: "war
   return (
     <div className="kpi">
       <p className="l">{label}</p>
-      <p className="v" style={{ color: tone === "warn" && value > 0 ? "#B4443C" : "#2B0B1E" }}>{value}</p>
+      <p className="v" style={{ color: tone === "warn" && value > 0 ? "var(--bad-fg)" : "var(--ink-900)" }}>{value}</p>
       <style jsx>{`
-        .kpi { background:#fff; border:1px solid #E8D7DF; border-radius:14px; padding:14px 16px; }
-        .l { margin:0 0 4px; font-size:12.5px; color:#6b6b6b; }
-        .v { margin:0; font-size:26px; font-weight:800; line-height:1.1; }
+        .kpi { background:var(--surface); border:1px solid var(--line); border-radius:var(--r-lg); padding:14px 16px; box-shadow:var(--e1); }
+        .l { margin:0 0 4px; font-size:var(--fs-sm); color:var(--ink-500); }
+        .v { margin:0; font-size:var(--fs-2xl); font-weight:700; line-height:1.1; }
       `}</style>
     </div>
   );

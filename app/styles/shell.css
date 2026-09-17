@@ -1,0 +1,699 @@
+/* ===========================================================================
+   Shell — the dark navigation rail, the content column, the page header and
+   the mobile drawer / bottom bar.
+   =========================================================================== */
+
+.app-shell {
+  display: grid;
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+/* --- navigation rail ------------------------------------------------------ */
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  padding: var(--s3) var(--s2) var(--s2);
+  background: var(--nav-bg);
+  border-right: 1px solid rgb(0 0 0 / 0.2);
+  color: var(--nav-fg);
+  overflow: hidden auto;
+  scrollbar-color: transparent transparent;
+  transition: scrollbar-color var(--t-base);
+}
+
+.sidebar:hover {
+  scrollbar-color: rgb(255 255 255 / 0.22) transparent;
+}
+
+.sidebar::-webkit-scrollbar {
+  width: 8px;
+}
+
+.sidebar::-webkit-scrollbar-thumb {
+  background: transparent;
+}
+
+.sidebar:hover::-webkit-scrollbar-thumb {
+  background: rgb(255 255 255 / 0.2);
+}
+
+.sidebar::-webkit-scrollbar-thumb:hover {
+  background: rgb(255 255 255 / 0.32);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s2) var(--s2) var(--s3);
+  margin-bottom: var(--s2);
+  border-bottom: 1px solid var(--nav-line);
+  border-radius: var(--r-md);
+}
+
+.brand:hover {
+  background: var(--nav-hover);
+}
+
+.brand-mark {
+  width: 36px;
+  height: 36px;
+  flex: none;
+  border-radius: var(--r-md);
+  background: conic-gradient(from 30deg, var(--gold), var(--gold) 25%, var(--brand-600) 0 52%, var(--brand-300) 0 74%, #fff 0);
+  box-shadow: inset 0 0 0 6px rgb(27 17 24 / 0.55), 0 1px 0 rgb(255 255 255 / 0.12);
+}
+
+.brand h1 {
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+  letter-spacing: -0.01em;
+}
+
+.brand p {
+  margin: 2px 0 0;
+  color: var(--nav-fg-faint);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  text-transform: uppercase;
+  letter-spacing: var(--track-caps);
+}
+
+/* The old "Live MySQL / Admin Console" gradient block took 60px of rail for
+   information nobody acts on; it is now a single status line. */
+.sidebar-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  margin: 0 var(--s2) var(--s2);
+  padding: 0;
+  color: var(--nav-fg-faint);
+  font-size: var(--fs-xs);
+}
+
+.sidebar-summary span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--nav-fg-dim);
+  font-weight: var(--fw-semibold);
+  text-transform: uppercase;
+  letter-spacing: var(--track-caps);
+}
+
+.sidebar-summary span::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ok-solid);
+  box-shadow: 0 0 0 3px rgb(30 138 85 / 0.22);
+}
+
+.sidebar-summary strong {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  color: var(--nav-fg-faint);
+}
+
+.nav-search {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  height: var(--h-md);
+  margin: 0 var(--s2) var(--s2);
+  padding: 0 var(--ctl-px);
+  border: 1px solid var(--nav-line);
+  border-radius: var(--r-sm);
+  background: rgb(255 255 255 / 0.05);
+  color: var(--nav-fg-faint);
+  transition: border-color var(--t-fast), background var(--t-fast);
+}
+
+.nav-search:focus-within {
+  border-color: rgb(255 255 255 / 0.3);
+  background: rgb(255 255 255 / 0.1);
+  color: var(--nav-fg-dim);
+}
+
+.nav-search input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  outline: none;
+  background: none;
+  color: #fff;
+  font-size: var(--fs-sm);
+}
+
+.nav-search input::placeholder {
+  color: rgb(255 255 255 / 0.38);
+}
+
+.nav-search-clear {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: var(--r-xs);
+  background: none;
+  color: rgb(255 255 255 / 0.55);
+  font-size: 17px;
+  line-height: 1;
+}
+
+.nav-search-clear:hover {
+  background: var(--nav-hover);
+  color: #fff;
+}
+
+.nav-pinned,
+.nav-search-results {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 var(--s2);
+}
+
+.nav-group {
+  margin: 0 0 var(--s3);
+  padding: 0 var(--s2) var(--s3);
+  border-bottom: 1px solid var(--nav-line);
+}
+
+.nav-group-title {
+  margin: 0 0 var(--s1);
+  padding: 0 var(--s2);
+  color: var(--nav-fg-faint);
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-bold);
+  text-transform: uppercase;
+  letter-spacing: var(--track-caps);
+}
+
+.nav-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  min-height: 34px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--r-sm);
+  color: var(--nav-fg-dim);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  transition: background var(--t-fast), color var(--t-fast);
+}
+
+.nav-item:hover {
+  background: var(--nav-hover);
+  color: #fff;
+}
+
+.nav-item.active {
+  background: var(--nav-active);
+  color: #fff;
+  font-weight: var(--fw-semibold);
+}
+
+/* A 3px brand bar marks the current destination without relying on the
+   background alone, which was nearly invisible on the old rail. */
+.nav-item.active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 7px;
+  bottom: 7px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--gold);
+}
+
+.nav-item svg {
+  width: 17px;
+  height: 17px;
+  flex: none;
+  opacity: 0.85;
+}
+
+.nav-item.active svg {
+  opacity: 1;
+}
+
+.nav-item-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nav-item-group {
+  flex: none;
+  min-width: 18px;
+  padding: 1px 6px;
+  border-radius: var(--r-pill);
+  background: rgb(255 255 255 / 0.08);
+  color: var(--nav-fg-faint);
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-bold);
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: var(--track-caps);
+}
+
+.nav-item.active .nav-item-group {
+  background: rgb(255 255 255 / 0.16);
+  color: #fff;
+}
+
+.nav-search-results .nav-item {
+  justify-content: flex-start;
+}
+
+.nav-search-empty {
+  padding: var(--s3) var(--s2);
+  color: var(--nav-fg-faint);
+  font-size: var(--fs-sm);
+}
+
+/* Legacy accordion rail — kept working for any screen still rendering it. */
+.nav-accordion {
+  margin: 0 var(--s2) 2px;
+}
+
+.nav-accordion-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  width: 100%;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--nav-fg-dim);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  text-align: left;
+}
+
+.nav-accordion-head:hover {
+  background: var(--nav-hover);
+  color: #fff;
+}
+
+.nav-accordion-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 17px;
+  height: 17px;
+}
+
+.nav-chevron {
+  margin-left: auto;
+  flex: none;
+  transition: transform var(--t-base);
+}
+
+.nav-accordion.open .nav-chevron {
+  transform: rotate(180deg);
+}
+
+.nav-accordion-body {
+  display: none;
+  padding: 2px 0 var(--s2) 28px;
+}
+
+.nav-accordion.open .nav-accordion-body {
+  display: block;
+}
+
+.nav-accordion .nav-item {
+  min-height: 30px;
+  font-size: var(--fs-sm);
+}
+
+/* --- signed-in admin, pinned to the bottom of the rail ------------------- */
+
+.admin-id-wrap {
+  margin-top: auto;
+  padding-top: var(--s3);
+}
+
+.admin-id {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  margin: 0 var(--s2) var(--s1);
+  padding: var(--s2);
+  border: 1px solid var(--nav-line);
+  border-radius: var(--r-md);
+  background: rgb(255 255 255 / 0.05);
+}
+
+.admin-id-avatar {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--r-sm);
+  background: linear-gradient(140deg, var(--gold), #c9821a);
+  color: #2a1a05;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold);
+}
+
+.admin-id-meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.admin-id-name {
+  overflow: hidden;
+  color: #fff;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-id-role {
+  overflow: hidden;
+  color: var(--nav-fg-faint);
+  font-size: var(--fs-2xs);
+  text-transform: uppercase;
+  letter-spacing: var(--track-caps);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-logout {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s2);
+  width: calc(100% - var(--s4));
+  margin: 0 var(--s2) var(--s1);
+  padding: var(--s2);
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--nav-fg-faint);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+}
+
+.admin-logout:hover {
+  background: var(--nav-hover);
+  border-color: var(--nav-line);
+  color: #fff;
+}
+
+/* --- content column ------------------------------------------------------ */
+
+.main {
+  min-width: 0;
+  width: 100%;
+  max-width: var(--content-max);
+  padding: var(--s5) var(--s6) var(--s9);
+  margin: 0 auto;
+}
+
+/* Page header: identity on the left, actions on the right, on one baseline. */
+.topbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--s5);
+  margin-bottom: var(--s4);
+  padding-bottom: var(--s4);
+  border-bottom: 1px solid var(--line);
+}
+
+.eyeline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 var(--s2);
+  color: var(--brand-500);
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-bold);
+  text-transform: uppercase;
+  letter-spacing: var(--track-caps);
+}
+
+.page-title {
+  margin: 0;
+  max-width: 42ch;
+  color: var(--ink-900);
+  font-size: clamp(var(--fs-xl), 2vw, var(--fs-2xl));
+  font-weight: var(--fw-semibold);
+  line-height: var(--lh-tight);
+  letter-spacing: -0.02em;
+}
+
+.subtitle {
+  margin: 6px 0 0;
+  max-width: 72ch;
+  color: var(--ink-500);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-normal);
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--s2);
+}
+
+.page-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s4);
+  margin-bottom: var(--s4);
+  padding-bottom: var(--s4);
+  border-bottom: 1px solid var(--line);
+}
+
+.page-sub {
+  margin: 6px 0 0;
+  max-width: 72ch;
+  color: var(--ink-500);
+  font-size: var(--fs-sm);
+}
+
+.page-sub code {
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-xs);
+  background: var(--surface-sunken);
+  font-size: var(--fs-xs);
+}
+
+.compact-topbar {
+  margin-bottom: var(--s3);
+  padding-bottom: var(--s3);
+}
+
+/* --- section tabs (the pages inside a rail destination) ------------------ */
+
+.section-tabs {
+  display: flex;
+  gap: 2px;
+  margin: 0 0 var(--s4);
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: var(--e1);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.section-tabs::-webkit-scrollbar {
+  height: 0;
+}
+
+.section-tabs a {
+  flex: none;
+  padding: 7px 13px;
+  border-radius: var(--r-xs);
+  color: var(--ink-500);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  white-space: nowrap;
+  transition: background var(--t-fast), color var(--t-fast);
+}
+
+.section-tabs a:hover {
+  background: var(--brand-50);
+  color: var(--brand-600);
+}
+
+.section-tabs a.active {
+  background: var(--brand-600);
+  color: #fff;
+  font-weight: var(--fw-semibold);
+}
+
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: var(--s3);
+  color: var(--ink-500);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+}
+
+.back-link:hover {
+  color: var(--brand-600);
+}
+
+/* --- phones and tablets -------------------------------------------------- */
+
+.mobile-nav,
+.mobile-drawer {
+  display: none;
+}
+
+@media (max-width: 1180px) {
+  .app-shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sidebar {
+    display: none;
+  }
+
+  .main {
+    padding: var(--s4) var(--s4) 92px;
+  }
+
+  .topbar,
+  .page-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .toolbar {
+    justify-content: flex-start;
+  }
+
+  /* The rail, reachable from "Menu" in the bottom bar. */
+  .mobile-drawer {
+    position: fixed;
+    inset: 0;
+    z-index: 80;
+    display: flex;
+    background: rgb(27 17 24 / 0.5);
+    backdrop-filter: blur(2px);
+    animation: shell-fade var(--t-base) ease;
+  }
+
+  .mobile-drawer-panel {
+    display: flex;
+    width: min(300px, 86vw);
+    height: 100%;
+    box-shadow: var(--e4);
+    animation: shell-slide var(--t-base) ease;
+  }
+
+  .sidebar.mobile-drawer-panel {
+    display: flex;
+  }
+
+  .mobile-drawer-close {
+    position: absolute;
+    top: var(--s3);
+    right: var(--s3);
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    border: 1px solid var(--nav-line);
+    border-radius: var(--r-sm);
+    background: rgb(255 255 255 / 0.07);
+    color: #fff;
+  }
+
+  .mobile-nav {
+    position: fixed;
+    left: var(--s3);
+    right: var(--s3);
+    bottom: var(--s3);
+    z-index: 40;
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
+    padding: 6px;
+    border-radius: var(--r-lg);
+    background: var(--nav-bg);
+    box-shadow: var(--e3);
+  }
+
+  /* "Menu" is a <button> next to three <a>s; before this it rendered as a
+     default grey browser button in the middle of the bar. */
+  .mobile-nav a,
+  .mobile-nav button {
+    display: grid;
+    place-items: center;
+    gap: 3px;
+    padding: 7px 4px;
+    border: 0;
+    border-radius: var(--r-sm);
+    background: none;
+    color: var(--nav-fg-dim);
+    font-size: var(--fs-2xs);
+    font-weight: var(--fw-semibold);
+    letter-spacing: 0.01em;
+  }
+
+  .mobile-nav a.active,
+  .mobile-nav a:active,
+  .mobile-nav button:active {
+    background: var(--nav-active);
+    color: #fff;
+  }
+}
+
+@keyframes shell-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes shell-slide {
+  from { transform: translateX(-12px); opacity: 0.6; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+/* Icons sitting inside a heading or a card title: nudged once here, rather
+   than with a `style={{ verticalAlign: "-4px" }}` on each one. */
+.page-title svg,
+.au-card-title svg,
+.section-title svg {
+  vertical-align: -3px;
+  margin-right: 8px;
+  color: var(--brand-600);
+}
+
+.page-sub svg,
+.subtitle svg {
+  vertical-align: -3px;
+  margin-right: 5px;
+}

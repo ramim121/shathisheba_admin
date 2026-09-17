@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowDown, ArrowUp, ChevronsUpDown, Download, Edit3, Eye, Filter, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronsUpDown, Download, Edit3, Eye, Filter, Plus, RefreshCw, Search, Trash2, X } from "lucide-react";
 import { AdminShell } from "@/components/AdminShell";
 import { Status } from "@/components/Status";
 import { Select } from "@/components/Select";
@@ -282,6 +282,34 @@ export function ManagementPage({
             <Status label={loading ? "Loading" : `${filteredRows.length}${filteredRows.length !== rows.length ? ` of ${rows.length}` : ""} records`} />
           </div>
           {message ? <div className="notice">{message}</div> : null}
+          {/* What is currently narrowing the table, and a way out of each one —
+              column filters used to be invisible once the filter row was
+              collapsed again. */}
+          {activeFilterCount || query ? (
+            <div className="active-filters">
+              <span className="active-filters-label">Filtered by</span>
+              {query ? (
+                <button type="button" className="filter-chip" onClick={() => setQuery("")}>
+                  search: <b>{query}</b><X size={13} />
+                </button>
+              ) : null}
+              {Object.entries(colFilters)
+                .filter(([, v]) => v.trim() !== "")
+                .map(([key, value]) => (
+                  <button
+                    type="button"
+                    className="filter-chip"
+                    key={key}
+                    onClick={() => setColFilters((f) => ({ ...f, [key]: "" }))}
+                  >
+                    {allColumns.find((c) => c.key === key)?.label ?? key}: <b>{value}</b><X size={13} />
+                  </button>
+                ))}
+              <button type="button" className="link-clear" onClick={() => { setColFilters({}); setQuery(""); }}>
+                Clear all
+              </button>
+            </div>
+          ) : null}
           <div className="table-wrap">
             <table className="data-table">
               <thead>
@@ -344,10 +372,32 @@ export function ManagementPage({
                     </td>
                   </tr>
                 ))}
+                {/* Placeholder rows while the fetch is in flight, so the table
+                    keeps its shape instead of collapsing to a single line. */}
+                {loading && rows.length === 0
+                  ? Array.from({ length: 6 }, (_, i) => (
+                      <tr key={`skeleton-${i}`} aria-hidden="true">
+                        {allColumns.map((column) => (
+                          <td key={column.key}><span className="cell-skeleton" /></td>
+                        ))}
+                        <td><span className="cell-skeleton" /></td>
+                      </tr>
+                    ))
+                  : null}
                 {!loading && filteredRows.length === 0 ? (
                   <tr>
-                    <td colSpan={allColumns.length + 1} style={{ color: "#9ca3af", padding: "20px 12px" }}>
-                      {query || activeFilterCount ? "No records match the current search/filters." : "No records yet. Use Create to add the first one."}
+                    <td colSpan={allColumns.length + 1} className="table-empty">
+                      {query || activeFilterCount ? (
+                        <>
+                          <strong>No {entityName.toLowerCase()} match this search.</strong>
+                          <span>Clear the search box or the column filters to see every record.</span>
+                        </>
+                      ) : (
+                        <>
+                          <strong>No records yet.</strong>
+                          <span>Use “Create {entityName}” to add the first one.</span>
+                        </>
+                      )}
                     </td>
                   </tr>
                 ) : null}

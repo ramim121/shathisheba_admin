@@ -221,7 +221,7 @@ export async function ResourceDetailPage({ config, resource, id }: Props) {
             ) : null}
             <div className="panel-header">
               <div>
-                <h2><Database size={16} style={{ verticalAlign: "-2px", marginRight: 6 }} />Record Fields</h2>
+                <h2><Database size={16} />Record Fields</h2>
                 <p>{entries.length} columns from <code>{resource}</code>.</p>
               </div>
             </div>
@@ -246,7 +246,7 @@ export async function ResourceDetailPage({ config, resource, id }: Props) {
           <aside className="panel">
             <div className="panel-header">
               <div>
-                <h2><Link2 size={16} style={{ verticalAlign: "-2px", marginRight: 6 }} />Related Data</h2>
+                <h2><Link2 size={16} />Related Data</h2>
                 <p>Linked records from joined tables.</p>
               </div>
             </div>

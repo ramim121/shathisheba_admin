@@ -149,7 +149,7 @@ export function UserRolesManager() {
                           <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
                             {u.roles.map((r) => <Status key={r} label={roleLabel(r)} />)}
                           </div>
-                        ) : <span style={{ color: "#9ca3af" }}>None</span>}
+                        ) : <span style={{ color: "var(--ink-400)" }}>None</span>}
                       </td>
                       <td>
                         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>

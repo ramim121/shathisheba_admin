@@ -218,16 +218,16 @@ export default function ApiViewerPage() {
 
           <style jsx>{`
             .api-filter { display:flex; gap:8px; align-items:center; padding:0 0 12px; }
-            .api-filter input { flex:1; padding:9px 12px; border:1px solid #E8D7DF; border-radius:9px; font-size:14px; }
-            .api-filter button { border:1px solid #E8D7DF; background:#fff; border-radius:9px; width:34px; height:34px; cursor:pointer; }
-            .api-group { border-top:1px solid #F4E8EE; }
+            .api-filter input { flex:1; padding:9px 12px; border:1px solid var(--line); border-radius:var(--r-sm); font-size:var(--fs-base); }
+            .api-filter button { border:1px solid var(--line); background:var(--surface); border-radius:var(--r-sm); width:34px; height:34px; cursor:pointer; }
+            .api-group { border-top:1px solid var(--line); }
             .api-group:first-child { border-top:none; }
             .api-group-head { width:100%; display:flex; align-items:center; gap:10px; background:none; border:none;
                               padding:12px 2px; cursor:pointer; text-align:left; }
-            .api-group-title { font-weight:700; font-size:14px; color:#2B0B1E; }
-            .api-group-count { background:#F4E8EE; color:#871449; border-radius:999px; padding:2px 9px; font-size:12px; font-weight:700; }
-            .api-group-chevron { margin-left:auto; color:#9B5173; font-size:16px; font-weight:700; }
-            .api-group-blurb { margin:0 0 8px; color:#6b6b6b; font-size:12.5px; }
+            .api-group-title { font-weight:700; font-size:var(--fs-base); color:var(--ink-900); }
+            .api-group-count { background:var(--line); color:var(--brand-600); border-radius:999px; padding:2px 9px; font-size:var(--fs-xs); font-weight:700; }
+            .api-group-chevron { margin-left:auto; color:var(--brand-500); font-size:16px; font-weight:700; }
+            .api-group-blurb { margin:0 0 8px; color:var(--ink-500); font-size:var(--fs-sm); }
           `}</style>
         </div>
 

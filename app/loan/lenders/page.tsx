@@ -229,33 +229,33 @@ export default function LenderSubmissionsPage() {
 
       <style jsx>{`
         .head { margin-bottom:16px; }
-        .eyebrow { margin:0 0 4px; font-size:11.5px; font-weight:700; letter-spacing:.5px; text-transform:uppercase; color:#9B5173; }
-        h1 { margin:0; font-size:22px; color:#2B0B1E; }
-        .h2 { margin:0 0 10px; font-size:15px; color:#2B0B1E; }
-        .muted { color:#7A6570; font-size:13px; margin:4px 0 0; }
-        .msg { color:#871449; font-size:13.5px; margin:0; }
+        .eyebrow { margin:0 0 4px; font-size:11.5px; font-weight:700; letter-spacing:.5px; text-transform:uppercase; color:var(--brand-500); }
+        h1 { margin:0; font-size:22px; color:var(--ink-900); }
+        .h2 { margin:0 0 10px; font-size:15px; color:var(--ink-900); }
+        .muted { color:var(--ink-500); font-size:var(--fs-sm); margin:4px 0 0; }
+        .msg { color:var(--brand-600); font-size:13.5px; margin:0; }
         .stats { display:grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap:12px; margin-bottom:16px; }
-        .stat { background:#fff; border:1px solid #F4E8EE; border-radius:12px; padding:14px; }
-        .stat-label { display:block; font-size:12px; color:#7A6570; text-transform:capitalize; }
-        .stat-value { display:block; font-size:19px; color:#2B0B1E; margin-top:4px; }
-        .stat-sub { display:block; font-size:12px; color:#7A6570; margin-top:2px; }
+        .stat { background:var(--surface); border:1px solid var(--line); border-radius:var(--r-lg); padding:14px; box-shadow:var(--e1); }
+        .stat-label { display:block; font-size:var(--fs-xs); color:var(--ink-500); text-transform:capitalize; }
+        .stat-value { display:block; font-size:19px; color:var(--ink-900); margin-top:4px; }
+        .stat-sub { display:block; font-size:var(--fs-xs); color:var(--ink-500); margin-top:2px; }
         .scroll { overflow-x:auto; }
-        .table { width:100%; border-collapse:collapse; font-size:13px; }
-        .table th { text-align:left; color:#7A6570; font-weight:600; padding:8px; border-bottom:1px solid #F4E8EE; white-space:nowrap; }
-        .table td { padding:8px; border-bottom:1px solid #FAF4F7; color:#2B0B1E; vertical-align:top; }
-        .pill { padding:3px 9px; border-radius:999px; font-size:11.5px; background:#F4E8EE; color:#871449; white-space:nowrap; }
-        .pill.approved { background:#E6F5ED; color:#1E7A46; }
-        .pill.declined { background:#FDECEA; color:#8A2F28; }
+        .table { width:100%; border-collapse:collapse; font-size:var(--fs-sm); }
+        .table th { text-align:left; padding:10px 16px; background:var(--surface-sunken); border-bottom:1px solid var(--line); font-size:var(--fs-2xs); font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--ink-500); white-space:nowrap; }
+        .table td { padding:10px 16px; border-bottom:1px solid var(--line); vertical-align:top; font-size:var(--fs-sm); color:var(--ink-800); }
+        .pill { padding:3px 9px; border-radius:999px; font-size:11.5px; background:var(--line); color:var(--brand-600); white-space:nowrap; }
+        .pill.approved { background:var(--ok-bg); color:var(--ok-fg); }
+        .pill.declined { background:var(--bad-bg); color:var(--bad-fg); }
         .row-actions { display:flex; gap:6px; align-items:center; }
         .final { font-style:italic; }
-        .btn { padding:9px 16px; border-radius:8px; border:1px solid #EBDDE4; background:#fff; color:#871449; font-size:13.5px; font-weight:600; cursor:pointer; text-decoration:none; }
-        .btn.primary { background:#871449; color:#fff; border-color:#871449; }
-        .btn.small { padding:5px 10px; font-size:12px; white-space:nowrap; }
+        .btn { padding:9px 16px; border-radius:8px; border:1px solid var(--line); background:var(--surface); color:var(--brand-600); font-size:13.5px; font-weight:600; cursor:pointer; text-decoration:none; }
+        .btn.primary { background:var(--brand-600); color:#fff; border-color:var(--brand-600); }
+        .btn.small { padding:5px 10px; font-size:var(--fs-xs); white-space:nowrap; }
         .btn:disabled { opacity:.5; cursor:not-allowed; }
         .form { display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin-top:12px; }
-        .form label { display:flex; flex-direction:column; gap:5px; font-size:12.5px; color:#7A6570; }
+        .form label { display:flex; flex-direction:column; gap:5px; font-size:var(--fs-sm); color:var(--ink-500); }
         .form label.wide { grid-column: 1 / -1; }
-        .form input, .form select { padding:8px 10px; border:1px solid #EBDDE4; border-radius:8px; font-size:13.5px; }
+        .form input, .form select { padding:8px 10px; border:1px solid var(--line); border-radius:8px; font-size:13.5px; }
         .form-actions { display:flex; gap:10px; margin-top:14px; }
       `}</style>
     </AdminShell>

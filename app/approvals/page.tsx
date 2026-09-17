@@ -368,7 +368,7 @@ export default function ApprovalsPage() {
                     <span className="aq-item-title">{title}</span>
                     <span className="aq-item-sub">{sub}</span>
                   </div>
-                  <span className="aq-kyc ok" style={{ background: "#f4eef7", color: "#6b3f7a" }}>
+                  <span className="aq-kyc ok" style={{ background: "var(--brand-50)", color: "var(--brand-700)" }}>
                     {humanStatus(String(it.status ?? ""))} · {LISTING_NEXT[String(it.status)] ?? "open the workspace"}
                   </span>
                   <span className={`aq-kyc ${kycOk ? "ok" : "warn"}`}>{kycOk ? <BadgeCheck size={13} /> : <AlertTriangle size={13} />}{kycOk ? "KYC" : "no KYC"}</span>
@@ -401,7 +401,7 @@ export default function ApprovalsPage() {
     <AdminShell>
       <div className="page-head">
         <div>
-          <h1 className="page-title"><ListChecks size={22} style={{ verticalAlign: "-4px", marginRight: 8 }} />Approvals</h1>
+          <h1 className="page-title"><ListChecks size={22} />Approvals</h1>
           <p className="page-sub">
             Decisional to-do queue. Review each applicant&apos;s KYC verification, then approve or reject.
             {" "}Sale listings are not approved — their rows open the listing workspace, where each section is recorded.
@@ -409,7 +409,7 @@ export default function ApprovalsPage() {
           </p>
         </div>
         <button className="aq-refresh" onClick={() => loadQueues()} disabled={loading}>
-          {loading ? <Loader2 size={13} className="spin" style={{ verticalAlign: "-2px", marginRight: 5 }} /> : null}Refresh
+          {loading ? <Loader2 size={13} className="spin" /> : null}Refresh
         </button>
       </div>
 
@@ -422,7 +422,7 @@ export default function ApprovalsPage() {
       {/* Only the first load blanks the grid: a flash row has to stay on
           screen while the queues reload underneath it. */}
       {!queues ? (
-        <p className="page-sub"><Loader2 size={16} className="spin" style={{ verticalAlign: "-3px" }} /> Loading queues…</p>
+        <p className="page-sub"><Loader2 size={16} className="spin" /> Loading queues…</p>
       ) : (
         <div className="aq-grid">
           {renderQueue("listings", queues.listings)}

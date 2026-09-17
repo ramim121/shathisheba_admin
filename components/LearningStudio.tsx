@@ -191,7 +191,7 @@ export function LearningStudio() {
                     </td>
                   </tr>
                 ))}
-                {!loading && moduleContents.length === 0 ? <tr><td colSpan={6} style={{ color: "#9ca3af" }}>No content yet. Use “New Content”.</td></tr> : null}
+                {!loading && moduleContents.length === 0 ? <tr><td colSpan={6} className="table-empty">No content yet. Use “New Content”.</td></tr> : null}
               </tbody>
             </table>
           </div>

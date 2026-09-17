@@ -1,0 +1,195 @@
+/* ===========================================================================
+   Design tokens — the single source of truth for colour, type, spacing,
+   radius, elevation and control size across the admin console.
+
+   Before this file the stylesheet carried four maroons (#7B1536, #871449,
+   #A11B3A, #C0362C), five greys per role, eight radii and font weights from
+   400 to 800 in steps of 40. Every surface now reads from the scales below,
+   so a change lands everywhere at once and nothing drifts.
+
+   The legacy aliases at the end (--brand, --rose-line, --muted, …) are kept
+   deliberately: pages and components still reference them, including from
+   inline styles, and they now resolve to the same scale as everything else.
+   =========================================================================== */
+
+@theme {
+  /* Exposed to Tailwind utilities (bg-brand, text-ink-500, rounded-md, …) so
+     new markup can be built with utilities without inventing a second
+     palette. */
+  --color-brand: #7b1536;
+  --color-brand-50: #fbf2f5;
+  --color-brand-100: #f6e4eb;
+  --color-brand-200: #ecc9d6;
+  --color-brand-300: #dca2b9;
+  --color-brand-400: #c2708f;
+  --color-brand-500: #a33763;
+  --color-brand-600: #7b1536;
+  --color-brand-700: #66102c;
+  --color-brand-800: #4e0c22;
+  --color-brand-900: #330716;
+
+  --color-ink: #1f1219;
+  --color-ink-900: #1f1219;
+  --color-ink-800: #2e1d27;
+  --color-ink-700: #4a3341;
+  --color-ink-600: #5c4655;
+  --color-ink-500: #6f5b67;
+  --color-ink-400: #8e7b87;
+  --color-ink-300: #b9a9b3;
+  --color-ink-200: #e4dae0;
+  --color-ink-100: #f0e9ed;
+  --color-ink-50: #f8f5f7;
+
+  --color-gold: #e8a020;
+  --color-leaf: #1e8a55;
+  --color-canvas: #f6f3f5;
+  --color-surface: #ffffff;
+
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+}
+
+:root {
+  /* ---- brand ------------------------------------------------------------ */
+  --brand-50: #fbf2f5;
+  --brand-100: #f6e4eb;
+  --brand-200: #ecc9d6;
+  --brand-300: #dca2b9;
+  --brand-400: #c2708f;
+  --brand-500: #a33763;
+  --brand-600: #7b1536;
+  --brand-700: #66102c;
+  --brand-800: #4e0c22;
+  --brand-900: #330716;
+
+  /* ---- neutrals (warm, faintly plum so they sit with the maroon) -------- */
+  --ink-900: #1f1219;
+  --ink-800: #2e1d27;
+  --ink-700: #4a3341;
+  --ink-600: #5c4655;
+  --ink-500: #6f5b67;
+  --ink-400: #8e7b87;
+  --ink-300: #b9a9b3;
+  --ink-200: #e4dae0;
+  --ink-100: #f0e9ed;
+  --ink-50: #f8f5f7;
+
+  /* ---- surfaces --------------------------------------------------------- */
+  --surface: #ffffff;
+  --surface-2: #fcfafb;
+  --surface-sunken: #f8f5f7;
+  --canvas: #f6f3f5;
+  --line: #ece3e8;
+  --line-strong: #e0d3db;
+
+  /* ---- semantic states -------------------------------------------------- */
+  --ok-bg: #e9f7ef;
+  --ok-line: #b7e3c9;
+  --ok-fg: #12703f;
+  --ok-solid: #1e8a55;
+
+  --warn-bg: #fff6e5;
+  --warn-line: #f5dfa8;
+  --warn-fg: #8a5a06;
+  --warn-solid: #e8a020;
+
+  --bad-bg: #fdedee;
+  --bad-line: #f4c3c6;
+  --bad-fg: #a11b2b;
+  --bad-solid: #c0362c;
+
+  --info-bg: #eef4fd;
+  --info-line: #c9dcf5;
+  --info-fg: #1f4e8c;
+  --info-solid: #2d6fd1;
+
+  /* ---- navigation (dark rail) ------------------------------------------- */
+  --nav-bg: #1b1118;
+  --nav-bg-2: #241620;
+  --nav-fg: #ffffff;
+  --nav-fg-dim: #cdb4c2;
+  --nav-fg-faint: #9c8391;
+  --nav-line: rgb(255 255 255 / 0.09);
+  --nav-hover: rgb(255 255 255 / 0.07);
+  --nav-active: rgb(255 255 255 / 0.13);
+
+  /* ---- type ------------------------------------------------------------- */
+  --fs-2xs: 10.5px;
+  --fs-xs: 11.5px;
+  --fs-sm: 12.5px;
+  --fs-base: 13.5px;
+  --fs-md: 15px;
+  --fs-lg: 17px;
+  --fs-xl: 21px;
+  --fs-2xl: 26px;
+  --fs-3xl: 32px;
+
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+
+  --lh-tight: 1.2;
+  --lh-snug: 1.35;
+  --lh-normal: 1.5;
+
+  --track-caps: 0.04em;
+
+  /* ---- spacing (4px base) ----------------------------------------------- */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 20px;
+  --s6: 24px;
+  --s7: 32px;
+  --s8: 40px;
+  --s9: 48px;
+
+  /* ---- radius ----------------------------------------------------------- */
+  --r-xs: 6px;
+  --r-sm: 8px;
+  --r-md: 10px;
+  --r-lg: 12px;
+  --r-xl: 16px;
+  --r-pill: 999px;
+
+  /* ---- elevation -------------------------------------------------------- */
+  --e1: 0 1px 2px rgb(31 18 25 / 0.05), 0 1px 1px rgb(31 18 25 / 0.04);
+  --e2: 0 1px 2px rgb(31 18 25 / 0.04), 0 8px 18px -8px rgb(31 18 25 / 0.12);
+  --e3: 0 2px 4px rgb(31 18 25 / 0.04), 0 18px 40px -14px rgb(31 18 25 / 0.2);
+  --e4: 0 32px 80px -20px rgb(31 18 25 / 0.34);
+
+  /* One focus treatment for every interactive element in the console. */
+  --ring: 0 0 0 3px rgb(123 21 54 / 0.16);
+  --ring-bad: 0 0 0 3px rgb(192 54 44 / 0.16);
+
+  /* ---- control sizing --------------------------------------------------- */
+  --h-sm: 30px;
+  --h-md: 36px;
+  --h-lg: 42px;
+  --ctl-px: 11px;
+
+  --sidebar-w: 260px;
+  --content-max: 1560px;
+
+  --t-fast: 120ms cubic-bezier(0.2, 0, 0.2, 1);
+  --t-base: 180ms cubic-bezier(0.2, 0, 0.2, 1);
+
+  /* ---- legacy aliases (still referenced by pages and inline styles) ----- */
+  --ink: var(--ink-900);
+  --muted: var(--ink-500);
+  --brand: var(--brand-600);
+  --brand-strong: var(--brand-800);
+  --rose: var(--brand-50);
+  --rose-line: var(--line);
+  --gold: #e8a020;
+  --leaf: var(--ok-solid);
+  --sky: var(--info-bg);
+  --night: var(--nav-bg);
+  --night-2: var(--nav-bg-2);
+  --shadow: var(--e2);
+}

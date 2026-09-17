@@ -6,15 +6,15 @@
 
 .form-issues {
   margin: 12px 18px 0;
-  border: 1px solid #F2B8B8;
-  border-left: 4px solid #C0362C;
-  background: #FDEEEE;
+  border: 1px solid var(--bad-line);
+  border-left: 4px solid var(--bad-fg);
+  background: var(--bad-bg);
   border-radius: 10px;
   padding: 10px 12px 11px;
 }
 
 .form-issues:focus {
-  outline: 2px solid #C0362C;
+  outline: 2px solid var(--bad-fg);
   outline-offset: 2px;
 }
 
@@ -23,9 +23,9 @@
   align-items: center;
   gap: 7px;
   margin: 0;
-  color: #8A1F1F;
+  color: var(--bad-fg);
   font-size: 13px;
-  font-weight: 750;
+  font-weight: 700;
 }
 
 .form-issues-head svg {
@@ -47,14 +47,14 @@
   gap: 6px;
   font-size: 12.5px;
   line-height: 1.5;
-  color: #6F2B2B;
+  color: var(--ink-700);
 }
 
 .form-issues-jump {
   border: 0;
   background: none;
   padding: 0;
-  color: #8A1F1F;
+  color: var(--bad-fg);
   font-size: 12.5px;
   font-weight: 700;
   text-decoration: underline;
@@ -63,11 +63,11 @@
 }
 
 .form-issues-jump:hover {
-  color: #C0362C;
+  color: var(--bad-fg);
 }
 
 .form-issues-where {
-  color: #9A6A6A;
+  color: var(--ink-500);
   font-size: 11.5px;
   font-weight: 600;
 }
@@ -79,8 +79,8 @@
   margin-right: 6px;
   padding: 0 6px;
   border-radius: 999px;
-  background: #F5ECF0;
-  color: #8A5E74;
+  background: var(--surface-sunken);
+  color: var(--ink-500);
   font-size: 10.5px;
   font-weight: 700;
   letter-spacing: 0.02em;
@@ -92,13 +92,13 @@
 .resource-form .field.has-error .input,
 .resource-form .field.has-error input.input,
 .resource-form .field.has-error textarea.input {
-  border-color: #D6564A;
-  background: #FFFAFA;
+  border-color: var(--bad-fg);
+  background: var(--bad-bg);
   box-shadow: 0 0 0 3px rgba(192, 54, 44, 0.09);
 }
 
 .resource-form .field.has-error .field-label {
-  color: #8A1F1F;
+  color: var(--bad-fg);
 }
 
 @media (max-width: 700px) {

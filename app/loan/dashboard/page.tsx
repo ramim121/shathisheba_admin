@@ -32,7 +32,7 @@ type Dashboard = {
 const taka = (n: number) => `৳${Number(n || 0).toLocaleString("en-IN")}`;
 
 const GRADE_TONE: Record<string, string> = {
-  A: "#1E9E5A", B: "#2563EB", C: "#D97706", D: "#B4443C",
+  A: "#1E9E5A", B: "#2563EB", C: "#D97706", D: "var(--bad-fg)",
 };
 
 const STATUS_LABEL: Record<string, string> = {
@@ -76,9 +76,9 @@ export default function CreditDashboardPage() {
         </div>
       </div>
 
-      {loading && <p style={{ color: "#6b6b6b" }}>Loading portfolio…</p>}
+      {loading && <p style={{ color: "var(--ink-500)" }}>Loading portfolio…</p>}
       {error && (
-        <p style={{ color: "#B4443C", background: "#FEF2F2", border: "1px solid #F3C7C4", borderRadius: 10, padding: "12px 14px" }}>{error}</p>
+        <p className="error">{error}</p>
       )}
 
       {data && (
@@ -185,18 +185,18 @@ export default function CreditDashboardPage() {
 
       <style jsx>{`
         .page-head { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:18px; }
-        .eyebrow { text-transform:uppercase; letter-spacing:.08em; font-size:11px; font-weight:700; color:#9B5173; margin:0 0 4px; }
-        h1 { margin:0 0 6px; font-size:28px; }
-        .page-sub { margin:0; color:#6b6b6b; max-width:720px; }
+        .eyebrow { text-transform:uppercase; letter-spacing:.08em; font-size:var(--fs-2xs); font-weight:700; color:var(--brand-500); margin:0 0 4px; }
+        h1 { margin:0 0 6px; font-size:var(--fs-2xl); }
+        .page-sub { margin:0; color:var(--ink-500); max-width:720px; }
         .stat-row { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:14px; margin-bottom:18px; }
         .panel-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(340px,1fr)); gap:16px; }
         .grade-row { display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap; }
-        .grade-chip { display:flex; flex-direction:column; align-items:center; border:2px solid; border-radius:12px; padding:8px 16px; min-width:64px; }
-        .grade-letter { font-size:22px; font-weight:800; line-height:1; }
-        .grade-count { font-size:13px; color:#6b6b6b; margin-top:2px; }
+        .grade-chip { display:flex; flex-direction:column; align-items:center; border:2px solid; border-radius:var(--r-lg); padding:8px 16px; min-width:64px; box-shadow:var(--e1); }
+        .grade-letter { font-size:22px; font-weight:700; line-height:1; }
+        .grade-count { font-size:var(--fs-sm); color:var(--ink-500); margin-top:2px; }
         .kv { display:grid; grid-template-columns:1fr auto; gap:6px 12px; margin:0 0 12px; }
-        .muted { color:#6b6b6b; margin:8px 0 0; }
-        .small { font-size:12.5px; }
+        .muted { color:var(--ink-500); margin:8px 0 0; }
+        .small { font-size:var(--fs-sm); }
       `}</style>
     </AdminShell>
   );
@@ -209,10 +209,10 @@ function StatCard({ label, value, sub }: { label: string; value: number; sub: st
       <p className="stat-value">{value ?? 0}</p>
       <p className="stat-sub">{sub}</p>
       <style jsx>{`
-        .stat { background:#fff; border:1px solid #E8D7DF; border-radius:14px; padding:16px 18px; }
-        .stat-label { margin:0 0 6px; font-size:13px; color:#6b6b6b; }
-        .stat-value { margin:0; font-size:30px; font-weight:800; color:#2B0B1E; line-height:1.1; }
-        .stat-sub { margin:4px 0 0; font-size:12px; color:#9B5173; }
+        .stat { background:var(--surface); border:1px solid var(--line); border-radius:var(--r-lg); padding:16px 18px; box-shadow:var(--e1); }
+        .stat-label { margin:0 0 6px; font-size:var(--fs-sm); color:var(--ink-500); }
+        .stat-value { margin:0; font-size:var(--fs-2xl); font-weight:700; color:var(--ink-900); line-height:1.1; }
+        .stat-sub { margin:4px 0 0; font-size:var(--fs-xs); color:var(--brand-500); }
       `}</style>
     </div>
   );
@@ -227,19 +227,19 @@ function Panel({ title, sub, children }: { title: string; sub: string; children:
       </header>
       {children}
       <style jsx>{`
-        .panel { background:#fff; border:1px solid #E8D7DF; border-radius:14px; padding:18px 20px; }
+        .panel { background:var(--surface); border:1px solid var(--line); border-radius:var(--r-lg); padding:18px 20px; }
         h2 { margin:0 0 4px; font-size:16px; }
-        header p { margin:0 0 14px; font-size:12.5px; color:#6b6b6b; }
+        header p { margin:0 0 14px; font-size:var(--fs-sm); color:var(--ink-500); }
       `}</style>
     </section>
   );
 }
 
 function KV({ k, v, tone }: { k: string; v: string; tone?: "warn" | "good" }) {
-  const color = tone === "warn" ? "#B4443C" : tone === "good" ? "#1E9E5A" : "#2B0B1E";
+  const color = tone === "warn" ? "var(--bad-fg)" : tone === "good" ? "#1E9E5A" : "var(--ink-900)";
   return (
     <>
-      <dt style={{ color: "#6b6b6b", fontSize: 13 }}>{k}</dt>
+      <dt style={{ color: "var(--ink-500)", fontSize: 13 }}>{k}</dt>
       <dd style={{ margin: 0, fontWeight: 700, color, textAlign: "right", fontSize: 14 }}>{v}</dd>
     </>
   );
@@ -247,17 +247,17 @@ function KV({ k, v, tone }: { k: string; v: string; tone?: "warn" | "good" }) {
 
 function Bars({ rows, empty }: { rows: [string, number][]; empty: string }) {
   const max = Math.max(1, ...rows.map(([, n]) => n));
-  if (!rows.length || rows.every(([, n]) => !n)) return <p style={{ color: "#6b6b6b" }}>{empty}</p>;
+  if (!rows.length || rows.every(([, n]) => !n)) return <p style={{ color: "var(--ink-500)" }}>{empty}</p>;
   return (
     <div>
       {rows.map(([label, n]) => (
         <div key={label} style={{ marginBottom: 8 }}>
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 3 }}>
-            <span style={{ color: "#2B0B1E" }}>{label}</span>
+            <span style={{ color: "var(--ink-900)" }}>{label}</span>
             <strong>{n}</strong>
           </div>
-          <div style={{ background: "#F4E8EE", borderRadius: 6, height: 8 }}>
-            <div style={{ width: `${(n / max) * 100}%`, background: "#871449", height: 8, borderRadius: 6 }} />
+          <div className="meter-track">
+            <div style={{ width: `${(n / max) * 100}%`, background: "var(--brand-600)", height: 8, borderRadius: 6 }} />
           </div>
         </div>
       ))}

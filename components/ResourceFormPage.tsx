@@ -797,7 +797,9 @@ export function ResourceFormPage({ config, resource, id }: Props) {
     const hint = field.type === "fee" ? field.hint ?? FEE_HINT : field.hint ?? (field.readOnly ? "" : formatNote(kindFor(field)));
     // With an error showing, a "Required" chip under the same box says nothing
     // the red message above it has not already said.
-    const showHintRow = Boolean(hint) || (required && !error);
+    // Only when there is something to say: the "required" state is already
+    // on the label (red asterisk) and on the control (aria-required).
+    const showHintRow = Boolean(hint);
     const describedBy = [error ? `${control}-error` : "", showHintRow ? `${control}-hint` : ""].filter(Boolean).join(" ") || undefined;
     const wide = field.type === "textarea" || field.type === "geo" || field.type === "multi-lookup";
     return (
@@ -820,7 +822,6 @@ export function ResourceFormPage({ config, resource, id }: Props) {
         ) : null}
         {showHintRow ? (
           <small className="field-hint" id={`${control}-hint`}>
-            {required ? <span className="req-tag">Required</span> : null}
             {hint}
           </small>
         ) : null}

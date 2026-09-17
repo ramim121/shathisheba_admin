@@ -32,6 +32,16 @@ type PipelineRow = {
 
 type Pipeline = { rows: PipelineRow[]; summary: { status: string; n: number; amount: string | number }[] };
 
+// The shared status-pill tones, so a lender decision reads like every other
+// status in the console.
+const STATUS_TONE: Record<string, string> = {
+  approved: "green",
+  declined: "red",
+  submitted: "blue",
+  under_review: "gold",
+  withdrawn: "grey"
+};
+
 const DECLINE_CODES = [
   "insufficient_repayment_capacity",
   "excessive_existing_debt",
@@ -102,38 +112,38 @@ export default function LenderSubmissionsPage() {
 
   return (
     <AdminShell>
-      <div className="head">
+      <section className="topbar">
         <div>
-          <p className="eyebrow">Loan &amp; Credit</p>
-          <h1>Lender submissions</h1>
-          <p className="muted">
+          <p className="eyeline">Loan &amp; Credit</p>
+          <h1 className="page-title">Lender submissions</h1>
+          <p className="subtitle">
             An application can only be shared where the farmer&rsquo;s consent to share with a lender is granted
             and current — checked at the moment of submission, not at application.
           </p>
         </div>
-      </div>
+      </section>
 
-      {message ? <section className="panel"><p className="msg">{message}</p></section> : null}
+      {message ? <div className="notice is-ok">{message}</div> : null}
 
       {data?.summary?.length ? (
-        <section className="stats">
+        <section className="grid metrics">
           {data.summary.map((s) => (
-            <div className="stat" key={s.status}>
-              <span className="stat-label">{s.status.replace(/_/g, " ")}</span>
-              <strong className="stat-value">{s.n}</strong>
-              <span className="stat-sub">{taka(s.amount)}</span>
+            <div className="metric" key={s.status}>
+              <span>{s.status.replace(/_/g, " ")}</span>
+              <strong>{s.n}</strong>
+              <small>{taka(s.amount)}</small>
             </div>
           ))}
         </section>
       ) : null}
 
       <section className="panel">
-        <h2 className="h2">Pipeline</h2>
+        <div className="panel-header"><h2>Pipeline</h2></div>
         {!data?.rows?.length ? (
-          <p className="muted">Nothing submitted yet.</p>
+          <p className="empty-note">Nothing submitted yet.</p>
         ) : (
-          <div className="scroll">
-            <table className="table">
+          <div className="table-wrap">
+            <table className="table is-flush">
               <thead>
                 <tr>
                   <th>Application</th><th>Farmer</th><th>Lender</th><th>Grade</th>
@@ -148,7 +158,7 @@ export default function LenderSubmissionsPage() {
                     <td>{r.lender}</td>
                     <td>{r.grade ?? "—"} / {r.data_confidence ?? "—"}</td>
                     <td>{taka(r.submitted_amount)}</td>
-                    <td><span className={`pill ${r.status}`}>{r.status.replace(/_/g, " ")}</span></td>
+                    <td><span className={`status-pill ${STATUS_TONE[r.status] ?? "grey"}`}>{r.status.replace(/_/g, " ")}</span></td>
                     <td>
                       {r.status === "approved" ? taka(r.approved_amount)
                         : r.status === "declined" ? <span className="muted">{r.decline_reason_code ?? "—"}</span>
@@ -186,8 +196,8 @@ export default function LenderSubmissionsPage() {
       </section>
 
       {deciding ? (
-        <section className="panel">
-          <h2 className="h2">Record a decision — {deciding.application_code}</h2>
+        <section className="panel is-padded">
+          <h2 className="section-title">Record a decision — {deciding.application_code}</h2>
           <p className="muted">
             {deciding.lender} · {deciding.farmer} · submitted {taka(deciding.submitted_amount)}.
             A decline needs a structured reason code, because free text cannot be learned from.
@@ -227,37 +237,6 @@ export default function LenderSubmissionsPage() {
         </section>
       ) : null}
 
-      <style jsx>{`
-        .head { margin-bottom:16px; }
-        .eyebrow { margin:0 0 4px; font-size:11.5px; font-weight:700; letter-spacing:.5px; text-transform:uppercase; color:var(--brand-500); }
-        h1 { margin:0; font-size:22px; color:var(--ink-900); }
-        .h2 { margin:0 0 10px; font-size:15px; color:var(--ink-900); }
-        .muted { color:var(--ink-500); font-size:var(--fs-sm); margin:4px 0 0; }
-        .msg { color:var(--brand-600); font-size:13.5px; margin:0; }
-        .stats { display:grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap:12px; margin-bottom:16px; }
-        .stat { background:var(--surface); border:1px solid var(--line); border-radius:var(--r-lg); padding:14px; box-shadow:var(--e1); }
-        .stat-label { display:block; font-size:var(--fs-xs); color:var(--ink-500); text-transform:capitalize; }
-        .stat-value { display:block; font-size:19px; color:var(--ink-900); margin-top:4px; }
-        .stat-sub { display:block; font-size:var(--fs-xs); color:var(--ink-500); margin-top:2px; }
-        .scroll { overflow-x:auto; }
-        .table { width:100%; border-collapse:collapse; font-size:var(--fs-sm); }
-        .table th { text-align:left; padding:10px 16px; background:var(--surface-sunken); border-bottom:1px solid var(--line); font-size:var(--fs-2xs); font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--ink-500); white-space:nowrap; }
-        .table td { padding:10px 16px; border-bottom:1px solid var(--line); vertical-align:top; font-size:var(--fs-sm); color:var(--ink-800); }
-        .pill { padding:3px 9px; border-radius:999px; font-size:11.5px; background:var(--line); color:var(--brand-600); white-space:nowrap; }
-        .pill.approved { background:var(--ok-bg); color:var(--ok-fg); }
-        .pill.declined { background:var(--bad-bg); color:var(--bad-fg); }
-        .row-actions { display:flex; gap:6px; align-items:center; }
-        .final { font-style:italic; }
-        .btn { padding:9px 16px; border-radius:8px; border:1px solid var(--line); background:var(--surface); color:var(--brand-600); font-size:13.5px; font-weight:600; cursor:pointer; text-decoration:none; }
-        .btn.primary { background:var(--brand-600); color:#fff; border-color:var(--brand-600); }
-        .btn.small { padding:5px 10px; font-size:var(--fs-xs); white-space:nowrap; }
-        .btn:disabled { opacity:.5; cursor:not-allowed; }
-        .form { display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin-top:12px; }
-        .form label { display:flex; flex-direction:column; gap:5px; font-size:var(--fs-sm); color:var(--ink-500); }
-        .form label.wide { grid-column: 1 / -1; }
-        .form input, .form select { padding:8px 10px; border:1px solid var(--line); border-radius:8px; font-size:13.5px; }
-        .form-actions { display:flex; gap:10px; margin-top:14px; }
-      `}</style>
     </AdminShell>
   );
 }

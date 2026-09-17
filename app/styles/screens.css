@@ -1,0 +1,709 @@
+/* ===========================================================================
+   Screen styles that used to live in a page's own <style jsx> block.
+
+   They were moved here for a reason worth remembering: styled-jsx scopes a
+   block to the component that renders it, so a rule written next to a page
+   never reached the small helper components declared in the same file. On the
+   loan workspace that meant `.meter-head` (space-between) never applied, and
+   the coverage meters printed "Material fields verified0/0" with the label
+   and the figure jammed together. Global rules have no such trap, and the
+   screens now share the tokens and the controls with everything else.
+   =========================================================================== */
+
+/* --- loan workspace (app/loan/applications/[id]) ------------------------- */
+
+.ws-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s4);
+}
+
+.ws-eyebrow {
+  margin: 0 0 var(--s1);
+  color: var(--brand-500);
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-bold);
+  text-transform: uppercase;
+  letter-spacing: var(--track-caps);
+}
+
+.ws-name {
+  margin: 0;
+  color: var(--ink-900);
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-semibold);
+  letter-spacing: -0.01em;
+}
+
+.ws-back {
+  flex: none;
+  color: var(--ink-500);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  white-space: nowrap;
+}
+
+.ws-back:hover {
+  color: var(--brand-600);
+}
+
+.ws-alert,
+.ws-contra,
+.ws-blocked {
+  margin-top: var(--s3);
+  padding: 10px var(--s3);
+  border: 1px solid var(--bad-line);
+  border-radius: var(--r-md);
+  background: var(--bad-bg);
+  color: var(--bad-fg);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-snug);
+}
+
+.ws-blocked strong {
+  display: block;
+  font-weight: var(--fw-semibold);
+}
+
+.ws-blocked ul {
+  margin: var(--s1) 0 0;
+  padding-left: var(--s5);
+}
+
+.ws-blocked li {
+  margin-top: 2px;
+}
+
+.ws-msg {
+  margin: 0;
+  color: var(--brand-700);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+}
+
+/* The requirement checklist. `!` blocks progression, `○` is outstanding but
+   not blocking, `✓` is met — the tone carries the same three states. */
+.ws-checklist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: var(--s4);
+}
+
+.ws-chip {
+  padding: 4px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-pill);
+  color: var(--ink-500);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+}
+
+.ws-chip.on {
+  border-color: var(--ok-line);
+  background: var(--ok-bg);
+  color: var(--ok-fg);
+}
+
+.ws-chip.block {
+  border-color: var(--bad-line);
+  background: var(--bad-bg);
+  color: var(--bad-fg);
+}
+
+.ws-meters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--s4);
+  margin-top: var(--s4);
+}
+
+.ws-grid {
+  display: grid;
+  /* minmax(0, …) on every track: without it a track's minimum is the
+     min-content of its widest child, so a row of inputs pushed the capture
+     column past the panel edge and `overflow: hidden` cut the "verified"
+     checkboxes off. */
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  gap: var(--s3);
+  align-items: start;
+}
+
+.ws-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  min-width: 0;
+}
+
+.ws-h3 {
+  margin: 0 0 var(--s1);
+  color: var(--ink-900);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+}
+
+.ws-hint {
+  margin-bottom: var(--s3);
+}
+
+/* label · value · source · verified, on one line that cannot overflow. */
+.ws-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(90px, 1fr) minmax(90px, 1fr) auto;
+  gap: var(--s2);
+  align-items: center;
+  margin-top: var(--s2);
+  padding-top: var(--s2);
+  border-top: 1px solid var(--line);
+}
+
+.ws-field:first-of-type {
+  border-top: 0;
+}
+
+.ws-field label {
+  color: var(--ink-700);
+  font-size: var(--fs-sm);
+}
+
+.ws-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-500);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+
+.ws-verify {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(150px, 220px);
+  gap: var(--s3);
+  align-items: center;
+  padding: var(--s2) 0;
+  border-top: 1px solid var(--line);
+  color: var(--ink-700);
+  font-size: var(--fs-sm);
+}
+
+.ws-verify:first-of-type {
+  border-top: 0;
+}
+
+.ws-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--s2);
+  margin-bottom: var(--s3);
+}
+
+.ws-actions .btn {
+  width: 100%;
+}
+
+/* Sticky only where there is room; stacked under the capture column on a
+   narrow screen, pinning it would cover the content it belongs to. */
+@media (min-width: 1001px) {
+  .ws-rail {
+    position: sticky;
+    top: var(--s4);
+  }
+}
+
+@media (max-width: 1000px) {
+  .ws-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 720px) {
+  .ws-field,
+  .ws-verify {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* --- assessment score + criteria bars ----------------------------------- */
+
+.ws-score {
+  display: flex;
+  align-items: center;
+  gap: var(--s4);
+  margin: var(--s2) 0 var(--s4);
+}
+
+.ws-grade {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  color: #fff;
+  font-size: var(--fs-2xl);
+  font-weight: var(--fw-bold);
+}
+
+.ws-grade.g-a { background: var(--ok-solid); }
+.ws-grade.g-b { background: var(--info-solid); }
+.ws-grade.g-c { background: var(--warn-solid); color: #3a2504; }
+.ws-grade.g-d { background: var(--bad-solid); }
+
+.ws-score-body strong {
+  color: var(--ink-900);
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-bold);
+}
+
+.ws-score-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.ws-pill {
+  padding: 2px 9px;
+  border-radius: var(--r-pill);
+  background: var(--brand-50);
+  color: var(--brand-700);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  text-transform: capitalize;
+}
+
+.ws-outof {
+  color: var(--ink-400);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+}
+
+.ws-nodata {
+  color: var(--bad-fg);
+  font-size: var(--fs-xs);
+}
+
+.ws-timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ws-timeline li {
+  padding: var(--s2) 0;
+  border-top: 1px solid var(--line);
+  color: var(--ink-900);
+  font-size: var(--fs-sm);
+}
+
+.ws-timeline li:first-child {
+  border-top: 0;
+}
+
+.ws-timeline p {
+  margin: 2px 0 0;
+}
+
+.meter {
+  min-width: 0;
+}
+
+.meter-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s2);
+  color: var(--ink-500);
+  font-size: var(--fs-sm);
+}
+
+.meter-head strong {
+  color: var(--ink-900);
+  font-variant-numeric: tabular-nums;
+}
+
+.crit {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  margin-top: var(--s3);
+}
+
+.crit-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s2);
+  margin-bottom: 5px;
+  color: var(--ink-900);
+  font-size: var(--fs-sm);
+}
+
+.crit-head strong {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.docstat {
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+  background: var(--ink-50);
+  color: var(--ink-500);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+}
+
+.docstat.s-verified { background: var(--ok-bg); color: var(--ok-fg); }
+.docstat.s-rejected { background: var(--bad-bg); color: var(--bad-fg); }
+
+/* --- shared utilities these screens rely on ----------------------------- */
+
+.muted {
+  color: var(--ink-500);
+  font-size: var(--fs-sm);
+}
+
+p.muted {
+  margin: var(--s1) 0 0;
+  line-height: var(--lh-normal);
+}
+
+/* A plain table inside a padded panel: full width, no 720px floor (that floor
+   exists for the wide list tables, which live in a scrolling .table-wrap). */
+.table {
+  min-width: 0;
+  margin-top: var(--s2);
+}
+
+.table :is(th, td):first-child {
+  padding-left: 0;
+}
+
+.table :is(th, td):last-child {
+  padding-right: 0;
+}
+
+.table th {
+  background: none;
+}
+
+/* A table that runs the full width of its panel (its own edge padding lines up
+   with the panel header above it) rather than being inset inside a padded
+   block. */
+.table.is-flush {
+  margin-top: 0;
+}
+
+.table.is-flush :is(th, td):first-child {
+  padding-left: var(--s4);
+}
+
+.table.is-flush :is(th, td):last-child {
+  padding-right: var(--s4);
+}
+
+.table.is-flush th {
+  background: var(--surface-sunken);
+}
+
+/* Rows the collections screen marks as behind schedule. */
+tr.late td,
+.late {
+  color: var(--bad-fg);
+}
+
+tr.late td:first-child {
+  font-weight: var(--fw-semibold);
+}
+
+/* Inline "record a payment" form on the collections screen. */
+.pay {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: var(--s3);
+  margin-top: var(--s3);
+}
+
+.pay label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--ink-700);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+}
+
+.pay-actions {
+  display: flex;
+  gap: var(--s2);
+  margin-top: var(--s4);
+}
+
+/* Inline decision / edit forms on the lender and readiness screens. */
+.form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--s3);
+  margin-top: var(--s3);
+}
+
+.form label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--ink-700);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+}
+
+.form label.wide {
+  grid-column: 1 / -1;
+}
+
+.final {
+  color: var(--ink-400);
+  font-size: var(--fs-xs);
+  font-style: italic;
+}
+
+/* --- loan queue (app/loan/applications) --------------------------------- */
+
+.list-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s3);
+  margin-bottom: var(--s3);
+}
+
+.list-filters-select {
+  width: 240px;
+  max-width: 100%;
+}
+
+/* Row cells the queue leans on. */
+.who {
+  font-weight: var(--fw-semibold);
+}
+
+.phone {
+  color: var(--ink-500);
+  font-size: var(--fs-xs);
+}
+
+.num {
+  font-weight: var(--fw-semibold);
+  white-space: nowrap;
+}
+
+.terms {
+  color: var(--ink-500);
+  white-space: nowrap;
+}
+
+.cell-open {
+  color: var(--brand-600);
+  font-weight: var(--fw-semibold);
+  white-space: nowrap;
+}
+
+.cell-open:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* --- credit dashboard (app/loan/dashboard) ------------------------------ */
+
+.bars {
+  display: grid;
+  gap: var(--s2);
+}
+
+.bar .meter-head {
+  margin-bottom: 3px;
+  color: var(--ink-900);
+}
+
+.bar .meter-head strong {
+  color: var(--ink-900);
+}
+
+/* Key/value money list. */
+.kv {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px var(--s3);
+  margin: 0;
+}
+
+.kv dt {
+  color: var(--ink-500);
+  font-size: var(--fs-sm);
+}
+
+.kv dd {
+  margin: 0;
+  color: var(--ink-900);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.kv dd.is-ok { color: var(--ok-fg); }
+.kv dd.is-bad { color: var(--bad-fg); }
+
+/* Indicative readiness grades. */
+.grade-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  margin-bottom: var(--s3);
+}
+
+.grade-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 62px;
+  padding: var(--s2) var(--s4);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--e1);
+}
+
+.grade-letter {
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-bold);
+  line-height: 1;
+}
+
+.grade-count {
+  margin-top: 2px;
+  color: var(--ink-500);
+  font-size: var(--fs-xs);
+}
+
+.small {
+  font-size: var(--fs-sm);
+}
+
+/* --- API viewer (app/api-viewer) ---------------------------------------- */
+
+.api-filter {
+  padding: var(--s3) var(--s4);
+  border-bottom: 1px solid var(--line);
+}
+
+.api-filter .search-box {
+  width: 100%;
+  box-shadow: none;
+}
+
+.api-filter .search-box input {
+  width: auto;
+  flex: 1;
+}
+
+.search-clear {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: var(--r-xs);
+  background: none;
+  color: var(--ink-400);
+}
+
+.search-clear:hover {
+  background: var(--surface-sunken);
+  color: var(--bad-fg);
+}
+
+.api-group {
+  border-top: 1px solid var(--line);
+}
+
+.api-group:first-child {
+  border-top: none;
+}
+
+.api-group-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  width: 100%;
+  padding: var(--s3) var(--s4);
+  border: 0;
+  background: none;
+  text-align: left;
+}
+
+.api-group-head:hover {
+  background: var(--surface-sunken);
+}
+
+.api-group-title {
+  color: var(--ink-900);
+  font-size: var(--fs-base);
+  font-weight: var(--fw-semibold);
+}
+
+.api-group-count {
+  padding: 1px 8px;
+  border-radius: var(--r-pill);
+  background: var(--brand-50);
+  color: var(--brand-700);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+}
+
+.api-group-chevron {
+  margin-left: auto;
+  color: var(--ink-400);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-bold);
+}
+
+.api-group-blurb {
+  margin: 0;
+  padding: 0 var(--s4) var(--s2);
+  color: var(--ink-500);
+  font-size: var(--fs-sm);
+}
+
+/* The registry lives in a narrow column beside the JSON pane, so its tables
+   wrap to fit instead of scrolling sideways behind a clipped edge. */
+.api-group table {
+  min-width: 0;
+}
+
+.api-group table :is(th, td):first-child {
+  padding-left: var(--s4);
+}
+
+.api-group table :is(th, td):last-child {
+  padding-right: var(--s4);
+}
+
+.api-group td {
+  vertical-align: top;
+}
+
+.api-group td code {
+  color: var(--brand-800);
+  overflow-wrap: break-word;
+}
+
+/* Give the path its own share of the column so it breaks at a slash rather
+   than mid-word. */
+.api-group td:nth-child(2),
+.api-group th:nth-child(2) {
+  width: 38%;
+}

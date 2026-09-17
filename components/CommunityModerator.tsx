@@ -200,9 +200,18 @@ export function CommunityModerator() {
                   </td>
                   <td className="cell-wrap">
                     <div className="post-cell">
-                      {p.image_url ? (
+                      {p.image_url && /^https?:/i.test(p.image_url) ? (
+                        // A broken-image icon in a moderation queue reads as a
+                        // problem with the post; hide the thumbnail instead and
+                        // keep the row legible. Some rows hold a device-local
+                        // file:// path written by an older app build.
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img src={p.image_url} alt="" className="post-thumb" />
+                        <img
+                          src={p.image_url}
+                          alt=""
+                          className="post-thumb"
+                          onError={(e) => { e.currentTarget.style.display = "none"; }}
+                        />
                       ) : null}
                       <span className="post-body">{p.body || <em className="cell-muted">(no text)</em>}</span>
                     </div>

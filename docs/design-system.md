@@ -18,6 +18,7 @@ utility layers and then the handwritten layers in order:
 | `app/styles/forms.css` | field stack, wizard steps, save bar, sign-in, editors |
 | `app/styles/feedback.css` | status pills, badges, notices, banners, drawers |
 | `app/styles/modules.css` | screen-specific modules (notifications, broadcasts, partner strip, geography, approvals queue, sale workflow) |
+| `app/styles/screens.css` | the loan workspace, loan queue, credit dashboard, collections, lender pipeline and API viewer |
 
 Three components keep their own file next to them, imported from the
 component: `components/admin-forms.css`, `components/listing-workflow.css`,
@@ -79,14 +80,39 @@ Prefer these over new markup:
 - `.status-pill` (`.green|gold|red|blue|grey|rose`), `.tag`, `.notice`
   (`.is-ok|is-warn|is-error`), `.drawer*`.
 
+## Three traps this codebase has already fallen into
+
+**styled-jsx scopes per component, not per file.** A `<style jsx>` block next
+to a page only reaches the elements that page renders; a small helper
+component declared in the same file gets a different scope id and none of the
+rules. That is why the loan workspace printed "Material fields verified0/0" —
+`.meter-head { justify-content: space-between }` never reached the `Meter`
+helper. There are now **no `<style jsx>` blocks left in the app**; screen
+rules live in `screens.css`. Keep it that way.
+
+**A `.panel` with no header needs `padding`.** The panel is built from parts
+that carry their own inset (`.panel-header`, `.table-wrap`, `.table-footer`).
+A panel holding plain content gets the inset itself, through the
+`:has()` rule in `layout.css`; `.panel.is-padded` forces it. Without this the
+heading sits on the top border and the controls touch both edges.
+
+**`1fr` is not `minmax(0, 1fr)`.** An `fr` track's minimum is the *min-content*
+of its widest child, so a track holding a text input (intrinsic width ~170px)
+refuses to shrink and pushes the row past its container — where
+`.panel { overflow: hidden }` silently cuts it off. That is what clipped the
+"verified" checkboxes off the loan workspace. Always write
+`minmax(0, 1fr)` in a grid that contains controls.
+
 ## Conventions
 
 - No hard-coded pixel colours in TSX. If a value has to be computed in JS,
   return a token string (`"var(--bad-fg)"`), as the loan screens do.
 - Inline `style` is for genuinely dynamic values only — a meter width, a
   chart series colour. Anything static belongs in a class.
-- A few screens still use `<style jsx>` for their own layout
-  (`app/loan/*`, `app/api-viewer`). That is fine, but those blocks read from
-  the same tokens; keep them that way.
+- No `<style jsx>`. Screen-specific rules go in `screens.css` (or
+  `modules.css`), where they are global and cannot miss a helper component.
+- A control written without a class still gets a sane box: `base.css` styles
+  bare `input`/`select`/`textarea` through `:where()`, so its specificity is
+  zero and every named control still wins.
 - Responsive: the rail collapses into a drawer plus a bottom bar below
   1180px. Test new screens at 414px as well as desktop.

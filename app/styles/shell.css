@@ -442,9 +442,12 @@
   border-bottom: 1px solid var(--line);
 }
 
+/* Block-level, not inline-flex: on the create/edit screen it follows a
+   "Back to list" link, and as an inline box it sat on the same line as it. */
 .eyeline {
-  display: inline-flex;
+  display: flex;
   align-items: center;
+  width: fit-content;
   gap: 6px;
   margin: 0 0 var(--s2);
   color: var(--brand-500);
@@ -552,8 +555,9 @@
 }
 
 .back-link {
-  display: inline-flex;
+  display: flex;
   align-items: center;
+  width: fit-content;
   gap: 6px;
   margin-bottom: var(--s3);
   color: var(--ink-500);

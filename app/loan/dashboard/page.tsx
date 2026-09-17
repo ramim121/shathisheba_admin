@@ -65,25 +65,25 @@ export default function CreditDashboardPage() {
 
   return (
     <AdminShell>
-      <div className="page-head">
+      <section className="topbar">
         <div>
-          <p className="eyebrow">Loan &amp; Credit</p>
-          <h1>Credit dashboard</h1>
-          <p className="page-sub">
+          <p className="eyeline">Loan &amp; Credit</p>
+          <h1 className="page-title">Credit dashboard</h1>
+          <p className="subtitle">
             The finance pipeline end to end — applications, risk mix, money position, repayment
             performance and the readiness funnel that feeds it.
           </p>
         </div>
-      </div>
+      </section>
 
-      {loading && <p style={{ color: "var(--ink-500)" }}>Loading portfolio…</p>}
+      {loading && <p className="empty-note">Loading portfolio…</p>}
       {error && (
         <p className="error">{error}</p>
       )}
 
       {data && (
         <>
-          <section className="stat-row">
+          <section className="grid metrics">
             <StatCard label="Applications" value={data.pipeline.total} sub="all time" />
             <StatCard label="Awaiting screening" value={data.pipeline.submitted} sub="just submitted" />
             <StatCard label="Collecting evidence" value={data.pipeline.collecting} sub="KYC &amp; field visit" />
@@ -183,37 +183,16 @@ export default function CreditDashboardPage() {
         </>
       )}
 
-      <style jsx>{`
-        .page-head { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:18px; }
-        .eyebrow { text-transform:uppercase; letter-spacing:.08em; font-size:var(--fs-2xs); font-weight:700; color:var(--brand-500); margin:0 0 4px; }
-        h1 { margin:0 0 6px; font-size:var(--fs-2xl); }
-        .page-sub { margin:0; color:var(--ink-500); max-width:720px; }
-        .stat-row { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:14px; margin-bottom:18px; }
-        .panel-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(340px,1fr)); gap:16px; }
-        .grade-row { display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap; }
-        .grade-chip { display:flex; flex-direction:column; align-items:center; border:2px solid; border-radius:var(--r-lg); padding:8px 16px; min-width:64px; box-shadow:var(--e1); }
-        .grade-letter { font-size:22px; font-weight:700; line-height:1; }
-        .grade-count { font-size:var(--fs-sm); color:var(--ink-500); margin-top:2px; }
-        .kv { display:grid; grid-template-columns:1fr auto; gap:6px 12px; margin:0 0 12px; }
-        .muted { color:var(--ink-500); margin:8px 0 0; }
-        .small { font-size:var(--fs-sm); }
-      `}</style>
     </AdminShell>
   );
 }
 
 function StatCard({ label, value, sub }: { label: string; value: number; sub: string }) {
   return (
-    <div className="card stat">
-      <p className="stat-label">{label}</p>
-      <p className="stat-value">{value ?? 0}</p>
-      <p className="stat-sub">{sub}</p>
-      <style jsx>{`
-        .stat { background:var(--surface); border:1px solid var(--line); border-radius:var(--r-lg); padding:16px 18px; box-shadow:var(--e1); }
-        .stat-label { margin:0 0 6px; font-size:var(--fs-sm); color:var(--ink-500); }
-        .stat-value { margin:0; font-size:var(--fs-2xl); font-weight:700; color:var(--ink-900); line-height:1.1; }
-        .stat-sub { margin:4px 0 0; font-size:var(--fs-xs); color:var(--brand-500); }
-      `}</style>
+    <div className="metric">
+      <span>{label}</span>
+      <strong>{value ?? 0}</strong>
+      <small>{sub}</small>
     </div>
   );
 }
@@ -221,43 +200,39 @@ function StatCard({ label, value, sub }: { label: string; value: number; sub: st
 function Panel({ title, sub, children }: { title: string; sub: string; children: React.ReactNode }) {
   return (
     <section className="panel">
-      <header>
-        <h2>{title}</h2>
-        <p>{sub}</p>
-      </header>
-      {children}
-      <style jsx>{`
-        .panel { background:var(--surface); border:1px solid var(--line); border-radius:var(--r-lg); padding:18px 20px; }
-        h2 { margin:0 0 4px; font-size:16px; }
-        header p { margin:0 0 14px; font-size:var(--fs-sm); color:var(--ink-500); }
-      `}</style>
+      <div className="panel-header">
+        <div>
+          <h2>{title}</h2>
+          <p>{sub}</p>
+        </div>
+      </div>
+      <div className="panel-body">{children}</div>
     </section>
   );
 }
 
 function KV({ k, v, tone }: { k: string; v: string; tone?: "warn" | "good" }) {
-  const color = tone === "warn" ? "var(--bad-fg)" : tone === "good" ? "#1E9E5A" : "var(--ink-900)";
   return (
     <>
-      <dt style={{ color: "var(--ink-500)", fontSize: 13 }}>{k}</dt>
-      <dd style={{ margin: 0, fontWeight: 700, color, textAlign: "right", fontSize: 14 }}>{v}</dd>
+      <dt>{k}</dt>
+      <dd className={tone === "warn" ? "is-bad" : tone === "good" ? "is-ok" : undefined}>{v}</dd>
     </>
   );
 }
 
 function Bars({ rows, empty }: { rows: [string, number][]; empty: string }) {
   const max = Math.max(1, ...rows.map(([, n]) => n));
-  if (!rows.length || rows.every(([, n]) => !n)) return <p style={{ color: "var(--ink-500)" }}>{empty}</p>;
+  if (!rows.length || rows.every(([, n]) => !n)) return <p className="empty-note">{empty}</p>;
   return (
-    <div>
+    <div className="bars">
       {rows.map(([label, n]) => (
-        <div key={label} style={{ marginBottom: 8 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 3 }}>
-            <span style={{ color: "var(--ink-900)" }}>{label}</span>
+        <div className="bar" key={label}>
+          <div className="meter-head">
+            <span>{label}</span>
             <strong>{n}</strong>
           </div>
           <div className="meter-track">
-            <div style={{ width: `${(n / max) * 100}%`, background: "var(--brand-600)", height: 8, borderRadius: 6 }} />
+            <div className="meter-fill" style={{ width: `${(n / max) * 100}%` }} />
           </div>
         </div>
       ))}

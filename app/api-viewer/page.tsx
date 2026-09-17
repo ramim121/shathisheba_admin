@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Copy, Eye, RefreshCw } from "lucide-react";
+import { Copy, Eye, RefreshCw, Search, X } from "lucide-react";
 import { AdminShell } from "@/components/AdminShell";
 import { Status } from "@/components/Status";
 
@@ -155,13 +155,20 @@ export default function ApiViewerPage() {
             <Status label={`${endpoints.length} endpoints`} />
           </div>
           <div className="api-filter">
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Filter by path or purpose…"
-              aria-label="Filter endpoints"
-            />
-            {query ? <button type="button" onClick={() => setQuery("")}>×</button> : null}
+            <div className="search-box">
+              <Search size={16} />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Filter by path or purpose…"
+                aria-label="Filter endpoints"
+              />
+              {query ? (
+                <button type="button" className="search-clear" onClick={() => setQuery("")} aria-label="Clear filter">
+                  <X size={14} />
+                </button>
+              ) : null}
+            </div>
           </div>
 
           <div className="table-wrap">
@@ -216,19 +223,6 @@ export default function ApiViewerPage() {
             ) : null}
           </div>
 
-          <style jsx>{`
-            .api-filter { display:flex; gap:8px; align-items:center; padding:0 0 12px; }
-            .api-filter input { flex:1; padding:9px 12px; border:1px solid var(--line); border-radius:var(--r-sm); font-size:var(--fs-base); }
-            .api-filter button { border:1px solid var(--line); background:var(--surface); border-radius:var(--r-sm); width:34px; height:34px; cursor:pointer; }
-            .api-group { border-top:1px solid var(--line); }
-            .api-group:first-child { border-top:none; }
-            .api-group-head { width:100%; display:flex; align-items:center; gap:10px; background:none; border:none;
-                              padding:12px 2px; cursor:pointer; text-align:left; }
-            .api-group-title { font-weight:700; font-size:var(--fs-base); color:var(--ink-900); }
-            .api-group-count { background:var(--line); color:var(--brand-600); border-radius:999px; padding:2px 9px; font-size:var(--fs-xs); font-weight:700; }
-            .api-group-chevron { margin-left:auto; color:var(--brand-500); font-size:16px; font-weight:700; }
-            .api-group-blurb { margin:0 0 8px; color:var(--ink-500); font-size:var(--fs-sm); }
-          `}</style>
         </div>
 
         <div className="panel api-json-panel">

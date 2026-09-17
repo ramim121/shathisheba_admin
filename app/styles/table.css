@@ -7,8 +7,8 @@
    the row is hovered.
    =========================================================================== */
 
+/* No min-height: a two-row table should not reserve 200px of empty panel. */
 .table-wrap {
-  min-height: 200px;
   max-height: calc(100vh - 300px);
   overflow: auto;
 }
@@ -298,6 +298,9 @@ td > .tag {
 
 /* --- row actions --------------------------------------------------------- */
 
+/* Icon-only actions in a list row. A row that holds labelled buttons instead
+   (the loan workspace verifies documents with "Verify" / "Reject") opts out
+   through .btn, which keeps its own width. */
 .row-actions {
   display: flex;
   align-items: center;
@@ -333,6 +336,12 @@ td > .tag {
 .row-actions button:disabled {
   opacity: 0.4;
   pointer-events: none;
+}
+
+.row-actions > .btn {
+  width: auto;
+  height: var(--h-sm);
+  padding: 0 10px;
 }
 
 /* --- footer: page size and pager ---------------------------------------- */

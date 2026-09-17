@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AdminShell } from "@/components/AdminShell";
@@ -61,21 +62,23 @@ const STATUS_LABEL: Record<string, string> = {
   cancelled: "Cancelled",
 };
 
+// Stage -> one of the shared status-pill tones. Blue is "moving", amber is
+// "waiting on someone", green is "cleared", red is "stopped".
 const STATUS_TONE: Record<string, string> = {
-  submitted: "#2563EB",
-  kyc_in_progress: "#D97706",
-  field_verification: "#D97706",
-  behavioral_pending: "#7C3AED",
-  under_assessment: "#7C3AED",
-  assessed: "#1E9E5A",
-  submitted_to_lender: "#2563EB",
-  approved: "#1E9E5A",
-  disbursed: "#1E9E5A",
-  repaying: "#1E9E5A",
-  overdue: "var(--bad-fg)",
-  lender_declined: "var(--bad-fg)",
-  hard_stopped: "var(--bad-fg)",
-  ineligible: "var(--bad-fg)",
+  submitted: "blue",
+  kyc_in_progress: "gold",
+  field_verification: "gold",
+  behavioral_pending: "gold",
+  under_assessment: "blue",
+  assessed: "green",
+  submitted_to_lender: "blue",
+  approved: "green",
+  disbursed: "green",
+  repaying: "green",
+  overdue: "red",
+  lender_declined: "red",
+  hard_stopped: "red",
+  ineligible: "red",
 };
 
 const taka = (n: unknown) => `৳${Number(n || 0).toLocaleString("en-IN")}`;
@@ -111,22 +114,24 @@ export default function LoanApplicationsPage() {
 
   return (
     <AdminShell>
-      <div className="head">
+      <section className="topbar">
         <div>
-          <p className="eyebrow">Loan &amp; Credit</p>
+          <p className="eyeline">Loan &amp; Credit</p>
           <h1>Loan applications</h1>
-          <p className="sub">
+          <p className="subtitle">
             Every finance application with its stage, the farmer, the amount requested and how long it
             has been open. Applications open more than five days are flagged.
           </p>
         </div>
-        <button className="btn ghost" onClick={load} disabled={loading}>
-          {loading ? "Refreshing…" : "Refresh"}
-        </button>
-      </div>
+        <div className="toolbar">
+          <button className="btn ghost" onClick={load} disabled={loading}>
+            <RefreshCw size={16} /> {loading ? "Refreshing…" : "Refresh"}
+          </button>
+        </div>
+      </section>
 
       {data && (
-        <section className="kpis">
+        <section className="grid metrics">
           <Kpi label="Awaiting screening" value={data.kpi.awaiting_screening} />
           <Kpi label="Collecting evidence" value={data.kpi.in_collection} />
           <Kpi label="Under assessment" value={data.kpi.in_assessment} />
@@ -134,8 +139,8 @@ export default function LoanApplicationsPage() {
         </section>
       )}
 
-      <div className="filters">
-        <div className="filter-select">
+      <div className="list-filters">
+        <div className="list-filters-select">
           <Select
             aria-label="Stage"
             value={status}
@@ -143,26 +148,28 @@ export default function LoanApplicationsPage() {
             onChange={(v) => { setPage(1); setStatus(v); }}
           />
         </div>
-        {data && <span className="count">{data.total} application{data.total === 1 ? "" : "s"}</span>}
+        {data && <span className="table-count">{data.total} application{data.total === 1 ? "" : "s"}</span>}
       </div>
 
       {error && <p className="error">{error}</p>}
       {loading && !data && <p className="muted">Loading queue…</p>}
 
       {data && data.rows.length === 0 && !loading && (
-        <div className="empty">
-          <p><strong>No applications yet.</strong></p>
-          <p className="muted">
-            Applications appear here as soon as a farmer submits one from the app. Nothing is shown
-            until then — this table never renders sample rows.
-          </p>
-        </div>
+        <section className="panel is-padded">
+          <div className="table-empty">
+            <strong>No applications yet.</strong>
+            <span>
+              Applications appear here as soon as a farmer submits one from the app. Nothing is
+              shown until then — this table never renders sample rows.
+            </span>
+          </div>
+        </section>
       )}
 
       {data && data.rows.length > 0 && (
-        <>
+        <section className="panel">
           <div className="table-wrap">
-            <table>
+            <table className="data-table">
               <thead>
                 <tr>
                   <th>Application</th><th>Farmer</th><th>Product</th><th>Requested</th>
@@ -190,8 +197,7 @@ export default function LoanApplicationsPage() {
                       {r.tenure_months} mo · {r.repayment_mode.replace("_", " ")}
                     </td>
                     <td>
-                      <span className="chip" style={{ color: STATUS_TONE[r.status] ?? "var(--ink-500)",
-                        borderColor: (STATUS_TONE[r.status] ?? "#ccc") + "55" }}>
+                      <span className={`status-pill ${STATUS_TONE[r.status] ?? "grey"}`}>
                         {STATUS_LABEL[r.status] ?? r.status}
                       </span>
                     </td>
@@ -200,7 +206,7 @@ export default function LoanApplicationsPage() {
                     <td>
                       {/* The workspace, not the generic row viewer — this is the
                           screen an officer actually works the application in. */}
-                      <Link className="open" href={`/loan/applications/${r.id}`}>
+                      <Link className="cell-open" href={`/loan/applications/${r.id}`}>
                         Open →
                       </Link>
                     </td>
@@ -210,56 +216,26 @@ export default function LoanApplicationsPage() {
             </table>
           </div>
 
-          <div className="pager">
-            <button className="btn ghost" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>Previous</button>
-            <span>Page {data.page} of {pages}</span>
-            <button className="btn ghost" disabled={page >= pages} onClick={() => setPage((p) => p + 1)}>Next</button>
+          <div className="table-footer">
+            <span className="table-count">{data.total} application{data.total === 1 ? "" : "s"}</span>
+            <div className="pager">
+              <button className="btn ghost sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>Prev</button>
+              <span className="page-indicator">Page {data.page}/{pages}</span>
+              <button className="btn ghost sm" disabled={page >= pages} onClick={() => setPage((p) => p + 1)}>Next</button>
+            </div>
           </div>
-        </>
+        </section>
       )}
 
-      <style jsx>{`
-        .head { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; margin-bottom:18px; }
-        .eyebrow { text-transform:uppercase; letter-spacing:.08em; font-size:var(--fs-2xs); font-weight:700; color:var(--brand-500); margin:0 0 4px; }
-        h1 { margin:0 0 6px; font-size:var(--fs-2xl); }
-        .sub { margin:0; color:var(--ink-500); max-width:680px; }
-        .kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:14px; margin-bottom:18px; }
-        .filters { display:flex; align-items:center; gap:12px; margin-bottom:12px; }
-        .filter-select { width:240px; max-width:100%; }
-        .count { color:var(--ink-500); font-size:var(--fs-sm); }
-        .table-wrap { overflow-x:auto; background:var(--surface); border:1px solid var(--line); border-radius:var(--r-lg); box-shadow:var(--e2); }
-        table { width:100%; border-collapse:collapse; font-size:var(--fs-base); }
-        th { text-align:left; padding:10px 16px; background:var(--surface-sunken); border-bottom:1px solid var(--line); font-size:var(--fs-2xs); font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--ink-500); white-space:nowrap; }
-        td { padding:10px 16px; border-bottom:1px solid var(--line); vertical-align:top; font-size:var(--fs-sm); color:var(--ink-800); }
-        tr:last-child td { border-bottom:none; }
-        .mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:var(--fs-sm); }
-        .who { font-weight:600; }
-        .phone { color:var(--ink-500); font-size:var(--fs-sm); }
-        .num { font-weight:700; white-space:nowrap; }
-        .terms { color:var(--ink-500); white-space:nowrap; }
-        .chip { display:inline-block; border:1px solid; border-radius:999px; padding:3px 10px;
-                font-size:var(--fs-xs); font-weight:600; white-space:nowrap; }
-        .late { color:var(--bad-fg); font-weight:700; }
-        .open { color:var(--brand-600); font-weight:600; text-decoration:none; white-space:nowrap; }
-        .pager { display:flex; align-items:center; gap:14px; justify-content:center; margin-top:16px; color:var(--ink-500); font-size:var(--fs-sm); }
-        .empty { background:var(--surface); border:1px solid var(--line); border-radius:var(--r-lg); padding:28px; text-align:center; box-shadow:var(--e1); }
-        .muted { color:var(--ink-500); }
-        .error { color:var(--bad-fg); background:var(--bad-bg); border:1px solid var(--bad-line); border-radius:var(--r-md); padding:12px 14px; }
-      `}</style>
     </AdminShell>
   );
 }
 
 function Kpi({ label, value, tone }: { label: string; value: number; tone?: "warn" }) {
   return (
-    <div className="kpi">
-      <p className="l">{label}</p>
-      <p className="v" style={{ color: tone === "warn" && value > 0 ? "var(--bad-fg)" : "var(--ink-900)" }}>{value}</p>
-      <style jsx>{`
-        .kpi { background:var(--surface); border:1px solid var(--line); border-radius:var(--r-lg); padding:14px 16px; box-shadow:var(--e1); }
-        .l { margin:0 0 4px; font-size:var(--fs-sm); color:var(--ink-500); }
-        .v { margin:0; font-size:var(--fs-2xl); font-weight:700; line-height:1.1; }
-      `}</style>
+    <div className={`metric${tone === "warn" && value > 0 ? " tone-red" : ""}`}>
+      <span>{label}</span>
+      <strong>{value}</strong>
     </div>
   );
 }

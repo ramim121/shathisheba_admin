@@ -40,6 +40,52 @@ textarea {
   color: inherit;
 }
 
+/* A default box for any control that was written without a class — the loan
+   and verification screens are full of bare <input> and <select> elements,
+   and they used to render as raw browser widgets next to the designed ones.
+   Written with :where() so its specificity is zero: .input, .col-filter,
+   .nav-search input and every other named control still win. */
+:where(input, select, textarea):not(:where([type="checkbox"], [type="radio"], [type="file"], [type="range"], [type="submit"], [type="button"], [type="image"], [type="color"])) {
+  width: 100%;
+  min-width: 0;
+  height: var(--h-md);
+  padding: 0 var(--ctl-px);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink-900);
+  font-size: var(--fs-base);
+  transition: border-color var(--t-fast), box-shadow var(--t-fast);
+}
+
+:where(textarea) {
+  height: auto;
+  min-height: 84px;
+  padding: 9px var(--ctl-px);
+  line-height: var(--lh-normal);
+  resize: vertical;
+}
+
+:where(select) {
+  padding-right: 30px;
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%238e7b87' stroke-width='2.2' stroke-linecap='round'><path d='m6 9 6 6 6-6'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+}
+
+:where(input, select, textarea):focus-visible {
+  outline: none;
+  border-color: var(--brand-500);
+  box-shadow: var(--ring);
+}
+
+:where(input, select, textarea):disabled {
+  background: var(--surface-sunken);
+  color: var(--ink-400);
+  cursor: not-allowed;
+}
+
 button {
   cursor: pointer;
 }

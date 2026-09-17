@@ -51,14 +51,34 @@
 /* --- panel --------------------------------------------------------------- */
 
 .panel {
-  display: flex;
-  flex-direction: column;
   min-width: 0;
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
   background: var(--surface);
   box-shadow: var(--e2);
   overflow: hidden;
+}
+
+/* A panel is either assembled from parts that carry their own padding — a
+   header, a table, a footer — or it is a plain section of content, in which
+   case it needs its own. The bespoke loan screens are the second kind and
+   were rendering their heading flush against the top border, with the text
+   sitting on the line and the controls touching both edges.
+
+   `.is-padded` forces it for a panel that does contain a part but still wants
+   the inset. */
+.panel:not(:has(> .panel-header)):not(:has(> .table-wrap)):not(:has(> table)):not(:has(> .def-grid)),
+.panel.is-padded {
+  padding: var(--s4) var(--s5) var(--s5);
+}
+
+/* A button is a control, not a row: it keeps its own width inside a panel or
+   a column instead of stretching across it. */
+.panel > .btn,
+.panel > button.btn,
+.panel > a.btn {
+  align-self: flex-start;
+  width: auto;
 }
 
 .panel-header {

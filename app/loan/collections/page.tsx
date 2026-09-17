@@ -1,5 +1,7 @@
 "use client";
 
+import { RefreshCw, Search } from "lucide-react";
+
 import { useCallback, useEffect, useState } from "react";
 import { AdminShell } from "@/components/AdminShell";
 
@@ -101,29 +103,32 @@ export default function CollectionsPage() {
 
   return (
     <AdminShell>
-      <div className="head">
+      <section className="topbar">
         <div>
-          <p className="eyebrow">Loan &amp; Credit</p>
-          <h1>Collections</h1>
-          <p className="muted">Aging, portfolio at risk, and the accounts behind both.</p>
+          <p className="eyeline">Loan &amp; Credit</p>
+          <h1 className="page-title">Collections</h1>
+          <p className="subtitle">Aging, portfolio at risk, and the accounts behind both.</p>
         </div>
-        <div className="head-actions">
-          <input
-            aria-label="Filter by district"
-            placeholder="Filter by district"
-            value={district}
-            onChange={(e) => setDistrict(e.target.value)}
-          />
+        <div className="toolbar">
+          <div className="search-box">
+            <Search size={16} />
+            <input
+              aria-label="Filter by district"
+              placeholder="Filter by district"
+              value={district}
+              onChange={(e) => setDistrict(e.target.value)}
+            />
+          </div>
           <button className="btn" onClick={() => post("admin/loan/arrears/refresh", {}, "Arrears recalculated.")} disabled={busy}>
-            Recalculate arrears
+            <RefreshCw size={16} /> Recalculate arrears
           </button>
         </div>
-      </div>
+      </section>
 
-      {message ? <section className="panel"><p className="msg">{message}</p></section> : null}
+      {message ? <div className="notice is-ok">{message}</div> : null}
 
       {p ? (
-        <section className="stats">
+        <section className="grid metrics">
           {([
             ["Active loans", String(p.active_loans)],
             ["Disbursed", taka(p.disbursed)],
@@ -133,17 +138,17 @@ export default function CollectionsPage() {
             // The one number a portfolio is actually judged on.
             ["Portfolio at risk", `${p.par_pct}%`],
           ] as [string, string][]).map(([label, value]) => (
-            <div className="stat" key={label}>
-              <span className="stat-label">{label}</span>
-              <strong className="stat-value">{value}</strong>
+            <div className="metric" key={label}>
+              <span>{label}</span>
+              <strong>{value}</strong>
             </div>
           ))}
         </section>
       ) : null}
 
       <section className="panel">
-        <h2 className="h2">Aging</h2>
-        <table className="table">
+        <div className="panel-header"><h2>Aging</h2></div>
+        <table className="table is-flush">
           <thead><tr><th>Bucket</th><th>Accounts</th><th>Outstanding</th><th>Overdue</th></tr></thead>
           <tbody>
             {(data?.buckets ?? []).map((b) => (
@@ -159,12 +164,12 @@ export default function CollectionsPage() {
       </section>
 
       <section className="panel">
-        <h2 className="h2">In arrears</h2>
+        <div className="panel-header"><h2>In arrears</h2></div>
         {(data?.overdue ?? []).length === 0 ? (
-          <p className="muted">Nothing is overdue.</p>
+          <p className="empty-note">Nothing is overdue.</p>
         ) : (
-          <div className="scroll">
-            <table className="table">
+          <div className="table-wrap">
+            <table className="table is-flush">
               <thead>
                 <tr><th>Application</th><th>Farmer</th><th>District</th><th>Overdue</th><th>Outstanding</th><th>Days</th><th></th></tr>
               </thead>
@@ -191,8 +196,8 @@ export default function CollectionsPage() {
       </section>
 
       {paying ? (
-        <section className="panel">
-          <h2 className="h2">Record a payment — {paying.code}</h2>
+        <section className="panel is-padded">
+          <h2 className="section-title">Record a payment — {paying.code}</h2>
           <p className="muted">
             {paying.farmer} · overdue {taka(paying.overdue)} of {taka(paying.outstanding)} outstanding.
             The amount is allocated oldest instalment first, and cannot exceed the balance.
@@ -220,33 +225,6 @@ export default function CollectionsPage() {
         </section>
       ) : null}
 
-      <style jsx>{`
-        .head { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; flex-wrap:wrap; margin-bottom:16px; }
-        .eyebrow { margin:0 0 4px; font-size:11.5px; font-weight:700; letter-spacing:.5px; text-transform:uppercase; color:var(--brand-500); }
-        h1 { margin:0; font-size:22px; color:var(--ink-900); }
-        .h2 { margin:0 0 10px; font-size:15px; color:var(--ink-900); }
-        .muted { color:var(--ink-500); font-size:var(--fs-sm); margin:4px 0 0; }
-        .msg { color:var(--brand-600); font-size:13.5px; margin:0; }
-        .head-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-        .head-actions input { padding:8px 10px; border:1px solid var(--line); border-radius:8px; font-size:13.5px; }
-        .stats { display:grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap:12px; margin-bottom:16px; }
-        .stat { background:var(--surface); border:1px solid var(--line); border-radius:var(--r-lg); padding:14px; box-shadow:var(--e1); }
-        .stat-label { display:block; font-size:var(--fs-xs); color:var(--ink-500); }
-        .stat-value { display:block; font-size:19px; color:var(--ink-900); margin-top:4px; }
-        .scroll { overflow-x:auto; }
-        .table { width:100%; border-collapse:collapse; font-size:var(--fs-sm); }
-        .table th { text-align:left; padding:10px 16px; background:var(--surface-sunken); border-bottom:1px solid var(--line); font-size:var(--fs-2xs); font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--ink-500); white-space:nowrap; }
-        .table td { padding:10px 16px; border-bottom:1px solid var(--line); vertical-align:top; font-size:var(--fs-sm); color:var(--ink-800); }
-        .late { color:var(--bad-fg); font-weight:600; }
-        .btn { padding:9px 16px; border-radius:8px; border:1px solid var(--line); background:var(--surface); color:var(--brand-600); font-size:13.5px; font-weight:600; cursor:pointer; }
-        .btn.primary { background:var(--brand-600); color:#fff; border-color:var(--brand-600); }
-        .btn.small { padding:6px 10px; font-size:var(--fs-sm); white-space:nowrap; }
-        .btn:disabled { opacity:.5; cursor:not-allowed; }
-        .pay { display:grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap:12px; margin-top:12px; box-shadow:var(--e1); }
-        .pay label { display:flex; flex-direction:column; gap:5px; font-size:var(--fs-sm); color:var(--ink-500); }
-        .pay input, .pay select { padding:8px 10px; border:1px solid var(--line); border-radius:8px; font-size:13.5px; }
-        .pay-actions { display:flex; gap:10px; margin-top:14px; }
-      `}</style>
     </AdminShell>
   );
 }

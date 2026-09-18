@@ -64,6 +64,11 @@ export type MessageInput = {
   model?: string | null;
   latencyMs?: number | null;
   ip?: string | null;
+  tokensIn?: number | null;
+  tokensOut?: number | null;
+  cachedTokens?: number | null;
+  fromCache?: boolean;
+  askedClarification?: boolean;
 };
 
 function json(value: unknown): string | null {
@@ -82,8 +87,9 @@ export async function logMessage(input: MessageInput): Promise<number | null> {
       `INSERT INTO apa_messages
          (conversation_id, user_id, role, input_mode, body, transcript, advice, image_url,
           audio_seconds, tools_json, sources_json, suggestions_json, refused, refusal_reason,
-          hedged, model, latency_ms, request_ip)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          hedged, model, latency_ms, request_ip,
+          tokens_in, tokens_out, cached_tokens, from_cache, asked_clarification)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         input.conversationId,
         input.userId,
@@ -102,7 +108,12 @@ export async function logMessage(input: MessageInput): Promise<number | null> {
         input.hedged ? 1 : 0,
         input.model?.slice(0, 80) ?? null,
         input.latencyMs ?? null,
-        input.ip?.slice(0, 45) ?? null
+        input.ip?.slice(0, 45) ?? null,
+        input.tokensIn ?? 0,
+        input.tokensOut ?? 0,
+        input.cachedTokens ?? 0,
+        input.fromCache ? 1 : 0,
+        input.askedClarification ? 1 : 0
       ]
     );
     if (input.role === "assistant") {
@@ -191,9 +202,9 @@ export type ToolLogInput = {
   latencyMs?: number | null;
 };
 
-export async function logToolCall(entry: ToolLogInput): Promise<void> {
+export async function logToolCall(entry: ToolLogInput): Promise<number | null> {
   try {
-    await executeQuery(
+    const res = await executeQuery(
       `INSERT INTO apa_tool_calls (message_id, user_id, tool, args_json, ok, error, rows_returned, latency_ms)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [
@@ -207,19 +218,30 @@ export async function logToolCall(entry: ToolLogInput): Promise<void> {
         entry.latencyMs ?? null
       ]
     );
+    return Number((res as { insertId?: number }).insertId ?? 0) || null;
   } catch (error) {
     console.error("apa tool write failed", error);
+    return null;
   }
 }
 
-/** Tool rows are written before the message id exists; this fills it in. */
-export async function attachToolMessage(userId: string | number, messageId: number | null): Promise<void> {
-  if (!messageId) return;
+/**
+ * Attach exactly the tool calls this answer made.
+ *
+ * This used to update every unattached row for the farmer in the last two
+ * minutes, which stitched one question's lookups onto another question's answer
+ * the moment she had two in flight — and swept up the unrelated app-side AI
+ * rows as well. The console's "grounded on" column is the thing someone would
+ * use to audit a bad answer, so it has to be right rather than approximately
+ * right.
+ */
+export async function attachToolCalls(ids: number[], messageId: number | null): Promise<void> {
+  if (!messageId || !ids.length) return;
   try {
+    const marks = ids.map(() => "?").join(", ");
     await executeQuery(
-      `UPDATE apa_tool_calls SET message_id = ?
-        WHERE user_id = ? AND message_id IS NULL AND created_at > NOW() - INTERVAL 2 MINUTE`,
-      [messageId, userId]
+      `UPDATE apa_tool_calls SET message_id = ? WHERE id IN (${marks})`,
+      [messageId, ...ids]
     );
   } catch {
     /* the call is still counted on the usage page */

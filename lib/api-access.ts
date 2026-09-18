@@ -167,7 +167,12 @@ export const ADMIN_ONLY = new Set<string>([
   "admin/apa/access",
   "admin/apa/grant",
   "admin/apa/feedback",
-  "admin/apa/feedback/review"
+  "admin/apa/feedback/review",
+  "admin/apa/quota",
+  "admin/apa/quota/reset",
+  "admin/apa/prompt-versions",
+  "admin/apa/prompt-revert",
+  "admin/apa/prewarm"
 ]);
 
 // Generic-CRUD tables an authenticated app user may create rows in. Every other

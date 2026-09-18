@@ -1,6 +1,9 @@
-import { genai, retrying } from "@/lib/apa/client";
-import { apaPrompt } from "@/lib/apa/config";
-import { TOOL_DECLARATIONS, activeProjectContext, runTool, type ApaSource, type ToolContext } from "@/lib/apa/tools";
+import { genai } from "@/lib/apa/client";
+import { askInstruction, type ApaConfig } from "@/lib/apa/config";
+import { runWithChain, thinkingFor, usageOf, type ModelUsage } from "@/lib/apa/models";
+import {
+  TOOL_DECLARATIONS, runTool, type ApaSource, type ToolContext, type ToolOutcome
+} from "@/lib/apa/tools";
 
 /**
  * The answer itself.
@@ -10,18 +13,32 @@ import { TOOL_DECLARATIONS, activeProjectContext, runTool, type ApaSource, type 
  * farmer standing in a field reads the first line and acts; the paragraph under
  * it is for the ones who want it.
  *
- * Three disclaimers are not optional and are enforced here rather than
- * requested in the prompt, because a model that forgets one half the time is
- * the same as not having it:
+ * Three structural decisions, each the result of something going wrong:
  *
- *   - anything about an animal's health ends with a named person to call;
- *   - a diagnosis from a photo is always marked as a first impression;
- *   - a figure a tool failed to fetch is never presented as today's number.
+ * 1. **The system instruction contains nothing about the individual farmer.**
+ *    Her district, farm and today's date go in the user turn. That keeps the
+ *    instruction byte-identical across every farmer, which is the condition
+ *    Google's implicit prompt cache needs — and, more usefully, it stopped the
+ *    model inventing a Bengali month, because the date is now stated rather
+ *    than guessed. It had said আষাঢ় in আশ্বিন: wrong by three months, in an
+ *    assistant whose job is planting windows.
  *
- * The model is asked to mark its own blocks with `[[advice]]`, `[[caution]]`
- * and `[[suggest]]`. Tagged text rather than JSON because JSON mode and
- * function calling do not compose, and losing the grounding tools to gain a
- * schema would be the wrong trade.
+ * 2. **Disclaimers are enforced here, not requested in the prompt.** A model
+ *    that forgets one half the time is the same as not having it. Measured:
+ *    with the old soft wording ("say plainly that you could not fetch it") the
+ *    model invented a complete three-day forecast; the rule had to become a
+ *    prohibition with a consequence before it held.
+ *
+ * 3. **A tool that found nothing is told apart from a tool that failed.** "No
+ *    weather alert for your area today" is a real answer; "I could not reach
+ *    the weather data" is a different one, and she acts differently on each.
+ *    The distinction was being computed server-side and then thrown away
+ *    before the model ever saw it.
+ *
+ * The model is asked to mark its own blocks with `[[advice]]`, `[[likely]]`,
+ * `[[caution]]` and `[[suggest]]`. Tagged text rather than JSON because JSON
+ * mode and function calling do not compose, and losing the grounding tools to
+ * gain a schema would be the wrong trade.
  */
 
 type Row = Record<string, unknown>;
@@ -34,8 +51,15 @@ export type ApaAnswer = {
   sources: ApaSource[];
   needs_officer: boolean;
   tools_used: string[];
+  /** Ids of the apa_tool_calls rows this answer produced, for exact attribution. */
+  tool_call_ids: number[];
   hedged: boolean;
+  /** True when she was asked one question back instead of being given a guess. */
+  asked_clarification: boolean;
+  /** No tool failed and nothing personal was read — safe to cache. */
+  cacheable: boolean;
   model: string;
+  usage: ModelUsage;
   latencyMs: number;
 };
 
@@ -55,56 +79,35 @@ const MAX_TOOL_ROUNDS = 3;
 
 export async function answer(input: {
   question: string;
-  model: string;
+  cfg: ApaConfig;
+  /** Which chain to use — vision for a photo, text otherwise. */
+  models: string[];
   ctx: ToolContext;
+  /**
+   * Everything about this farmer and today, rendered for the user turn. Built
+   * by the caller so this function stays ignorant of the database.
+   */
+  contextBlock: string;
   /** Prior turns, oldest first, already trimmed by the caller. */
   history?: Array<{ role: "user" | "assistant"; text: string }>;
   image?: { data: string; mimeType: string } | null;
-  language?: "bn" | "en";
 }): Promise<ApaAnswer> {
   const started = Date.now();
-  const [persona, scope, project] = await Promise.all([
-    apaPrompt("persona"),
-    apaPrompt("scope"),
-    activeProjectContext(input.ctx.userId)
-  ]);
-
-  const systemInstruction = [
-    persona,
-    "",
-    scope,
-    "",
-    "WHERE THIS FARMER IS:",
-    `District: ${input.ctx.districtName ?? "unknown"}. Upazila: ${input.ctx.upazilaName ?? "unknown"}.`,
-    project ? `She is enrolled in: ${project}.` : "",
-    "",
-    "USING THE TOOLS:",
-    "- Never state a weather condition, a price, a grade, an instalment or a stock level without calling the tool for it first. The app shows these numbers on its own screens and the farmer will see both.",
-    "- If a tool fails or returns nothing, say plainly that you could not fetch it today, give the general guidance instead and mark it as general. Never fill the gap with a number.",
-    "- Call get_my_profile whenever the advice depends on where she is or what she keeps.",
-    "",
-    "THE EARLIER TURNS:",
-    "- They are background, not a question. Answer only the last message. Do not re-answer or summarise what came before, and do not carry a figure from an earlier turn into an answer about something else.",
-    "",
-    "HOW TO LAY THE ANSWER OUT:",
-    "Write the answer as plain Bangla text, two to five short sentences or bullets. Then, where they apply, add these blocks exactly as written:",
-    "",
-    "[[advice]]What she should do today, one or two sentences.[[/advice]]",
-    "[[likely]]For a photo or a described symptom: what it probably is, and the common name.[[/likely]]",
-    "[[caution]]A warning she must read before acting.[[/caution]]",
-    "[[suggest]]first follow-up | second follow-up | third[[/suggest]]",
-    "",
-    "Use [[advice]] when there is an action. Use [[likely]] instead when you are naming a probable disease. Never both. Keep [[suggest]] to three short questions she might ask next, in her words.",
-    "Nothing else may be marked up: no headings, no bold, no tables."
-  ]
-    .filter(Boolean)
-    .join("\n");
+  const systemInstruction = await askInstruction(input.cfg);
 
   const contents: Array<{ role: string; parts: unknown[] }> = [];
   for (const turn of (input.history ?? []).slice(-6)) {
     contents.push({ role: turn.role === "user" ? "user" : "model", parts: [{ text: turn.text }] });
   }
-  const askParts: unknown[] = [{ text: input.question || "এই ছবিটা দেখে বলুন কী হয়েছে।" }];
+
+  const askText = [
+    input.contextBlock.trim(),
+    "",
+    "[QUESTION]",
+    input.question || "এই ছবিটা দেখে বলুন কী হয়েছে।"
+  ].join("\n");
+
+  const askParts: unknown[] = [{ text: askText }];
   if (input.image) {
     askParts.push({ inlineData: { mimeType: input.image.mimeType, data: input.image.data } });
   }
@@ -112,20 +115,43 @@ export async function answer(input: {
 
   const sources: ApaSource[] = [];
   const toolsUsed: string[] = [];
+  const toolCallIds: number[] = [];
   let toolFailed = false;
+  let personal = false;
   let text = "";
+  let model = input.models[0] ?? "unknown";
+  const usage: ModelUsage = { tokensIn: 0, tokensOut: 0, cachedTokens: 0 };
+
+  // Tool results are remembered for the length of this answer, so a model that
+  // asks for the weather twice across two rounds only costs one query.
+  const seen = new Map<string, ToolOutcome>();
 
   for (let round = 0; round <= MAX_TOOL_ROUNDS; round += 1) {
-    const res = await retrying(() => genai().models.generateContent({
-      model: input.model,
-      contents: contents as never,
-      config: {
-        systemInstruction,
-        temperature: 0.4,
-        maxOutputTokens: 900,
-        tools: [{ functionDeclarations: TOOL_DECLARATIONS as never }]
-      } as never
-    }));
+    const attempt = await runWithChain({
+      job: input.image ? "vision" : "answer",
+      chain: input.models,
+      call: async (candidate) => {
+        const res = await genai().models.generateContent({
+          model: candidate,
+          contents: contents as never,
+          config: {
+            systemInstruction,
+            temperature: 0.4,
+            maxOutputTokens: 900,
+            ...thinkingFor(candidate),
+            tools: [{ functionDeclarations: TOOL_DECLARATIONS as never }]
+          } as never
+        });
+        return { value: res, usage: usageOf(res) };
+      }
+    });
+
+    model = attempt.model;
+    const res = attempt.result;
+    const turnUsage = usageOf(res);
+    usage.tokensIn = (usage.tokensIn ?? 0) + (turnUsage.tokensIn ?? 0);
+    usage.tokensOut = (usage.tokensOut ?? 0) + (turnUsage.tokensOut ?? 0);
+    usage.cachedTokens = (usage.cachedTokens ?? 0) + (turnUsage.cachedTokens ?? 0);
 
     const parts = (res.candidates?.[0]?.content?.parts ?? []) as Array<{
       text?: string;
@@ -140,13 +166,41 @@ export async function answer(input: {
     const responses: unknown[] = [];
     for (const call of calls) {
       const name = String(call.functionCall?.name);
-      const outcome = await runTool(name, (call.functionCall?.args ?? {}) as Row, input.ctx);
-      toolsUsed.push(name);
-      if (!outcome.ok) toolFailed = true;
-      for (const source of outcome.sources) {
-        if (!sources.some((s) => s.kind === source.kind && s.label_bn === source.label_bn)) sources.push(source);
+      const args = (call.functionCall?.args ?? {}) as Row;
+      const cacheKey = `${name}:${JSON.stringify(args)}`;
+
+      let outcome = seen.get(cacheKey);
+      if (!outcome) {
+        outcome = await runTool(name, args, input.ctx);
+        seen.set(cacheKey, outcome);
+        toolsUsed.push(name);
+        if (outcome.toolCallId) toolCallIds.push(outcome.toolCallId);
+        if (!outcome.ok) toolFailed = true;
+        if (outcome.personal) personal = true;
+        for (const source of outcome.sources) {
+          if (!sources.some((s) => s.kind === source.kind && s.label_bn === source.label_bn)) {
+            sources.push(source);
+          }
+        }
       }
-      responses.push({ functionResponse: { name, response: { result: outcome.data } } });
+
+      // The model is told which of the three things happened, because it should
+      // answer differently for each: data, nothing there, or could not ask.
+      responses.push({
+        functionResponse: {
+          name,
+          response: {
+            ok: outcome.ok,
+            empty: outcome.empty,
+            note: !outcome.ok
+              ? "This lookup FAILED. Do not state a figure. Say you could not fetch it and give general guidance, marked as general."
+              : outcome.empty
+                ? "This lookup SUCCEEDED and there is genuinely nothing to report. Say so plainly — it is a real answer, not a failure."
+                : "This lookup succeeded. Use these figures exactly; do not round them.",
+            result: outcome.data
+          }
+        }
+      });
     }
     contents.push({ role: "user", parts: responses });
   }
@@ -156,9 +210,12 @@ export async function answer(input: {
     question: input.question,
     sources,
     toolsUsed,
+    toolCallIds,
     toolFailed,
+    personal,
     hasImage: Boolean(input.image),
-    model: input.model,
+    model,
+    usage,
     latencyMs: Date.now() - started
   });
 }
@@ -179,9 +236,12 @@ function finish(input: {
   question: string;
   sources: ApaSource[];
   toolsUsed: string[];
+  toolCallIds: number[];
   toolFailed: boolean;
+  personal: boolean;
   hasImage: boolean;
   model: string;
+  usage: ModelUsage;
   latencyMs: number;
 }): ApaAnswer {
   let rest = input.raw;
@@ -213,12 +273,21 @@ function finish(input: {
   // A first impression from a photograph is always a first impression. The
   // model says so most of the time; "most of the time" is not a safety control.
   if (input.hasImage && likely.body && !cautionText) {
-    cautionText = "এটি প্রাথমিক ধারণা। নিশ্চিত হতে স্থানীয় প্রাণিসম্পদ কর্মকর্তার সাথে কথা বলুন।";
+    cautionText = "এটি ছবি দেখে প্রাথমিক ধারণা, নিশ্চিত নয়। আজই প্রাণিসম্পদ কর্মকর্তা বা পশু ডাক্তারকে দেখান।";
   }
   // A number we could not fetch is never today's number.
   if (input.toolFailed && !cautionText) {
     cautionText = "এটি সাধারণ ধারণা, আজকের নিশ্চিত তথ্য নয়। একটু পরে আবার চেষ্টা করুন।";
   }
+
+  // One short question back and nothing else is the "ask rather than guess"
+  // behaviour, and the caller must not mistake it for a failed answer.
+  const sentences = text.split(/[।?!\n]+/).filter((s) => s.trim().length > 2);
+  const askedClarification =
+    /[?？]|জানালে|কোনটা|কোন গাছ|কী ধরনের/.test(text) &&
+    sentences.length <= 2 &&
+    !advice.body &&
+    !likely.body;
 
   return {
     text,
@@ -234,8 +303,14 @@ function finish(input: {
     sources: input.sources,
     needs_officer: health,
     tools_used: Array.from(new Set(input.toolsUsed)),
+    tool_call_ids: input.toolCallIds,
     hedged: Boolean(cautionText) || input.toolFailed,
+    asked_clarification: askedClarification,
+    // Never cache a failed lookup, anything personal, or a clarifying question
+    // — the last because the next farmer's vague question is not this one.
+    cacheable: !input.toolFailed && !input.personal && !askedClarification && text.length > 0,
     model: input.model,
+    usage: input.usage,
     latencyMs: input.latencyMs
   };
 }

@@ -79,7 +79,7 @@ export async function startLiveSession(input: {
   let token;
   try {
     ({ token } = await mintLiveToken({
-      model: cfg.models.live,
+      model: cfg.models.live[0],
       voice: cfg.voiceName,
       sessionMinutes: Math.ceil(allowed / 60),
       districtName: (profile?.district_bn as string | null) ?? null,
@@ -97,7 +97,7 @@ export async function startLiveSession(input: {
   const res = await executeQuery(
     `INSERT INTO apa_live_sessions (user_id, conversation_id, token_name, model, request_ip)
      VALUES (?, ?, ?, ?, ?)`,
-    [input.userId, conversationId, token.name.slice(0, 190), cfg.models.live, input.ip?.slice(0, 45) ?? null]
+    [input.userId, conversationId, token.name.slice(0, 190), cfg.models.live[0], input.ip?.slice(0, 45) ?? null]
   );
 
   await addUsage(input.userId, { live_sessions: 1 });

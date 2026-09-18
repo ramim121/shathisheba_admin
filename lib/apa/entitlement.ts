@@ -1,4 +1,5 @@
 import { executeQuery, queryRows } from "@/lib/db";
+import { getAppOfficers } from "@/lib/app-endpoints";
 import { apaConfig, type ApaConfig } from "@/lib/apa/config";
 
 /**
@@ -35,10 +36,12 @@ export type ApaRequirement = {
   label_bn: string;
   label_en: string;
   detail_bn: string;
+  detail_en: string;
   state: RequirementState;
   /** A screen token the app routes to, or null when there is nothing to tap. */
   action: string | null;
   action_label_bn: string | null;
+  action_label_en: string | null;
 };
 
 export type ApaEntitlement = {
@@ -63,8 +66,23 @@ export type ApaEntitlement = {
     bandwidth_floor_kbps: number;
   };
   voice: { autoplay: boolean; voice_name: string; speech_rate: string };
-  /** One line for the app to show above the lock, already in Bangla. */
+  /** One line for the app to show above the lock. */
   headline_bn: string;
+  headline_en: string;
+  /**
+   * Her area's field officer, present only while she is locked or waiting on a
+   * verification.
+   *
+   * The unlock screen is where a farmer gets stuck: her NID photograph was
+   * rejected, or it has been pending for three days, and the screen has no
+   * answer for either beyond "upload it again". A name and a phone number for
+   * somebody local is the difference between that screen being a wall and
+   * being a next step.
+   *
+   * Looked up only in those states, because `resolveEntitlement` runs on every
+   * question and a verified farmer does not need it.
+   */
+  officer: { name: string; phone: string | null; role: string | null; area: string | null } | null;
 };
 
 /** A refusal the app renders as a screen rather than an error toast. */
@@ -120,36 +138,44 @@ function buildRequirements(user: Row, docs: Row[]): ApaRequirement[] {
       label_bn: "আপনার এলাকা",
       label_en: "Your area",
       detail_bn: "জেলা ও উপজেলা দিলে আপনার এলাকার আবহাওয়া ও দাম বলতে পারব",
+      detail_en: "With your district and upazila we can give you local weather and prices",
       state: user.district_id ? "done" : "todo",
       action: user.district_id ? null : "screen:menuProfile",
-      action_label_bn: user.district_id ? null : "এলাকা দিন"
+      action_label_bn: user.district_id ? null : "এলাকা দিন",
+      action_label_en: user.district_id ? null : "Add your area"
     },
     {
       id: "nid_number",
       label_bn: "এনআইডি নম্বর",
       label_en: "NID number",
       detail_bn: "লিখুন বা বলে দিন",
+      detail_en: "Type it or say it out loud",
       state: String(user.nid_number ?? "").trim() ? "done" : "todo",
       action: String(user.nid_number ?? "").trim() ? null : "screen:menuKyc",
-      action_label_bn: String(user.nid_number ?? "").trim() ? null : "নম্বর দিন"
+      action_label_bn: String(user.nid_number ?? "").trim() ? null : "নম্বর দিন",
+      action_label_en: String(user.nid_number ?? "").trim() ? null : "Add the number"
     },
     {
       id: "nid_photo",
       label_bn: "এনআইডির ছবি",
       label_en: "NID photo",
       detail_bn: "সামনের দিক — ছবি তুলুন",
+      detail_en: "The front side — take a photo",
       state: nidPhoto,
       action: nidPhoto === "done" ? null : "screen:menuKyc",
-      action_label_bn: nidPhoto === "done" ? null : nidPhoto === "rejected" ? "আবার তুলুন" : "ছবি তুলুন"
+      action_label_bn: nidPhoto === "done" ? null : nidPhoto === "rejected" ? "আবার তুলুন" : "ছবি তুলুন",
+      action_label_en: nidPhoto === "done" ? null : nidPhoto === "rejected" ? "Retake it" : "Take a photo"
     },
     {
       id: "selfie",
       label_bn: "আপনার সেলফি",
-      label_en: "Selfie",
+      label_en: "Your selfie",
       detail_bn: "মুখ স্পষ্ট দেখা যাবে এমন",
+      detail_en: "One where your face is clear",
       state: selfie,
       action: selfie === "done" ? null : "screen:menuKyc",
-      action_label_bn: selfie === "done" ? null : selfie === "rejected" ? "আবার তুলুন" : "সেলফি তুলুন"
+      action_label_bn: selfie === "done" ? null : selfie === "rejected" ? "আবার তুলুন" : "সেলফি তুলুন",
+      action_label_en: selfie === "done" ? null : selfie === "rejected" ? "Retake it" : "Take a selfie"
     },
     {
       id: "verified",
@@ -163,9 +189,17 @@ function buildRequirements(user: Row, docs: Row[]): ApaRequirement[] {
           : anyPending
             ? "সাধারণত ৭ কর্মদিবসে শেষ হয়। হয়ে গেলে জানিয়ে দেব।"
             : "উপরের ধাপগুলো শেষ হলে আমরা যাচাই করব",
+      detail_en: verified
+        ? "Done"
+        : anyRejected
+          ? "The photo needs retaking — a little clearer"
+          : anyPending
+            ? "Usually finished within 7 working days. We will let you know."
+            : "We check this once the steps above are done",
       state: verified ? "done" : anyRejected ? "rejected" : anyPending ? "pending" : "todo",
       action: verified || anyPending ? null : "screen:menuKyc",
-      action_label_bn: verified || anyPending ? null : "যাচাই শুরু করুন"
+      action_label_bn: verified || anyPending ? null : "যাচাই শুরু করুন",
+      action_label_en: verified || anyPending ? null : "Start verifying"
     }
   ];
 }
@@ -188,11 +222,14 @@ export async function resolveEntitlement(
   const cfg = config ?? (await apaConfig());
   const id = userId == null ? "" : String(userId);
 
-  const locked = (reason: string): ApaEntitlement => ({
+  const locked = (reason: string, reasonEn?: string): ApaEntitlement => ({
     enabled: cfg.enabled,
     tier: "locked",
     tier_source: "verification",
     expires_at: null,
+    // Nothing is known about this caller yet — not even a user id — so there
+    // is no area to find an officer for.
+    officer: null,
     blocked: false,
     blocked_reason: null,
     features: { ask_text: false, ask_voice: false, ask_photo: false, read_aloud: false, live: false },
@@ -202,18 +239,19 @@ export async function resolveEntitlement(
     trial: { allowance: cfg.freeQuestions, used: 0, left: 0, active: false },
     live: liveBlock(cfg, 0),
     voice: { autoplay: cfg.autoplayVoice, voice_name: cfg.voiceName, speech_rate: cfg.speechRate },
-    headline_bn: reason
+    headline_bn: reason,
+    headline_en: reasonEn ?? reason
   });
 
-  if (!cfg.enabled) return locked("শাথী আপা এখন বন্ধ আছে। একটু পরে আবার দেখুন।");
-  if (!id) return locked("শাথী আপার সাথে কথা বলতে আগে লগ ইন করুন।");
+  if (!cfg.enabled) return locked("শাথী আপা এখন বন্ধ আছে। একটু পরে আবার দেখুন।", "Shathi Apa is switched off just now. Please check back shortly.");
+  if (!id) return locked("শাথী আপার সাথে কথা বলতে আগে লগ ইন করুন।", "Please sign in to talk to Shathi Apa.");
 
   const [user] = await queryRows<Row>(
     `SELECT u.id, u.status, u.is_kyc_verified, u.nid_number, u.district_id, u.full_name
        FROM app_users u WHERE u.id = ? LIMIT 1`,
     [id]
   );
-  if (!user) return locked("শাথী আপার সাথে কথা বলতে আগে লগ ইন করুন।");
+  if (!user) return locked("শাথী আপার সাথে কথা বলতে আগে লগ ইন করুন।", "Please sign in to talk to Shathi Apa.");
 
   const [docs, roles, grant, usage] = await Promise.all([
     queryRows<Row>(
@@ -242,7 +280,10 @@ export async function resolveEntitlement(
 
   // A block is absolute and says so. Nothing below re-opens it.
   if (Number(grant?.is_blocked ?? 0) === 1) {
-    const out = locked(s(grant?.blocked_reason) ?? "আপনার অ্যাকাউন্টে শাথী আপা আপাতত বন্ধ আছে।");
+    const out = locked(
+      s(grant?.blocked_reason) ?? "আপনার অ্যাকাউন্টে শাথী আপা আপাতত বন্ধ আছে।",
+      s(grant?.blocked_reason) ?? "Shathi Apa is switched off for your account at the moment."
+    );
     out.blocked = true;
     out.blocked_reason = s(grant?.blocked_reason);
     out.requirements = requirements;
@@ -299,11 +340,21 @@ export async function resolveEntitlement(
     live: full && cfg.liveMicEnabled && minutes * 60 - liveSecondsUsed > 0
   };
 
+  // Only the farmers who might need it, so the common path stays one query
+  // lighter: locked, on the trial, or with a requirement that is not simply
+  // outstanding — a rejected or pending verification is the case that needs a
+  // human, and it is the one the screen could say nothing useful about.
+  const stuck =
+    tier === "locked" ||
+    tier === "trial" ||
+    requirements.some((r) => r.state === "pending" || r.state === "rejected");
+
   return {
     enabled: true,
     tier,
     tier_source: tierSource,
     expires_at: s(grant?.tier_expires_at),
+    officer: stuck ? await areaOfficer(id) : null,
     blocked: false,
     blocked_reason: null,
     features,
@@ -318,8 +369,32 @@ export async function resolveEntitlement(
     },
     live: { ...liveBlock(cfg, liveSecondsUsed, minutes), mic_enabled: cfg.liveMicEnabled },
     voice: { autoplay: cfg.autoplayVoice, voice_name: cfg.voiceName, speech_rate: cfg.speechRate },
-    headline_bn: headline(tier, trialLeft, requirements)
+    headline_bn: headline(tier, trialLeft, requirements),
+    headline_en: headlineEn(tier, trialLeft, requirements)
   };
+}
+
+/**
+ * The first field officer covering her area.
+ *
+ * Deliberately never an error: an unlock screen with no officer on it is a
+ * slightly worse unlock screen, and an unlock screen that failed to load
+ * because the officer table was busy is a farmer locked out of the assistant.
+ */
+async function areaOfficer(userId: string): Promise<ApaEntitlement["officer"]> {
+  try {
+    const officers = (await getAppOfficers(userId)) as Array<Record<string, unknown>>;
+    const first = officers?.[0];
+    if (!first?.name) return null;
+    return {
+      name: String(first.name),
+      phone: first.phone ? String(first.phone) : null,
+      role: first.officer_role ? String(first.officer_role) : null,
+      area: first.upazila ? String(first.upazila) : first.district ? String(first.district) : null
+    };
+  } catch {
+    return null;
+  }
 }
 
 function liveBlock(cfg: ApaConfig, used: number, minutes = cfg.liveMinutesMonthly) {
@@ -345,6 +420,17 @@ function headline(tier: ApaTier, trialLeft: number, requirements: ApaRequirement
       : "পরিচয় যাচাই করলে যত খুশি প্রশ্ন করতে পারবেন";
   }
   return "সবসময় পাশে আছি";
+}
+
+function headlineEn(tier: ApaTier, trialLeft: number, requirements: ApaRequirement[]): string {
+  if (tier === "trial") return trialLeft === 1 ? "1 question left" : `${trialLeft} questions left`;
+  if (tier === "locked") {
+    const pending = requirements.find((r) => r.id === "verified")?.state === "pending";
+    return pending
+      ? "Verification in progress — voice messages keep working"
+      : "Verify your identity to ask as much as you like";
+  }
+  return "Always here to help";
 }
 
 const BN_DIGITS = "০১২৩৪৫৬৭৮৯";
@@ -408,16 +494,23 @@ export async function ensureEntitlementRow(userId: string | number): Promise<voi
 
 /**
  * Spend one trial question. Only called after an answer was actually produced:
- * a refusal or a failure must not cost the farmer one of her five.
+ * a refusal, a failure or a clarifying question must not cost the farmer one of
+ * her five.
+ *
+ * The increment is guarded in SQL rather than read-then-written, so two
+ * questions in flight at once cannot both see four used and both be answered.
+ * The rate limiter bounds how often that could happen, but a counter that can
+ * be beaten by double-tapping is not a counter.
  */
-export async function spendTrialQuestion(userId: string | number): Promise<void> {
+export async function spendTrialQuestion(userId: string | number, allowance?: number): Promise<void> {
   await ensureEntitlementRow(userId);
+  const cap = allowance ?? Number.MAX_SAFE_INTEGER;
   await executeQuery(
     `UPDATE apa_entitlements
         SET trial_used = trial_used + 1,
             trial_started_at = COALESCE(trial_started_at, NOW())
-      WHERE user_id = ?`,
-    [userId]
+      WHERE user_id = ? AND trial_used < ?`,
+    [userId, cap]
   );
 }
 

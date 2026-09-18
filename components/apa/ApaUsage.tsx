@@ -33,10 +33,31 @@ type Usage = {
   top_users: Row[];
   tools: Row[];
   sessions: Row[];
-  prices: Record<string, number>;
+  prices: Record<string, ModelPrice>;
+  speech_cost_per_minute: number;
+};
+
+type ModelPrice = {
+  /** US dollars per million input tokens. */
+  in: number;
+  /** US dollars per million output tokens. */
+  out: number;
+  audioInPerMinute?: number;
+  /** Measured, not published — see the note on the table. */
+  audioOutTokensPerSecond?: number;
 };
 
 const money = (v: unknown) => `$${n(v).toFixed(2)}`;
+
+/** What a model is in the list for, from its name. */
+function useOf(model: string): string {
+  if (model.includes("-tts")) return "reading aloud";
+  if (model.includes("transcribe")) return "transcription";
+  if (model.includes("live")) return "live conversation";
+  if (model.startsWith("gemma")) return "free-tier fallback";
+  if (model.includes("pro")) return "not used — priced for comparison";
+  return "answering and photos";
+}
 
 export function ApaUsage() {
   const feed = useApi<Usage>("/api/v1/admin/apa/usage?months=6");
@@ -202,6 +223,76 @@ export function ApaUsage() {
             ) : (
               <Empty title="No lookups yet" />
             )}
+          </section>
+
+          {/* The rates every figure on this page was computed from. Without
+              them the estimates are unfalsifiable, which for a number nobody
+              can check against an invoice is the wrong property to have. */}
+          <section className="panel">
+            <div className="panel-header">
+              <div>
+                <h2>What each model charges</h2>
+                <p>
+                  List prices per million tokens, in US dollars. Every estimate on this page is
+                  these rates multiplied by what was actually spent — so if one of them is out of
+                  date, this is the table to correct. None of it applies while the project is on the
+                  free tier, where the limit is requests a day rather than money.
+                </p>
+              </div>
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Model</th>
+                    <th>In</th>
+                    <th>Out</th>
+                    <th>Audio in</th>
+                    <th>Spoken output</th>
+                    <th>Used for</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.entries(feed.data.prices)
+                    .sort((a, b) => a[0].localeCompare(b[0]))
+                    .map(([model, price]) => {
+                      const free = price.in === 0 && price.out === 0;
+                      return (
+                        <tr key={model}>
+                          <td><strong>{model}</strong></td>
+                          <td>{free ? <span className="muted">free</span> : `$${price.in.toFixed(2)}`}</td>
+                          <td>{free ? <span className="muted">free</span> : `$${price.out.toFixed(2)}`}</td>
+                          <td>
+                            {price.audioInPerMinute
+                              ? `$${price.audioInPerMinute.toFixed(3)}/min`
+                              : <span className="muted">—</span>}
+                          </td>
+                          <td>
+                            {price.audioOutTokensPerSecond ? (
+                              <>
+                                {price.audioOutTokensPerSecond} tok/s
+                                <small className="apa-quota-cached">
+                                  ≈ ${((price.audioOutTokensPerSecond * 60 * price.out) / 1_000_000).toFixed(3)}/min ·
+                                  measured
+                                </small>
+                              </>
+                            ) : (
+                              <span className="muted">—</span>
+                            )}
+                          </td>
+                          <td className="muted">{useOf(model)}</td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </div>
+            <p className="muted" style={{ margin: "10px 0 0", padding: "0 var(--s5) var(--s4)" }}>
+              Spoken output is billed in audio tokens, and how many of those a second of speech
+              costs is not published — the two figures above were measured by synthesising a known
+              clip and reading the token count back. Read aloud on the phone&apos;s own engine costs
+              nothing at all, which is why it is the default.
+            </p>
           </section>
 
           <section className="panel">

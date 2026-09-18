@@ -119,15 +119,17 @@ const groups: NavGroup[] = [
     ]
   },
   {
-    // The assistant's own console. Seven pages because seven different people
-    // ask seven different questions of it: what are farmers asking, what did
-    // the scope gate get wrong, what is it costing, who is it reaching.
+    // The assistant's own console. Eight pages because eight different people
+    // ask eight different questions of it: what are farmers asking, what did
+    // the scope gate get wrong, what is it costing, how much of today's free
+    // allowance is left, who is it reaching.
     label: "Shathi Apa", icon: Sparkles, tabs: [
       { label: "Conversations", href: "/apa" },
       { label: "Scope review", href: "/apa/scope" },
       { label: "Vocabulary", href: "/apa/vocabulary" },
       { label: "Voice config", href: "/apa/config" },
       { label: "Usage & cost", href: "/apa/usage" },
+      { label: "Requests & quota", href: "/apa/quota" },
       { label: "Access & tiers", href: "/apa/access" },
       { label: "Feedback", href: "/apa/feedback" },
       { label: "Home card prompts", href: "/assistant" }

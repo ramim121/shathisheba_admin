@@ -14,27 +14,88 @@ import { executeQuery, queryRows } from "@/lib/db";
  */
 
 const TTL_MS = 60_000;
-let cache: { at: number; terms: string[] } | null = null;
+let cache: { at: number; terms: Array<{ term: string; group: string; heard: number }> } | null = null;
 
-/** Gemini caps the bias list; past this the tail stops helping anyway. */
-const MAX_TERMS = 500;
+/**
+ * How many terms go on the wire.
+ *
+ * Measured: the full 141-term list is 565 input tokens on **every** voice
+ * message, and the table is allowed to grow. Sending all of it was costing more
+ * than the transcription itself on short clips, so the list is ranked and
+ * trimmed: terms this farmer's own crops and animals make likely, then terms
+ * that have actually been heard, then the rest.
+ */
+const MAX_TERMS = 120;
 
-export async function biasTerms(): Promise<string[]> {
+async function all(): Promise<Array<{ term: string; group: string; heard: number }>> {
   if (cache && Date.now() - cache.at < TTL_MS) return cache.terms;
   try {
-    const rows = await queryRows<{ term: string }>(
-      `SELECT term FROM apa_vocabulary
+    const rows = await queryRows<{ term: string; term_group: string; heard_count: number }>(
+      `SELECT term, term_group, heard_count FROM apa_vocabulary
         WHERE is_active = 1
-        ORDER BY heard_count DESC, sort_order, term
-        LIMIT ${MAX_TERMS}`
+        ORDER BY heard_count DESC, sort_order, term`
     );
-    cache = { at: Date.now(), terms: rows.map((r) => r.term) };
+    cache = {
+      at: Date.now(),
+      terms: rows.map((r) => ({ term: r.term, group: r.term_group, heard: Number(r.heard_count ?? 0) }))
+    };
   } catch {
     // A missing table must not stop a farmer being heard — it only makes the
     // transcription slightly worse.
     cache = { at: Date.now(), terms: [] };
   }
   return cache.terms;
+}
+
+/**
+ * The bias list for one farmer, most relevant first.
+ *
+ * Relevance is crude and deliberately so: the groups her farm profile implies,
+ * then anything already heard on the platform, then the remainder to fill the
+ * budget. A cleverer ranking would be harder to explain to the staff member
+ * deciding whether a term is worth keeping.
+ */
+export async function biasTerms(userId?: string | number | null): Promise<string[]> {
+  const terms = await all();
+  if (!terms.length) return [];
+  if (!userId) return terms.slice(0, MAX_TERMS).map((t) => t.term);
+
+  const groups = await relevantGroups(userId);
+  const scored = terms.map((t) => ({
+    term: t.term,
+    score: (groups.has(t.group) ? 1000 : 0) + Math.min(t.heard, 500),
+  }));
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, MAX_TERMS).map((t) => t.term);
+}
+
+/** Which vocabulary groups this farmer's own farm makes likely. */
+async function relevantGroups(userId: string | number): Promise<Set<string>> {
+  const always = new Set(["platform", "measure", "weather", "general"]);
+  try {
+    const [farm] = await queryRows<{ crop_types: string | null; livestock_count: number | null; pond_count: number | null; primary_focus: string | null }>(
+      "SELECT crop_types, livestock_count, pond_count, primary_focus FROM app_user_farm WHERE user_id = ? LIMIT 1",
+      [userId]
+    );
+    if (!farm) return new Set([...always, "crop", "crop_disease", "crop_pest", "livestock", "livestock_disease", "input"]);
+    const focus = `${farm.crop_types ?? ""} ${farm.primary_focus ?? ""}`.toLowerCase();
+    if (farm.crop_types || /crop|ধান|সবজি|ফসল/.test(focus)) {
+      always.add("crop"); always.add("crop_disease"); always.add("crop_pest"); always.add("input");
+    }
+    if (Number(farm.livestock_count ?? 0) > 0 || /cattle|livestock|গরু|পশু/.test(focus)) {
+      always.add("livestock"); always.add("livestock_disease"); always.add("poultry");
+    }
+    if (Number(farm.pond_count ?? 0) > 0 || /fish|মাছ|পুকুর/.test(focus)) {
+      always.add("fish");
+    }
+    // A farmer with nothing recorded gets the common groups rather than nothing.
+    if (always.size <= 4) {
+      always.add("crop"); always.add("crop_disease"); always.add("livestock"); always.add("livestock_disease");
+    }
+    return always;
+  } catch {
+    return new Set([...always, "crop", "livestock"]);
+  }
 }
 
 export function invalidateVocabulary() {
@@ -51,7 +112,7 @@ export function invalidateVocabulary() {
 export async function recordHeardTerms(transcript: string): Promise<void> {
   const text = (transcript ?? "").trim();
   if (!text) return;
-  const terms = (await biasTerms()).filter((t) => text.includes(t));
+  const terms = (await all()).map((t) => t.term).filter((t) => text.includes(t));
   if (!terms.length) return;
   try {
     const marks = terms.map(() => "?").join(", ");

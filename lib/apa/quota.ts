@@ -2,7 +2,8 @@ import { executeQuery, queryRows } from "@/lib/db";
 import { RateLimitError } from "@/lib/errors";
 import { currentPeriod } from "@/lib/apa/entitlement";
 import type { ApaConfig } from "@/lib/apa/config";
-import { estimateAskCost, estimateLiveCost } from "@/lib/apa/pure";
+import { dayHeadroom } from "@/lib/apa/models";
+import { estimateLiveCost } from "@/lib/apa/pure";
 
 /**
  * Rate limits and monthly accounting.
@@ -34,8 +35,64 @@ export async function assertAskRate(userId: string | number, cfg: ApaConfig): Pr
   if (minute >= cfg.askPerMinute) {
     throw new RateLimitError("একটু ধীরে — আগের প্রশ্নের উত্তর আসছে।", 20);
   }
-  if (day >= cfg.askPerDay) {
-    throw new RateLimitError("আজকের প্রশ্নের সীমা শেষ। কাল আবার জিজ্ঞাসা করুন।", 3600);
+
+  const cap = await fairShareCap(cfg);
+  if (day >= cap.perUser) {
+    throw new RateLimitError(
+      cap.rationed
+        ? // Deliberately not "you have asked too much". The limit is the
+          // platform's for the day, not hers, and telling her otherwise for
+          // asking eight questions would be a lie that makes her ask fewer.
+          "আজ অনেক কৃষক প্রশ্ন করেছেন, তাই আজকের মতো শেষ। কাল সকালে আবার খোলা থাকবে।"
+        : "আজকের প্রশ্নের সীমা শেষ। কাল আবার জিজ্ঞাসা করুন।",
+      3600
+    );
+  }
+}
+
+/**
+ * Fair share of what is left of the day.
+ *
+ * The free tier's cap is on the whole project, not on the farmer — so without
+ * this, one enthusiastic user (or one retry loop) can spend the day's entire
+ * allowance before most people have woken up, and everyone else is told the
+ * assistant is busy. The per-farmer daily limit therefore tightens as the
+ * project's own headroom runs down.
+ *
+ * It is not a queue. A queue would hold a question about a dying animal until
+ * midnight Pacific, which is worse than an honest "come back tomorrow" — she
+ * can ring the officer instead, and the refusal names that option.
+ *
+ * The bands are deliberately coarse. The point is to stop one account
+ * consuming the tail of the day, not to divide the allowance precisely: doing
+ * that properly needs to know how many farmers will ask in the hours left,
+ * which nothing here can know.
+ */
+export async function fairShareCap(
+  cfg: ApaConfig
+): Promise<{ perUser: number; rationed: boolean; pct: number; left: number }> {
+  if (!cfg.fairSharePct || cfg.fairSharePct >= 100) {
+    return { perUser: cfg.askPerDay, rationed: false, pct: 0, left: 0 };
+  }
+  try {
+    const head = await dayHeadroom(cfg.models.text);
+    if (!head.cap) return { perUser: cfg.askPerDay, rationed: false, pct: 0, left: 0 };
+
+    // Two bands. Past the trigger, heavy users stop and light users carry on;
+    // past the second, everybody gets a few and nobody gets the rest.
+    const tight = Math.max(cfg.fairSharePct, 90);
+    if (head.pct >= tight) {
+      return { perUser: Math.min(cfg.askPerDay, 3), rationed: true, pct: head.pct, left: head.left };
+    }
+    if (head.pct >= cfg.fairSharePct) {
+      return { perUser: Math.min(cfg.askPerDay, 8), rationed: true, pct: head.pct, left: head.left };
+    }
+    return { perUser: cfg.askPerDay, rationed: false, pct: head.pct, left: head.left };
+  } catch (error) {
+    // A guard that cannot read the counters must not become the outage it
+    // exists to prevent.
+    console.error("apa fair share check failed", error);
+    return { perUser: cfg.askPerDay, rationed: false, pct: 0, left: 0 };
   }
 }
 
@@ -54,11 +111,16 @@ export type UsageDelta = Partial<{
   transcribe_seconds: number;
   tts_chars: number;
   est_cost_usd: number;
+  cached_tokens: number;
+  cache_hits: number;
+  speech_device: number;
+  speech_server: number;
 }>;
 
 const COLUMNS: Array<keyof UsageDelta> = [
   "ask_count", "voice_count", "photo_count", "refused_count", "tool_calls",
-  "live_sessions", "live_seconds", "transcribe_seconds", "tts_chars", "est_cost_usd"
+  "live_sessions", "live_seconds", "transcribe_seconds", "tts_chars", "est_cost_usd",
+  "cached_tokens", "cache_hits", "speech_device", "speech_server"
 ];
 
 /** One upsert per turn, adding whatever that turn spent. */
@@ -130,4 +192,4 @@ export async function reconcileAbandonedSessions(userId: string | number, capSec
 }
 
 // Re-exported so the console and the app-side helpers keep one import path.
-export { PRICE, estimateAskCost, estimateLiveCost } from "@/lib/apa/pure";
+export { MODEL_PRICES, costOf, estimateAskCost, estimateLiveCost, priceOf, speechCostPerMinute } from "@/lib/apa/pure";

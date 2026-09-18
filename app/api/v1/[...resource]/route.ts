@@ -184,7 +184,7 @@ import { getDeleteImpact, getDeleteImpactRows, clearDeleteBlockers } from "@/lib
 import { isAiConfigured, runAssist, type AssistRequest } from "@/lib/ai-assist";
 import { getFarmerFile, searchFarmers } from "@/lib/endpoints/farmer-file";
 import { askApa } from "@/lib/apa";
-import { appAnalyzePhoto, appListingDescription, appSpeak, appSummarize } from "@/lib/endpoints/app-ai";
+import { appAnalyzePhoto, appListingDescription, appSpeak, appSpeechConfig, appSummarize } from "@/lib/endpoints/app-ai";
 import { ApaLockedError } from "@/lib/apa/entitlement";
 import { closeLiveSession, markLiveConnected, saveLiveTranscript, startLiveSession } from "@/lib/apa/live";
 import {
@@ -210,7 +210,13 @@ import {
   grantApaTier,
   reviewApaFeedback,
   saveApaVocabulary,
-  saveApaVoiceConfig
+  saveApaVoiceConfig,
+  getApaQuota,
+  getApaPromptVersions,
+  getApaPromptVersion,
+  resetApaQuotaHints,
+  revertApaPrompt,
+  prewarmApaAnswer
 } from "@/lib/endpoints/apa-console";
 
 // App-facing list reads. The mobile app hits these generic resource paths and
@@ -451,6 +457,21 @@ function clientIp(request: NextRequest): string | null {
   return request.headers.get("x-real-ip")?.slice(0, 45) ?? null;
 }
 
+// Where the phone should fetch a file this request produced. Built from the
+// forwarded host so the URL is reachable by the caller — a phone on the LAN in
+// development, the production domain in a release build — rather than from the
+// address the server happens to be bound to.
+function requestOrigin(request: NextRequest): string {
+  const host =
+    request.headers.get("x-forwarded-host") ||
+    request.headers.get("host") ||
+    request.nextUrl.host;
+  const proto =
+    request.headers.get("x-forwarded-proto") ||
+    (request.nextUrl.protocol === "https:" ? "https" : "http");
+  return `${proto}://${host}`;
+}
+
 // Identify the caller and apply the access policy in one step. Returns either a
 // ready-to-send rejection or the caller, so each verb handler is a two-line guard.
 async function guard(
@@ -577,6 +598,17 @@ export async function GET(request: NextRequest, { params }: Params) {
         case "admin/apa/access":
           return envelope(
             await getApaAccess({ q: searchParams.get("q"), tier: searchParams.get("tier"), limit: Number(searchParams.get("limit") ?? 50) }),
+            { source: "mysql", surface: "admin", resource }
+          );
+        case "app/apa/speech-config":
+          return envelope(await appSpeechConfig(), { source: "mysql", surface: "app", resource });
+        case "admin/apa/quota":
+          return envelope(await getApaQuota(), { source: "mysql", surface: "admin", resource });
+        case "admin/apa/prompt-versions":
+          return envelope(
+            id
+              ? await getApaPromptVersion(id)
+              : await getApaPromptVersions(searchParams.get("prompt_key")),
             { source: "mysql", surface: "admin", resource }
           );
         case "admin/apa/feedback":
@@ -1059,7 +1091,11 @@ export async function POST(request: NextRequest, { params }: Params) {
       const p = payload as Record<string, unknown>;
       switch (exact) {
         case "app/ai/speak":
-          return NextResponse.json({ ok: true, action: "ai_speak", result: await appSpeak(p) });
+          return NextResponse.json({
+            ok: true,
+            action: "ai_speak",
+            result: await appSpeak({ ...p, origin: requestOrigin(request) })
+          });
         case "app/ai/summarize":
           return NextResponse.json({ ok: true, action: "ai_summarize", result: await appSummarize(p) });
         case "app/ai/listing-description":
@@ -1089,6 +1125,11 @@ export async function POST(request: NextRequest, { params }: Params) {
               imageUrl: p.image_url ? String(p.image_url) : null,
               conversationId: p.conversation_id ? Number(p.conversation_id) : null,
               speakAnswer: p.speak === true,
+              // The phone reports whether it found a Bangla voice of its own.
+              // No voice installed is the only reason the server synthesises.
+              needsServerSpeech: p.needs_server_speech === true,
+              lang: p.lang === "en" ? "en" : "bn",
+              origin: requestOrigin(request),
               ip: clientIp(request)
             });
             return NextResponse.json({ ok: true, action: "apa_answer", result });
@@ -1154,6 +1195,12 @@ export async function POST(request: NextRequest, { params }: Params) {
             return NextResponse.json({ ok: true, result: await saveApaVoiceConfig(p, caller.admin.id) });
           case "admin/apa/grant":
             return NextResponse.json({ ok: true, result: await grantApaTier(p, caller.admin.id) });
+          case "admin/apa/prewarm":
+            return NextResponse.json({ ok: true, result: await prewarmApaAnswer(p) });
+          case "admin/apa/quota/reset":
+            return NextResponse.json({ ok: true, result: await resetApaQuotaHints(caller.admin.id) });
+          case "admin/apa/prompt-revert":
+            return NextResponse.json({ ok: true, result: await revertApaPrompt(p, caller.admin.id) });
           case "admin/apa/feedback/review":
             return NextResponse.json({ ok: true, result: await reviewApaFeedback(p, caller.admin.id) });
         }

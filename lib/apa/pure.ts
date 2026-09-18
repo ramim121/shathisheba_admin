@@ -132,44 +132,121 @@ export function audioSeconds(bytes: number, mimeType: string): number {
    --------------------------------------------------------------------------- */
 
 /**
- * List prices in US dollars, used only for the console's estimate.
+ * List prices in US dollars per 1M tokens, per model.
  *
- * These are not billed against anything — the real invoice comes from Google.
- * They exist so the Usage and Cost page can answer "are we about to be
- * surprised" while the month is still running, which a monthly invoice cannot.
- * Wrong by a factor of two is still useful; wrong by a factor of fifty is what
- * having no number at all gets you.
+ * This used to be one flat table, which was confidently wrong the moment a
+ * model was changed in the console — the models on offer differ by 15x on
+ * input and 50x on speech output, so a single set of numbers could not describe
+ * any two of them. Figures are Google's published list prices; where a model is
+ * banded by prompt length or modality, the lower band is used, because that is
+ * the band a farmer's question falls in.
+ *
+ * `audio_out_tokens_per_second` is measured, not published: 32.1 for the 3.1
+ * TTS preview and 24.9 for the 2.5 preview, read off `usageMetadata` against a
+ * known audio length. It is what makes a spoken answer costable at all.
  */
-export const PRICE = {
-  /** per 1M input tokens / per 1M output tokens, flash tier */
-  text_in: 0.30,
-  text_out: 2.50,
-  /** per minute of audio transcribed */
-  transcribe_minute: 0.006,
-  /** per 1M characters of speech synthesised */
-  tts_million_chars: 16.0,
-  /** per minute of live audio in + out */
-  live_minute: 0.09
-} as const;
+export type ModelPrice = {
+  in: number;
+  out: number;
+  /** Billed output tokens per second of synthesised speech, where measured. */
+  audioOutTokensPerSecond?: number;
+  /** Per-minute audio price, for the paths Google bills that way. */
+  audioInPerMinute?: number;
+};
 
+export const MODEL_PRICES: Record<string, ModelPrice> = {
+  // Text and vision
+  "gemini-3.8-flash": { in: 0.75, out: 3.75 },
+  "gemini-3.7-flash": { in: 0.75, out: 3.75 },
+  "gemini-3.6-flash": { in: 0.75, out: 3.75 },
+  "gemini-3.5-flash": { in: 1.50, out: 9.00 },
+  "gemini-3.5-flash-lite": { in: 0.30, out: 2.50 },
+  "gemini-3.1-flash-lite": { in: 0.25, out: 1.50 },
+  "gemini-3.1-pro-preview": { in: 2.00, out: 12.00 },
+  "gemini-2.5-pro": { in: 1.25, out: 10.00 },
+  "gemini-2.5-flash": { in: 0.30, out: 2.50 },
+  "gemini-2.5-flash-lite": { in: 0.10, out: 0.40 },
+  // Gemma is free to call, so it costs nothing and is priced as such.
+  "gemma-4-31b-it": { in: 0, out: 0 },
+  "gemma-4-26b-a4b-it": { in: 0, out: 0 },
+  // Transcription
+  "gemini-3.5-transcribe": { in: 2.00, out: 12.00, audioInPerMinute: 0.003 },
+  "gemini-3.5-transcribe-live": { in: 3.50, out: 21.00, audioInPerMinute: 0.005 },
+  // Speech
+  "gemini-3.1-flash-tts-preview": { in: 1.00, out: 20.00, audioOutTokensPerSecond: 32.1 },
+  "gemini-2.5-flash-preview-tts": { in: 0.50, out: 10.00, audioOutTokensPerSecond: 24.9 },
+  "gemini-2.5-pro-preview-tts": { in: 1.00, out: 20.00 },
+  // Live
+  "gemini-3.8-live": { in: 3.00, out: 12.00, audioInPerMinute: 0.005 },
+  "gemini-3.1-flash-live-preview": { in: 3.00, out: 12.00, audioInPerMinute: 0.005 },
+};
+
+/** A model nobody priced yet is costed at the flash rate rather than at zero. */
+const FALLBACK_PRICE: ModelPrice = { in: 0.30, out: 2.50 };
+
+export function priceOf(model: string): ModelPrice {
+  return MODEL_PRICES[model] ?? FALLBACK_PRICE;
+}
+
+/** What read-aloud costs per minute of speech, for the model actually in use. */
+export function speechCostPerMinute(model: string): number {
+  const price = priceOf(model);
+  const perSecond = price.audioOutTokensPerSecond ?? 28;
+  return (perSecond * 60 / 1e6) * price.out;
+}
+
+/**
+ * Cost of one turn, from the token counts the API reported.
+ *
+ * Cached input tokens are discounted 90% where the model supports implicit
+ * caching. Measured caveat: `gemini-3.1-flash-lite` reported
+ * `cachedContentTokenCount: 0` on three identical 4,895-token prefixes, so the
+ * discount is real only where the API says tokens were cached — which is why
+ * this takes the count rather than assuming it.
+ */
+export function costOf(input: {
+  model: string;
+  tokensIn: number;
+  tokensOut: number;
+  cachedTokens?: number;
+}): number {
+  const price = priceOf(input.model);
+  const cached = Math.max(0, Math.min(input.cachedTokens ?? 0, input.tokensIn));
+  const fresh = Math.max(0, input.tokensIn - cached);
+  return (
+    (fresh / 1e6) * price.in +
+    (cached / 1e6) * price.in * 0.1 +
+    (input.tokensOut / 1e6) * price.out
+  );
+}
+
+/** Older shape, kept for the estimate the console shows before token counts exist. */
 export function estimateAskCost(input: {
   promptChars: number;
   answerChars: number;
   transcribeSeconds?: number;
   ttsChars?: number;
+  model?: string;
+  ttsModel?: string;
 }): number {
+  const text = priceOf(input.model ?? "gemini-3.1-flash-lite");
+  const tts = priceOf(input.ttsModel ?? "gemini-2.5-flash-preview-tts");
+  const transcribe = priceOf("gemini-3.5-transcribe");
   // Four characters to a token is the usual rough conversion and holds well
   // enough for Bangla once the tokeniser is accounted for.
+  const spokenSeconds = (input.ttsChars ?? 0) / 12;
   return (
-    (input.promptChars / 4 / 1e6) * PRICE.text_in +
-    (input.answerChars / 4 / 1e6) * PRICE.text_out +
-    ((input.transcribeSeconds ?? 0) / 60) * PRICE.transcribe_minute +
-    ((input.ttsChars ?? 0) / 1e6) * PRICE.tts_million_chars
+    (input.promptChars / 4 / 1e6) * text.in +
+    (input.answerChars / 4 / 1e6) * text.out +
+    ((input.transcribeSeconds ?? 0) / 60) * (transcribe.audioInPerMinute ?? 0.003) +
+    (spokenSeconds * (tts.audioOutTokensPerSecond ?? 28) / 1e6) * tts.out
   );
 }
 
-export function estimateLiveCost(seconds: number): number {
-  return (seconds / 60) * PRICE.live_minute;
+export function estimateLiveCost(seconds: number, model = "gemini-3.8-live"): number {
+  const price = priceOf(model);
+  // Both directions: she speaks and is spoken to for roughly the same duration.
+  return (seconds / 60) * ((price.audioInPerMinute ?? 0.005) + 0.018);
 }
 
 /**
@@ -222,4 +299,60 @@ export function assertConstrained(body: Record<string, unknown>): void {
   if (/codeExecution|code_execution|googleSearch|google_search|urlContext|url_context/i.test(tools)) {
     throw new Error("Refusing to mint a live token whose tool list includes an unrestricted capability.");
   }
+}
+
+
+/* ---------------------------------------------------------------------------
+   The answer cache's key
+   --------------------------------------------------------------------------- */
+
+/**
+ * Normalise a question so two farmers asking the same thing in slightly
+ * different words hit the same cache row.
+ *
+ * Deliberately conservative. Over-normalising would serve one farmer another
+ * farmer's answer, so this only strips what cannot change the meaning:
+ * whitespace, Bangla and Latin punctuation, Bangla numerals folded to Latin so
+ * "৭৯০" and "790" agree, and case.
+ */
+export function normaliseQuestion(text: string): string {
+  const bnDigits = "০১২৩৪৫৬৭৮৯";
+  return (text ?? "")
+    .replace(/[০-৯]/g, (d) => String(bnDigits.indexOf(d)))
+    .toLowerCase()
+    .replace(/[\s।॥.,;:!?()\[\]"'\-\/]+/g, " ")
+    .trim()
+    .slice(0, 480);
+}
+
+/**
+ * Tools whose result is about one farmer. An answer that used any of them must
+ * never be cached, however identical the question looks.
+ */
+/**
+ * Tools whose answer is about one farmer and nobody else.
+ *
+ * This is the single source of truth for that, and it is load-bearing for
+ * privacy rather than for cost: an answer that read her listings, her orders,
+ * her profile or her loan must never reach the answer cache, because the next
+ * farmer in her district asking a similarly-worded question would be served
+ * it. There used to be a second copy of this list in tools.ts, which is a
+ * privacy bug waiting for somebody to add a tool to one and not the other.
+ */
+export const PERSONAL_TOOLS = new Set([
+  "get_my_profile",
+  "get_my_listings",
+  "get_my_orders",
+  "get_finance_status",
+]);
+
+export function isCacheable(tools: string[]): boolean {
+  return !tools.some((t) => PERSONAL_TOOLS.has(t));
+}
+
+/** Questions where the answer depends on a figure that moves during the day. */
+export function cacheableForHours(tools: string[], defaultHours: number): number {
+  if (tools.includes("get_market_price")) return Math.min(defaultHours, 4);
+  if (tools.includes("get_weather")) return Math.min(defaultHours, 3);
+  return defaultHours;
 }

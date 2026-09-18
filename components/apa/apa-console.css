@@ -716,3 +716,279 @@
 .apa-modal .apa-grant {
   overflow-y: auto;
 }
+
+/* --- requests & quota ---------------------------------------------------- */
+
+/* A model's name carries three facts at once — which job it serves, whether it
+   is the first choice or a fallback, and whether it is spent for today — so the
+   cell stacks them rather than putting them in three more columns. */
+.apa-quota-model {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.apa-quota-model strong {
+  color: var(--ink-900);
+  font-weight: var(--fw-semibold);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.apa-quota-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.apa-quota-tag {
+  padding: 1px 7px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-pill);
+  background: var(--surface-sunken);
+  color: var(--ink-600);
+  font-size: var(--fs-xs);
+  font-style: normal;
+  white-space: nowrap;
+}
+
+.apa-quota-tag.is-primary {
+  border-color: color-mix(in srgb, var(--ok-solid) 40%, transparent);
+  background: color-mix(in srgb, var(--ok-solid) 10%, transparent);
+  color: var(--ok-solid);
+}
+
+.apa-quota-tag.is-spent {
+  border-color: var(--warn-line);
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+}
+
+.apa-quota-tag.is-off { opacity: 0.65; }
+
+/* Observed against assumed is the whole honesty of this page: a figure nobody
+   has seen a 429 for is a planning number, and must not look like a fact. */
+.apa-quota-src {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 6px;
+  border-radius: var(--r-pill);
+  background: var(--surface-sunken);
+  color: var(--ink-500);
+  font-size: var(--fs-xs);
+  font-style: normal;
+  white-space: nowrap;
+}
+
+.apa-quota-src.is-observed {
+  background: color-mix(in srgb, var(--ok-solid) 12%, transparent);
+  color: var(--ok-solid);
+}
+
+.apa-quota-left {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 88px;
+}
+
+.apa-quota-left b {
+  font-weight: var(--fw-semibold);
+  font-variant-numeric: tabular-nums;
+}
+
+.apa-quota-cached,
+.apa-quota-err {
+  display: block;
+  margin-top: 2px;
+  color: var(--ink-500);
+  font-size: var(--fs-xs);
+  overflow-wrap: anywhere;
+}
+
+tr.is-bad-row > td { background: var(--warn-bg); }
+
+/* --- the fallback chains ------------------------------------------------- */
+
+.apa-chains {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  padding: var(--s4) var(--s5);
+}
+
+.apa-chain {
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr);
+  align-items: start;
+  gap: var(--s3);
+}
+
+.apa-chain-job {
+  color: var(--ink-600);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+}
+
+/* Arrows between the links, so left-to-right reads as "tried in this order"
+   rather than as an unordered set. */
+.apa-chain-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.apa-chain-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-pill);
+  background: var(--surface-sunken);
+  color: var(--ink-600);
+  font-size: var(--fs-xs);
+  overflow-wrap: anywhere;
+}
+
+.apa-chain-link.is-first {
+  border-color: color-mix(in srgb, var(--ok-solid) 40%, transparent);
+  background: color-mix(in srgb, var(--ok-solid) 10%, transparent);
+  color: var(--ok-solid);
+}
+
+.apa-chain-link.is-spent {
+  border-color: var(--warn-line);
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+  text-decoration: line-through;
+}
+
+.apa-chain-link em {
+  padding: 0 5px;
+  border-radius: var(--r-pill);
+  background: color-mix(in srgb, var(--ink-900) 8%, transparent);
+  font-size: var(--fs-xs);
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+}
+
+.apa-chain-links > .apa-chain-link + .apa-chain-link::before {
+  content: "→";
+  margin-right: 3px;
+  color: var(--ink-500);
+  text-decoration: none;
+}
+
+.apa-quota-foot {
+  margin: 0 0 var(--s5);
+  padding: 0 var(--s5);
+  font-size: var(--fs-sm);
+}
+
+/* One column below the point where the label column starts squeezing the
+   chain onto four lines. */
+@media (max-width: 820px) {
+  .apa-chain { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+}
+
+/* --- prompt history ------------------------------------------------------ */
+
+.apa-hist-delta,
+.apa-hist-note {
+  display: block;
+  color: var(--ink-500);
+  font-size: var(--fs-xs);
+  overflow-wrap: anywhere;
+}
+
+.apa-hist-note { max-width: 32ch; }
+
+.apa-hist-panel {
+  margin-top: var(--s4);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md, 10px);
+  background: var(--surface-sunken);
+}
+
+.apa-hist-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+  padding: var(--s3) var(--s4);
+  border-bottom: 1px solid var(--line-strong);
+}
+
+.apa-hist-head strong { color: var(--ink-900); font-weight: var(--fw-semibold); }
+
+.apa-hist-legend {
+  margin: 0;
+  padding: var(--s3) var(--s4) 0;
+  font-size: var(--fs-sm);
+}
+
+.apa-hist-key {
+  padding: 1px 6px;
+  border-radius: var(--r-pill);
+  font-style: normal;
+}
+
+.apa-hist-key.is-del {
+  background: color-mix(in srgb, var(--bad-solid) 14%, transparent);
+  color: var(--bad-solid);
+}
+
+.apa-hist-key.is-add {
+  background: color-mix(in srgb, var(--ok-solid) 14%, transparent);
+  color: var(--ok-solid);
+}
+
+/* Monospace and pre-wrap: these are instructions where indentation and line
+   breaks are part of the meaning, and a proportional font hides both. */
+.apa-hist-diff {
+  display: flex;
+  flex-direction: column;
+  max-height: 460px;
+  margin: var(--s3) 0 0;
+  padding: 0 0 var(--s3);
+  overflow: auto;
+  font-family: ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.apa-hist-line {
+  padding: 0 var(--s4) 0 calc(var(--s4) + 14px);
+  border-left: 3px solid transparent;
+  color: var(--ink-600);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.apa-hist-line.is-del {
+  border-left-color: var(--bad-solid);
+  background: color-mix(in srgb, var(--bad-solid) 8%, transparent);
+  color: var(--bad-solid);
+}
+
+.apa-hist-line.is-add {
+  border-left-color: var(--ok-solid);
+  background: color-mix(in srgb, var(--ok-solid) 8%, transparent);
+  color: var(--ok-solid);
+}
+
+.apa-hist-line.is-del::before { content: "− "; margin-left: -14px; }
+.apa-hist-line.is-add::before { content: "+ "; margin-left: -14px; }
+
+.apa-hist-gap {
+  margin: 2px 0;
+  padding: 2px var(--s4);
+  background: color-mix(in srgb, var(--ink-900) 4%, transparent);
+  color: var(--ink-500);
+  font-size: var(--fs-xs);
+  font-style: italic;
+}

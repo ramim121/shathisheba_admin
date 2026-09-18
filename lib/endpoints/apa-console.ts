@@ -4,8 +4,11 @@ import { recordAudit } from "@/lib/audit";
 import { apaConfig, invalidateApaPrompts } from "@/lib/apa/config";
 import { invalidateVocabulary } from "@/lib/apa/vocabulary";
 import { setEntitlementGrant } from "@/lib/apa/entitlement";
-import { PRICE } from "@/lib/apa/quota";
+import { MODEL_PRICES, speechCostPerMinute } from "@/lib/apa/quota";
 import { jsonArray } from "@/lib/endpoints/apa";
+import { FREE_RPD, forgetSpentModels, modelCallsToday, modelCallsTrend, spentModels } from "@/lib/apa/models";
+import { cacheStats, pruneAnswerCache } from "@/lib/apa/cache";
+import { prewarmAnswer } from "@/lib/apa/prewarm";
 
 /**
  * The seven console pages.
@@ -412,12 +415,26 @@ export async function saveApaVocabulary(payload: Row, adminId: number) {
    4. Voice config
    --------------------------------------------------------------------------- */
 
+/**
+ * Which settings the console may write.
+ *
+ * A whitelist rather than "anything starting apa_", because this endpoint takes
+ * a key straight from a form post and a typo in one of these names must not
+ * create a new row that nothing ever reads.
+ *
+ * Anything absent here is reported back rather than dropped — see the note in
+ * saveApaVoiceConfig on why silence was the wrong behaviour.
+ */
 const SETTING_KEYS = [
   "apa_enabled", "apa_free_questions", "apa_live_minutes_monthly", "apa_live_session_minutes",
-  "apa_live_mic_enabled", "apa_bandwidth_floor_kbps", "apa_data_mb_per_minute", "apa_voice_name",
-  "apa_autoplay_voice", "apa_speech_rate", "apa_tts_max_chars", "apa_model_text",
-  "apa_model_classify", "apa_model_transcribe", "apa_model_tts", "apa_model_live",
-  "apa_model_vision", "apa_ask_per_minute", "apa_ask_per_day", "apa_budget_usd"
+  "apa_live_mic_enabled", "apa_live_client_ready", "apa_bandwidth_floor_kbps",
+  "apa_data_mb_per_minute", "apa_voice_name", "apa_autoplay_voice", "apa_speech_rate",
+  "apa_tts_max_chars", "apa_model_text", "apa_model_classify", "apa_model_transcribe",
+  "apa_model_tts", "apa_model_live", "apa_model_vision", "apa_ask_per_minute",
+  "apa_ask_per_day", "apa_budget_usd",
+  // The cost and quota controls.
+  "apa_tts_mode", "apa_answer_cache_hours", "apa_speech_cache_enabled", "apa_prompt_examples",
+  "apa_image_max_px", "apa_fair_share_pct", "apa_prewarm_enabled", "apa_retention_days"
 ];
 
 export async function getApaVoiceConfig() {
@@ -445,8 +462,16 @@ const VOICES = [
 export async function saveApaVoiceConfig(payload: Row, adminId: number) {
   const settings = (payload.settings ?? {}) as Record<string, unknown>;
   const written: string[] = [];
+  // An unrecognised key used to be skipped in silence, which meant a setting
+  // added to the form but not to the list above appeared to save and did
+  // nothing — the kind of thing that costs an afternoon to notice.
+  const ignored = Object.keys(settings).filter((key) => !SETTING_KEYS.includes(key));
+  if (ignored.length) {
+    throw new Error(
+      `These are not settings this page may change: ${ignored.join(", ")}. Add them to SETTING_KEYS if that is wrong.`
+    );
+  }
   for (const [key, value] of Object.entries(settings)) {
-    if (!SETTING_KEYS.includes(key)) continue;
     await executeQuery(
       `INSERT INTO app_settings (setting_key, value_text) VALUES (?, ?)
        ON DUPLICATE KEY UPDATE value_text = VALUES(value_text)`,
@@ -463,6 +488,19 @@ export async function saveApaVoiceConfig(payload: Row, adminId: number) {
     // restriction, so the floor is enforced here as well as in the token mint.
     if (key === "scope" && text.length < 200) {
       throw new Error("The scope instruction is too short to restrict anything. Keep it at least 200 characters.");
+    }
+    // Keep what is being replaced. The scope instruction is the safety
+    // control; an accidental paste over it used to be unrecoverable, and the
+    // audit log recorded only which key changed, not what was lost.
+    const [before] = await queryRows<Row>(
+      "SELECT body FROM apa_prompts WHERE prompt_key = ? LIMIT 1",
+      [key]
+    );
+    if (before?.body && String(before.body) !== text) {
+      await executeQuery(
+        "INSERT INTO apa_prompt_versions (prompt_key, body, chars, changed_by, note) VALUES (?, ?, ?, ?, ?)",
+        [key, before.body, String(before.body).length, adminId, "replaced from the console"]
+      );
     }
     await executeQuery(
       "UPDATE apa_prompts SET body = ?, updated_by = ? WHERE prompt_key = ?",
@@ -563,7 +601,8 @@ export async function getApaUsage(params: { months?: number }) {
     top_users: topUsers,
     tools,
     sessions,
-    prices: PRICE
+    prices: MODEL_PRICES,
+    speech_cost_per_minute: speechCostPerMinute(cfg.models.tts[0])
   };
 }
 
@@ -770,4 +809,285 @@ export async function reviewApaFeedback(payload: Row, adminId: number) {
     entityId: id
   });
   return { ok: true };
+}
+
+
+/* ---------------------------------------------------------------------------
+   8. Requests and quota
+   --------------------------------------------------------------------------- */
+
+/**
+ * How many calls went to each model today, and how much of its daily allowance
+ * that is likely to be.
+ *
+ * This page exists because the free tier caps requests **per model per project
+ * per day** — measured: `gemini-3.6-flash` reports `quotaValue: 20` — so
+ * "how many calls have we made" is only a meaningful question per model. The
+ * old Usage page could not answer it at all, and the first sign of trouble was
+ * a farmer being told the assistant was busy.
+ *
+ * The allowances below are observed, not published: Google's rate-limit page
+ * now defers to AI Studio, so `KNOWN_FREE_RPD` holds what this project's own
+ * 429s reported and `observed` marks which of them we have actually seen. A
+ * figure nobody has confirmed is shown as unknown rather than guessed at.
+ */
+// The allowances themselves live in lib/apa/models.ts, beside the runner that
+// trips over them and the fair-share guard that rations what is left.
+const KNOWN_FREE_RPD = FREE_RPD;
+
+export async function getApaQuota() {
+  const cfg = await apaConfig();
+  const [rows, trend, cache, answered] = await Promise.all([
+    modelCallsToday(),
+    modelCallsTrend(14),
+    cacheStats(),
+    // The denominator for "how many answers came out of the cache" has to be
+    // answers, not model calls: a retry down a fallback chain is two calls and
+    // one answer, and a cache hit is an answer with no call at all.
+    queryRows<Row>(
+      `SELECT COUNT(*) AS answers,
+              COALESCE(SUM(from_cache), 0) AS from_cache,
+              COALESCE(SUM(asked_clarification), 0) AS clarifications
+         FROM apa_messages
+        WHERE role = 'assistant' AND created_at >= CURDATE()`
+    )
+  ]);
+
+  // Per job as well as per model. A model's total is the wrong number to show
+  // against one job in a chain — `gemini-3.1-flash-lite` answering thirteen
+  // questions and classifying none would otherwise read, on the scope-gate
+  // row, as thirteen scope-gate calls.
+  const jobCalls: Record<string, Record<string, number>> = {};
+  for (const row of rows) {
+    const job = String(row.job);
+    const model = String(row.model);
+    jobCalls[job] = jobCalls[job] ?? {};
+    jobCalls[job][model] = (jobCalls[job][model] ?? 0) + Number(row.calls ?? 0);
+  }
+  // `text` is the configured name of the job the runner records as `answer`.
+  if (jobCalls.answer && !jobCalls.text) jobCalls.text = jobCalls.answer;
+
+  const byModel = new Map<string, Row>();
+  for (const row of rows) {
+    const model = String(row.model);
+    const existing = byModel.get(model) ?? {
+      model,
+      jobs: [] as string[],
+      calls: 0, ok_calls: 0, quota_errors: 0, other_errors: 0,
+      tokens_in: 0, tokens_out: 0, cached_tokens: 0, est_cost_usd: 0,
+      last_error: null as string | null, last_quota_at: null as unknown
+    };
+    (existing.jobs as string[]).push(String(row.job));
+    existing.calls = Number(existing.calls) + Number(row.calls ?? 0);
+    existing.ok_calls = Number(existing.ok_calls) + Number(row.ok_calls ?? 0);
+    existing.quota_errors = Number(existing.quota_errors) + Number(row.quota_errors ?? 0);
+    existing.other_errors = Number(existing.other_errors) + Number(row.other_errors ?? 0);
+    existing.tokens_in = Number(existing.tokens_in) + Number(row.tokens_in ?? 0);
+    existing.tokens_out = Number(existing.tokens_out) + Number(row.tokens_out ?? 0);
+    existing.cached_tokens = Number(existing.cached_tokens) + Number(row.cached_tokens ?? 0);
+    existing.est_cost_usd = Number(existing.est_cost_usd) + Number(row.est_cost_usd ?? 0);
+    if (row.last_error) existing.last_error = String(row.last_error);
+    if (row.last_quota_at) existing.last_quota_at = row.last_quota_at;
+    byModel.set(model, existing);
+  }
+
+  // Every model named in a chain appears, even at zero calls, so a configured
+  // fallback that has never been reached is visible rather than absent.
+  const configured = new Map<string, string[]>();
+  for (const [job, chain] of Object.entries(cfg.models)) {
+    for (const model of chain as string[]) {
+      configured.set(model, [...(configured.get(model) ?? []), job]);
+    }
+  }
+  for (const [model, jobs] of configured) {
+    if (!byModel.has(model)) {
+      byModel.set(model, {
+        model, jobs, calls: 0, ok_calls: 0, quota_errors: 0, other_errors: 0,
+        tokens_in: 0, tokens_out: 0, cached_tokens: 0, est_cost_usd: 0,
+        last_error: null, last_quota_at: null
+      });
+    }
+  }
+
+  const spent = new Set(spentModels());
+  const models = Array.from(byModel.values())
+    .map((row): Row => {
+      const model = String(row.model);
+      const known = KNOWN_FREE_RPD[model];
+      const used = Number(row.calls);
+      return {
+        ...row,
+        jobs: Array.from(new Set(row.jobs as string[])),
+        configured_for: configured.get(model) ?? [],
+        in_use: configured.has(model),
+        // First in a chain is the one we want; the rest are the safety net.
+        is_primary: Object.values(cfg.models).some((chain) => (chain as string[])[0] === model),
+        free_rpd: known?.rpd ?? null,
+        free_rpd_observed: known?.observed ?? false,
+        remaining: known ? Math.max(0, known.rpd - used) : null,
+        used_pct: known ? Math.min(100, Math.round((used / known.rpd) * 100)) : null,
+        exhausted: spent.has(model) || Number(row.quota_errors) > 0
+      };
+    })
+    .sort((a, b) => Number(b.calls) - Number(a.calls));
+
+  const totals = { calls: 0, ok: 0, quota: 0, other: 0, cost: 0, cached: 0 };
+  for (const m of models) {
+    totals.calls += Number(m.calls ?? 0);
+    totals.ok += Number(m.ok_calls ?? 0);
+    totals.quota += Number(m.quota_errors ?? 0);
+    totals.other += Number(m.other_errors ?? 0);
+    totals.cost += Number(m.est_cost_usd ?? 0);
+    totals.cached += Number(m.cached_tokens ?? 0);
+  }
+
+  const asked = answered[0] ?? {};
+  const answers = Number(asked.answers ?? 0);
+  const fromCache = Number(asked.from_cache ?? 0);
+
+  return {
+    day: new Date().toISOString().slice(0, 10),
+    // Google's daily quotas reset at midnight Pacific, which is what a staff
+    // member in Dhaka needs told rather than left to work out.
+    resets_at: nextPacificMidnight(),
+    tts_mode: cfg.ttsMode,
+    chains: cfg.models,
+    job_calls: jobCalls,
+    models,
+    totals,
+    // Today, in answers rather than calls.
+    answers: {
+      total: answers,
+      from_cache: fromCache,
+      from_model: Math.max(0, answers - fromCache),
+      cache_pct: answers ? Math.round((fromCache / answers) * 100) : 0,
+      clarifications: Number(asked.clarifications ?? 0)
+    },
+    trend,
+    cache,
+    exhausted: Array.from(spent)
+  };
+}
+
+/** When the per-day counters go back to zero, in both places it matters. */
+function nextPacificMidnight(): { utc: string; dhaka: string; hours_away: number } {
+  const now = new Date();
+  // Pacific is UTC-7 in summer and UTC-8 in winter; the eight-hour offset is
+  // the safe one to quote because it never claims the reset has happened early.
+  const offsetHours = 8;
+  const pacificNow = new Date(now.getTime() - offsetHours * 3_600_000);
+  const nextMidnight = Date.UTC(
+    pacificNow.getUTCFullYear(), pacificNow.getUTCMonth(), pacificNow.getUTCDate() + 1
+  ) + offsetHours * 3_600_000;
+  const at = new Date(nextMidnight);
+  return {
+    utc: at.toISOString(),
+    dhaka: at.toLocaleString("en-GB", { timeZone: "Asia/Dhaka", hour: "2-digit", minute: "2-digit", day: "numeric", month: "short" }),
+    hours_away: Number(((nextMidnight - now.getTime()) / 3_600_000).toFixed(1))
+  };
+}
+
+/** Clear the in-process "this model is spent" hints — after a key change. */
+export async function resetApaQuotaHints(adminId: number) {
+  forgetSpentModels();
+  const pruned = await pruneAnswerCache();
+  await recordAudit({
+    actorAdminId: adminId,
+    action: "apa_quota_hints_reset",
+    entityType: "apa_model_calls",
+    after: { pruned_cache_rows: pruned }
+  });
+  return { ok: true, pruned_cache_rows: pruned };
+}
+
+/* ---------------------------------------------------------------------------
+   9. Prompt history
+   --------------------------------------------------------------------------- */
+
+export async function getApaPromptVersions(promptKey: string | null) {
+  const where = promptKey ? "WHERE v.prompt_key = ?" : "";
+  const values = promptKey ? [promptKey] : [];
+  const rows = await queryRows<Row>(
+    `SELECT CAST(v.id AS CHAR) AS id, v.prompt_key, v.chars, v.note, v.created_at,
+            a.name AS changed_by_name,
+            LEFT(v.body, 400) AS preview
+       FROM apa_prompt_versions v
+       LEFT JOIN admin_users a ON a.id = v.changed_by
+       ${where}
+      ORDER BY v.id DESC
+      LIMIT 60`,
+    values
+  );
+  return { rows };
+}
+
+export async function getApaPromptVersion(id: string) {
+  const [row] = await queryRows<Row>(
+    "SELECT CAST(id AS CHAR) AS id, prompt_key, body, chars, created_at FROM apa_prompt_versions WHERE id = ? LIMIT 1",
+    [id]
+  );
+  if (!row) throw new Error("No such prompt version.");
+  return row;
+}
+
+/**
+ * Put an earlier version back.
+ *
+ * The scope instruction is the safety control, so losing it to a bad paste must
+ * be recoverable in one click rather than by finding whoever has a copy.
+ */
+export async function revertApaPrompt(payload: Row, adminId: number) {
+  const id = String(payload.id ?? "").trim();
+  if (!id) throw new Error("A version id is required.");
+  const version = await getApaPromptVersion(id);
+  const key = String(version.prompt_key);
+  const body = String(version.body);
+
+  if (key === "scope" && body.trim().length < 200) {
+    throw new Error("That version of the scope instruction is too short to restrict anything.");
+  }
+
+  const [current] = await queryRows<Row>("SELECT body FROM apa_prompts WHERE prompt_key = ? LIMIT 1", [key]);
+  if (current?.body) {
+    await executeQuery(
+      "INSERT INTO apa_prompt_versions (prompt_key, body, chars, changed_by, note) VALUES (?, ?, ?, ?, ?)",
+      [key, current.body, String(current.body).length, adminId, `replaced by revert to version ${id}`]
+    );
+  }
+  await executeQuery("UPDATE apa_prompts SET body = ?, updated_by = ? WHERE prompt_key = ?", [body, adminId, key]);
+  invalidateApaPrompts();
+  await recordAudit({
+    actorAdminId: adminId,
+    action: "apa_prompt_reverted",
+    entityType: "apa_prompts",
+    entityId: id,
+    before: { chars: current?.body ? String(current.body).length : 0 },
+    after: { prompt_key: key, chars: body.length }
+  });
+  return { ok: true, prompt_key: key, chars: body.length };
+}
+
+
+/* ---------------------------------------------------------------------------
+   10. Pre-warming the cache
+   --------------------------------------------------------------------------- */
+
+/**
+ * Answer one question ahead of time and hold it for the day.
+ *
+ * Called by `scripts/apa-prewarm.cjs` just after the quota resets, when the
+ * day's allowance is idle. It lives under `admin/` rather than behind a new
+ * shared secret deliberately: the script already has database credentials, so
+ * it mints itself a short-lived admin session and deletes it afterwards, and
+ * no second authentication mechanism has to exist or be kept secret.
+ *
+ * All of the judgement about whether an answer may be held is in
+ * lib/apa/prewarm.ts, which discards rather than caches whenever it is unsure.
+ */
+export async function prewarmApaAnswer(payload: Row) {
+  const userId = String(payload.user_id ?? "").trim();
+  const question = String(payload.text ?? "").trim();
+  if (!userId) throw new Error("A user id is required — the district comes from it.");
+  if (!question) throw new Error("A question is required.");
+  return prewarmAnswer({ userId, question });
 }

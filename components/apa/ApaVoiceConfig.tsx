@@ -5,6 +5,7 @@ import { AlertTriangle, Loader2, Save, ShieldAlert } from "lucide-react";
 import { AdminShell } from "@/components/AdminShell";
 import { Select } from "@/components/Select";
 import { Failed, Loading, n, post, s, useApi, when, type Row } from "@/components/apa/shared";
+import { ApaPromptHistory } from "@/components/apa/ApaPromptHistory";
 import "@/components/apa/apa-console.css";
 
 /**
@@ -32,7 +33,8 @@ type Field =
   | { key: string; label: string; help: string; kind: "toggle" }
   | { key: string; label: string; help: string; kind: "number"; unit?: string }
   | { key: string; label: string; help: string; kind: "select"; options: string[] }
-  | { key: string; label: string; help: string; kind: "voice" };
+  | { key: string; label: string; help: string; kind: "voice" }
+  | { key: string; label: string; help: string; kind: "chain"; placeholder?: string };
 
 const GROUPS: Array<{ title: string; note: string; fields: Field[] }> = [
   {
@@ -66,14 +68,69 @@ const GROUPS: Array<{ title: string; note: string; fields: Field[] }> = [
   },
   {
     title: "Models",
-    note: "Changed here, not in code. A model that starts refusing or slows down can be swapped without a deploy.",
+    note: "Each of these is a chain, tried left to right, comma separated. The free tier caps requests per model per day, so a second entry is not a nicety — it is what keeps the assistant answering after the first model is spent. Watch it work on Requests and quota.",
     fields: [
-      { key: "apa_model_text", label: "Answers and calls tools", help: "", kind: "select", options: ["gemini-3.6-flash", "gemini-3.6-pro", "gemini-3.5-flash"] },
-      { key: "apa_model_classify", label: "Scope gate", help: "Cheap and fast matters more than clever.", kind: "select", options: ["gemini-3.6-flash", "gemini-3.5-flash"] },
-      { key: "apa_model_transcribe", label: "Speech to text", help: "", kind: "select", options: ["gemini-3.5-transcribe", "gemini-3.6-flash"] },
-      { key: "apa_model_tts", label: "Text to speech", help: "", kind: "select", options: ["gemini-3.1-flash-tts-preview", "gemini-3.1-pro-tts-preview"] },
-      { key: "apa_model_live", label: "Live conversation", help: "Audio out only; the transcript strip comes from output transcription.", kind: "select", options: ["gemini-3.8-live", "gemini-3.5-live"] },
-      { key: "apa_model_vision", label: "Reads a photo", help: "", kind: "select", options: ["gemini-3.6-flash", "gemini-3.6-pro"] }
+      { key: "apa_model_text", label: "Answers and calls tools", help: "First entry does the work; the rest are the safety net.", kind: "chain", placeholder: "gemini-3.1-flash-lite,gemini-2.5-flash" },
+      { key: "apa_model_classify", label: "Scope gate", help: "Cheap and reliable matters more than clever — most questions never reach it, because an obvious farming question is let through without a model call at all.", kind: "chain", placeholder: "gemini-2.5-flash,gemini-3.1-flash-lite" },
+      { key: "apa_model_transcribe", label: "Speech to text", help: "", kind: "chain", placeholder: "gemini-3.5-transcribe" },
+      { key: "apa_model_tts", label: "Text to speech", help: "Only reached by a handset with no Bangla voice of its own, and only when read-aloud below is not set to device.", kind: "chain", placeholder: "gemini-2.5-flash-preview-tts" },
+      { key: "apa_model_live", label: "Live conversation", help: "Audio out only; the transcript strip comes from output transcription.", kind: "chain", placeholder: "gemini-3.8-live" },
+      { key: "apa_model_vision", label: "Reads a photo", help: "", kind: "chain", placeholder: "gemini-3.1-flash-lite,gemini-2.5-flash" }
+    ]
+  },
+  {
+    // Everything here exists because the free tier caps *requests*, not money.
+    // A request not made is worth more than a request made cheaply.
+    title: "Cost and quota controls",
+    note: "The four levers, in order of what they return. None of these change what a farmer sees when things are working; all of them change how many requests a day it takes to get there.",
+    fields: [
+      {
+        key: "apa_tts_mode",
+        label: "Who reads the answer aloud",
+        help: "device — the phone's own engine, always: free, instant, works offline, and the single largest saving available. device_then_server synthesises for handsets with no Bangla voice installed. server synthesises every answer and is the most expensive setting here.",
+        kind: "select",
+        options: ["device", "device_then_server", "server"]
+      },
+      {
+        key: "apa_answer_cache_hours",
+        label: "How long an answer may be reused",
+        help: "Fifty farmers in one upazila asking the same thing on the same morning is one model call. Never across districts, never across days, never anything personal. Zero switches the cache off.",
+        kind: "number",
+        unit: "hours"
+      },
+      {
+        key: "apa_prompt_examples",
+        label: "Send the worked examples with every answer",
+        help: "Longer prompt, noticeably better register and far less invention. It also pushes the instruction past the caching thresholds — 2,048 tokens on 2.5, 4,096 on 3.x — so on a paid tier it partly pays for itself.",
+        kind: "toggle"
+      },
+      {
+        key: "apa_image_max_px",
+        label: "Longest edge of a photo sent to a model",
+        help: "Gemini bills an image in 768-pixel tiles. A camera original is about five times the tokens of the same photo at 1024, for the same answer about the same spot on the same leaf. The phone reads this and shrinks before uploading.",
+        kind: "number",
+        unit: "px"
+      },
+      {
+        key: "apa_fair_share_pct",
+        label: "Start rationing at",
+        help: "The daily cap belongs to the project, not the farmer — so without this, one heavy user can spend the day's allowance before most farmers have woken up. Past this share of the day's own headroom, the per-farmer daily limit tightens. 100 switches it off.",
+        kind: "number",
+        unit: "% of the day"
+      },
+      {
+        key: "apa_prewarm_enabled",
+        label: "Fill the cache overnight",
+        help: "The allowance resets at midnight Pacific — 2pm in Dhaka — and almost nothing is asked until the next morning. scripts/apa-prewarm.cjs spends a few dozen of those idle requests on the questions farmers ask every morning, so those mornings cost nothing.",
+        kind: "toggle"
+      },
+      {
+        key: "apa_retention_days",
+        label: "Keep message bodies for",
+        help: "Transcripts and answers are pruned past this. Scope verdicts, feedback, vocabulary and prompt history are never pruned — they are the training corpus and the audit trail.",
+        kind: "number",
+        unit: "days"
+      }
     ]
   },
   {
@@ -213,6 +270,16 @@ export function ApaVoiceConfig() {
                             />
                             {field.unit ? <span className="muted">{field.unit}</span> : null}
                           </div>
+                        ) : field.kind === "chain" ? (
+                          <input
+                            className="input"
+                            type="text"
+                            spellCheck={false}
+                            placeholder={field.placeholder}
+                            value={values[field.key] ?? ""}
+                            onChange={(e) => set(field.key, e.target.value)}
+                            aria-label={field.label}
+                          />
                         ) : field.kind === "voice" ? (
                           <Select
                             value={values[field.key] ?? ""}
@@ -269,6 +336,8 @@ export function ApaVoiceConfig() {
               })}
             </div>
           </section>
+
+          <ApaPromptHistory current={originalPrompts} onRestored={feed.reload} />
 
           <section className="panel is-padded">
             <h2 className="act-form-title">What the server is using right now</h2>

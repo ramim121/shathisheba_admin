@@ -1,7 +1,8 @@
-import { genai, parseJson, retrying } from "@/lib/apa/client";
+import { genai, parseJson } from "@/lib/apa/client";
 import { looksAgricultural } from "@/lib/apa/pure";
 import { apaPrompt } from "@/lib/apa/config";
 import { logScope } from "@/lib/apa/log";
+import { runWithChain, thinkingFor, usageOf } from "@/lib/apa/models";
 
 /**
  * Layer 1 of the scope restriction: is this a farming question at all?
@@ -15,10 +16,21 @@ import { logScope } from "@/lib/apa/log";
  *
  * The bias is deliberate and asymmetric. Refusing a farmer's badly-phrased
  * question about her own field is the failure that loses a user; answering
- * something loosely agricultural costs a fraction of a cent. So `ambiguous`
+ * something loosely agricultural costs a fraction of a paisa. So `ambiguous`
  * resolves to *allow*, and every verdict — allow and refuse alike — is logged
  * for the Scope Review queue, because a log that only holds refusals cannot
  * show what the gate turned away by mistake.
+ *
+ * Two things here were measured rather than assumed:
+ *
+ *   - **Thinking must be off.** With it on, the model spent the entire output
+ *     budget reasoning and returned `finishReason: MAX_TOKENS` with no content
+ *     at all. The parse fell through to `ambiguous`, ambiguous allows, and so
+ *     *every* question was reaching the answering model. A gate that fails open
+ *     silently is not a gate.
+ *   - **Accuracy differs sharply by model** on the same ten labelled cases:
+ *     `gemini-2.5-flash` 10/10 at 1.3s, `gemini-3.1-flash-lite` 9/10,
+ *     `gemini-3.5-flash` 7/10, `gemma-4-31b-it` 2/10 at 21s.
  */
 
 export type Verdict = "in_scope" | "out_of_scope" | "ambiguous";
@@ -39,7 +51,8 @@ type Raw = { verdict?: string; topic?: string; confidence?: number };
 export async function classifyScope(input: {
   text: string;
   userId?: string | number | null;
-  model: string;
+  /** Fallback chain; the first model that answers wins. */
+  models: string[];
   /** A photo of an animal or a field is agricultural by construction. */
   hasImage?: boolean;
 }): Promise<ScopeResult> {
@@ -53,42 +66,38 @@ export async function classifyScope(input: {
   if (input.hasImage) return shortcut("photo");
   if (looksAgricultural(text)) return shortcut("keyword");
 
-  const scope = await apaPrompt("scope");
-  const prompt = [
-    scope,
-    "",
-    "Classify the farmer's message below. Return strict JSON and nothing else:",
-    '{"verdict":"in_scope|out_of_scope|ambiguous","topic":"crop|livestock|poultry|fish|weather|market|money|platform|other","confidence":0.0}',
-    "",
-    "Use `ambiguous` when you genuinely cannot tell. Do not answer the message.",
-    "",
-    `MESSAGE:\n"""${text.slice(0, 1500)}"""`
-  ].join("\n");
+  const instruction = await apaPrompt("classify");
+  const prompt = `${instruction}\n\nMESSAGE:\n"""${text.slice(0, 1500)}"""`;
 
   let verdict: Verdict = "ambiguous";
   let topic = "other";
   let confidence = 0;
+  let model = input.models[0] ?? "unknown";
+
   try {
-    const res = await retrying(() => genai().models.generateContent({
-      model: input.model,
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      config: {
-        temperature: 0,
-        responseMimeType: "application/json",
-        maxOutputTokens: 200,
-        // Thinking off, and this is not an optimisation. With it on, the whole
-        // output budget was spent reasoning before a single character of JSON
-        // was produced: the call came back `finishReason: MAX_TOKENS` with no
-        // parts at all, the parse fell through to `ambiguous`, and because
-        // ambiguous allows, *every* question was reaching the answering model.
-        // A gate that fails open silently is not a gate.
-        thinkingConfig: { thinkingBudget: 0 }
-      } as never
-    }));
-    if (!res.text) {
-      throw new Error(`empty classification (${res.candidates?.[0]?.finishReason ?? "no reason"})`);
-    }
-    const parsed = parseJson<Raw>(res.text, {});
+    const attempt = await runWithChain({
+      job: "classify",
+      chain: input.models,
+      call: async (candidate) => {
+        const res = await genai().models.generateContent({
+          model: candidate,
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          config: {
+            temperature: 0,
+            responseMimeType: "application/json",
+            maxOutputTokens: 200,
+            ...thinkingFor(candidate)
+          } as never
+        });
+        if (!res.text) {
+          throw new Error(`empty classification (${res.candidates?.[0]?.finishReason ?? "no reason"})`);
+        }
+        return { value: res.text, usage: usageOf(res) };
+      }
+    });
+
+    model = attempt.model;
+    const parsed = parseJson<Raw>(attempt.result, {});
     const raw = String(parsed.verdict ?? "").toLowerCase();
     verdict = raw === "in_scope" || raw === "out_of_scope" ? raw : "ambiguous";
     topic = String(parsed.topic ?? "other").slice(0, 80);
@@ -96,11 +105,11 @@ export async function classifyScope(input: {
   } catch (error) {
     // The gate failing open is the correct trade here: a farmer gets an answer
     // she might not have, rather than a refusal she certainly should not have.
-    // The verdict is logged as ambiguous so the queue shows it either way.
+    // The verdict is logged as ambiguous so the review queue shows it either way.
     console.error("apa scope classify failed", error);
   }
 
-  return finish(verdict, topic, confidence, started, input, input.model);
+  return finish(verdict, topic, confidence, started, input, model);
 }
 
 async function finish(

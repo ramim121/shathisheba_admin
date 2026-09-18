@@ -1,6 +1,7 @@
 import { apaRest } from "@/lib/apa/client";
 import { biasTerms, recordHeardTerms } from "@/lib/apa/vocabulary";
 import { audioSeconds } from "@/lib/apa/pure";
+import { runWithChain } from "@/lib/apa/models";
 
 /**
  * A voice message, turned into words.
@@ -36,27 +37,38 @@ type RestResponse = {
 export async function transcribeAudio(input: {
   data: string;
   mimeType: string;
-  model: string;
+  /** Fallback chain; the first model that answers wins. */
+  models: string[];
   language?: string;
+  /** Used to pick which vocabulary terms are worth sending. */
+  userId?: string | number | null;
 }): Promise<Transcription> {
-  const terms = await biasTerms();
+  const terms = await biasTerms(input.userId);
   const seconds = audioSeconds(Buffer.from(input.data, "base64").length, input.mimeType);
 
-  const res = await apaRest<RestResponse>(`v1beta/models/${input.model}:generateContent`, {
-    contents: [
-      {
-        role: "user",
-        parts: [{ inlineData: { mimeType: input.mimeType, data: input.data } }]
-      }
-    ],
-    generationConfig: {
-      audioTranscriptionConfig: {
-        languageCodes: [input.language ?? "bn-BD"],
-        customVocabulary: terms
-      }
+  const attempt = await runWithChain({
+    job: "transcribe",
+    chain: input.models,
+    call: async (model) => {
+      const value = await apaRest<RestResponse>(`v1beta/models/${model}:generateContent`, {
+        contents: [
+          {
+            role: "user",
+            parts: [{ inlineData: { mimeType: input.mimeType, data: input.data } }]
+          }
+        ],
+        generationConfig: {
+          audioTranscriptionConfig: {
+            languageCodes: [input.language ?? "bn-BD"],
+            customVocabulary: terms
+          }
+        }
+      });
+      return { value };
     }
   });
 
+  const res = attempt.result;
   const parts = res.candidates?.[0]?.content?.parts ?? [];
   const text = parts
     .map((p) => p.audioTranscription?.text ?? p.text ?? "")
@@ -69,7 +81,7 @@ export async function transcribeAudio(input: {
   return {
     text,
     seconds: Number(seconds.toFixed(2)),
-    model: input.model,
+    model: attempt.model,
     ok: text.length > 0
   };
 }

@@ -1,6 +1,7 @@
 import { queryRows } from "@/lib/db";
 import { getUserGeo } from "@/lib/geo-scope";
 import { logToolCall } from "@/lib/apa/log";
+import { PERSONAL_TOOLS } from "@/lib/apa/pure";
 import {
   getAppActiveProjects,
   getAppLearningOverview,
@@ -59,6 +60,10 @@ export type ToolOutcome = {
   ok: boolean;
   /** The lookup ran and there was nothing there. Not a failure. */
   empty: boolean;
+  /** This result is about one farmer, so an answer using it may never be cached. */
+  personal: boolean;
+  /** The apa_tool_calls row, so the answer can attribute exactly its own calls. */
+  toolCallId: number | null;
   error?: string;
 };
 
@@ -78,6 +83,22 @@ export type ToolContext = {
  * list is the assistant's entire capability surface, and this one is ten
  * read-only queries against our own database.
  */
+/**
+ * Screens `navigate_to` may offer. Declared once: it used to be written into
+ * the tool schema and then read back out of it through a cast at runtime, so
+ * the two could drift and nothing would notice.
+ */
+export const NAVIGABLE_SCREENS = [
+  "weather", "marketUpdates", "myListings", "saleCategories", "buyCategories",
+  "buyProducts", "training", "financeHub", "menuKyc", "officers", "notifications", "menuFarm"
+] as const;
+
+/** Tools whose result is about one farmer and must never be cached across them. */
+// Aliased, not redeclared. A second copy of this list is how an answer about
+// one farmer's loan ends up in a cache that another farmer is served from —
+// see the note on PERSONAL_TOOLS in pure.ts, which owns it.
+export const PERSONAL_TOOL_NAMES = PERSONAL_TOOLS;
+
 export const TOOL_DECLARATIONS = [
   {
     name: "get_weather",
@@ -160,10 +181,7 @@ export const TOOL_DECLARATIONS = [
           type: "string",
           description:
             "One of: weather, marketUpdates, myListings, saleCategories, buyCategories, buyProducts, training, financeHub, menuKyc, officers, notifications, menuFarm.",
-          enum: [
-            "weather", "marketUpdates", "myListings", "saleCategories", "buyCategories",
-            "buyProducts", "training", "financeHub", "menuKyc", "officers", "notifications", "menuFarm"
-          ]
+          enum: NAVIGABLE_SCREENS
         },
         label_bn: { type: "string", description: "What the button should say, in Bangla, at most five words." }
       },
@@ -200,13 +218,13 @@ export async function runTool(
   if (!KNOWN.has(name)) {
     // A model asking for a tool that does not exist is the shape a prompt
     // injection takes when it works, so it is logged rather than ignored.
-    await logToolCall({ userId: ctx.userId, tool: name, args: rawArgs, ok: false, error: "unknown tool" });
-    return { tool: name, data: null, sources: [], ok: false, empty: true, error: "unknown tool" };
+    const id = await logToolCall({ userId: ctx.userId, tool: name, args: rawArgs, ok: false, error: "unknown tool" });
+    return { tool: name, data: null, sources: [], ok: false, empty: true, personal: false, toolCallId: id, error: "unknown tool" };
   }
 
   try {
     const outcome = await execute(name as ToolName, rawArgs, ctx);
-    await logToolCall({
+    const id = await logToolCall({
       userId: ctx.userId,
       tool: name,
       args: rawArgs,
@@ -215,10 +233,10 @@ export async function runTool(
       rows: Array.isArray(outcome.data) ? outcome.data.length : outcome.data ? 1 : 0,
       latencyMs: Date.now() - started
     });
-    return outcome;
+    return { ...outcome, personal: PERSONAL_TOOL_NAMES.has(name), toolCallId: id };
   } catch (error) {
     const message = error instanceof Error ? error.message : "tool failed";
-    await logToolCall({
+    const id = await logToolCall({
       userId: ctx.userId,
       tool: name,
       args: rawArgs,
@@ -229,15 +247,20 @@ export async function runTool(
     // The model is told plainly that the lookup failed, so it can say so rather
     // than filling the gap with a plausible number (SRS G5: no source chip,
     // because there is no source to cite).
-    return { tool: name, data: { error: "unavailable" }, sources: [], ok: false, empty: true, error: message };
+    return {
+      tool: name, data: { error: "unavailable" }, sources: [], ok: false, empty: true,
+      personal: PERSONAL_TOOL_NAMES.has(name), toolCallId: id, error: message
+    };
   }
 }
+
+type ToolResult = Omit<ToolOutcome, "personal" | "toolCallId">;
 
 async function execute(
   name: ToolName,
   args: Record<string, unknown>,
   ctx: ToolContext
-): Promise<ToolOutcome> {
+): Promise<ToolResult> {
   switch (name) {
     case "get_weather": {
       const alerts = await getAppWeatherAlerts(ctx.userId);
@@ -431,10 +454,7 @@ async function execute(
       // Not executed. Returned to the app as a button; the farmer taps it.
       const screen = String(args.screen ?? "").trim();
       const label = String(args.label_bn ?? "").trim().slice(0, 40);
-      const allowed = (TOOL_DECLARATIONS.find((t) => t.name === "navigate_to")?.parameters as {
-        properties?: { screen?: { enum?: readonly string[] } };
-      })?.properties?.screen?.enum;
-      const ok = Boolean(screen && label && allowed?.includes(screen));
+      const ok = Boolean(screen && label && (NAVIGABLE_SCREENS as readonly string[]).includes(screen));
       return {
         tool: name,
         ok,

@@ -82,23 +82,42 @@ export type FailureKind = "daily_quota" | "minute_quota" | "transient" | "fatal"
  * the day's allowance.
  */
 export const FREE_RPD: Record<string, { rpd: number; observed: boolean }> = {
+  // --- observed: this project has seen a 429 quoting the figure -------------
+  //
+  // Read this table before choosing a primary model. The quality ranking and
+  // the allowance ranking are close to inverted, which is the single most
+  // important fact about serving farmers on this tier.
+  //
+  // gemini-3.5-flash-lite is the best model measured (11/11 on the capability
+  // battery, 6/6 on restraint, ~1.4s) and allows **fifteen requests a day**.
+  // gemini-3.1-flash-lite is measurably worse (9/11, 5/6, ~3.2s) and is the
+  // only model here that can carry real volume. Neither is "the right choice";
+  // the chain is, in that order — the first fifteen questions of the day get
+  // the better answer and everything after falls through to the one that can
+  // actually serve it.
+  "gemini-3.5-flash-lite": { rpd: 15, observed: true },
+  "gemini-2.5-flash": { rpd: 20, observed: true },
   "gemini-3.6-flash": { rpd: 20, observed: true },
+
+  // --- assumed: no 429 seen yet --------------------------------------------
+  //
+  // gemini-3.1-flash-lite served more than forty requests in a day without
+  // complaint, so its ceiling is at least that and the figure below is a
+  // placeholder rather than a measurement. It is the model the service
+  // actually runs on, so its real allowance is the most valuable unknown left
+  // on this list.
+  "gemini-3.1-flash-lite": { rpd: 1000, observed: false },
   "gemini-3.5-flash": { rpd: 20, observed: false },
   "gemini-3.8-flash": { rpd: 20, observed: false },
   "gemini-3.7-flash": { rpd: 20, observed: false },
-  // Measured 19 Sept 2026: a 429 on this model quoted
-  // `generate_content_free_tier_requests = 20`. The 250 assumed here
-  // previously was wrong by more than twelve times, which made the
-  // console report plenty of headroom on a model with almost none.
-  "gemini-2.5-flash": { rpd: 20, observed: true },
-  "gemini-3.1-flash-lite": { rpd: 1000, observed: false },
-  "gemini-3.5-flash-lite": { rpd: 1000, observed: false },
-  // 404 for new projects since 2026; Google names 3.5-flash-lite instead.
-  "gemini-2.5-flash-lite": { rpd: 0, observed: true },
   "gemini-3.5-transcribe": { rpd: 100, observed: false },
   "gemini-2.5-flash-preview-tts": { rpd: 100, observed: false },
   "gemini-3.1-flash-tts-preview": { rpd: 100, observed: false },
-  "gemma-4-31b-it": { rpd: 14400, observed: false }
+  "gemma-4-31b-it": { rpd: 14400, observed: false },
+
+  // --- retired --------------------------------------------------------------
+  // 404 for new projects since 2026; Google names 3.5-flash-lite instead.
+  "gemini-2.5-flash-lite": { rpd: 0, observed: true }
 };
 
 export function freeRpd(model: string): { rpd: number; observed: boolean } | null {
@@ -128,9 +147,20 @@ export function freeRpd(model: string): { rpd: number; observed: boolean } | nul
  * replacement for `gemini-2.5-flash-lite`, which now 404s for new projects.
  */
 const NO_THINKING_BUDGET = new Set([
+  // "Request contains an invalid argument."
   "gemini-3.5-flash-lite",
+  // "Thinking budget is not supported for this model."
   "gemma-4-31b-it",
-  "gemma-4-26b-a4b-it"
+  "gemma-4-26b-a4b-it",
+  // "Thinking is not enabled for this model" — the speech and transcription
+  // models. Nothing sends them a thinkingConfig today, because tts.ts and
+  // transcribe.ts build their own requests; they are listed so that the day
+  // one of them moves onto the shared chain runner it does not 400 on arrival.
+  "gemini-3.5-transcribe",
+  "gemini-3.5-transcribe-live",
+  "gemini-2.5-flash-preview-tts",
+  "gemini-3.1-flash-tts-preview",
+  "gemini-2.5-pro-preview-tts"
 ]);
 
 /**

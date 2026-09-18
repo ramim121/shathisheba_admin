@@ -383,7 +383,14 @@ check("a model that rejects thinkingBudget is not sent it", () => {
   // fatal stops the chain — so sending this field blindly would turn a
   // recoverable quota error into a dead end on exactly the fallbacks that
   // exist to prevent one.
-  for (const model of ["gemini-3.5-flash-lite", "gemma-4-31b-it", "gemma-4-26b-a4b-it"]) {
+  for (const model of [
+    "gemini-3.5-flash-lite",
+    "gemma-4-31b-it",
+    "gemma-4-26b-a4b-it",
+    "gemini-3.5-transcribe",
+    "gemini-2.5-flash-preview-tts",
+    "gemini-3.1-flash-tts-preview"
+  ]) {
     assert.deepEqual(thinkingFor(model), {}, `${model} must not be sent thinkingConfig`);
   }
   // And it is still sent everywhere it is needed: thinking on a scope-gate

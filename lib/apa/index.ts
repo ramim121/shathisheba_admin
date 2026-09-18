@@ -201,9 +201,7 @@ async function runAsk(input: AskInput): Promise<AskResult> {
 
   if (cached) {
     const officer = cached.needs_officer ? await firstOfficer(input.userId) : null;
-    const speech = await speechFor({
-      cfg, input, text: [cached.text, cached.caution].filter(Boolean).join(". "), entitlement
-    });
+    const speech = await speechFor({ cfg, input, text: spokenText(cached), entitlement });
     const messageId = await logMessage({
       conversationId,
       userId: input.userId,
@@ -318,7 +316,7 @@ async function runAsk(input: AskInput): Promise<AskResult> {
   const speech = await speechFor({
     cfg,
     input,
-    text: [result.text, result.advice?.body, result.caution].filter(Boolean).join(". "),
+    text: spokenText(result),
     entitlement
   });
 
@@ -416,6 +414,26 @@ async function runAsk(input: AskInput): Promise<AskResult> {
 /* ---------------------------------------------------------------------------
    Speech: the phone first, the server only if it has to
    --------------------------------------------------------------------------- */
+
+/**
+ * What a voice should read out for an answer.
+ *
+ * One definition, used by the fresh path and the cache path both, because they
+ * disagreed and it cost twice over: the cached path joined only the answer and
+ * the caution while the fresh path also included the advice body, so an answer
+ * served from cache (a) was read out *differently* from the same answer served
+ * fresh, and (b) hashed to a different speech key — which meant every answer
+ * cache hit still spent a text-to-speech request to synthesise audio we already
+ * had. The two caches were cancelling each other out.
+ */
+function spokenText(answer: {
+  text: string;
+  advice?: { body?: string | null } | unknown;
+  caution?: string | null;
+}): string {
+  const advice = answer.advice as { body?: string | null } | null | undefined;
+  return [answer.text, advice?.body, answer.caution].filter(Boolean).join(". ");
+}
 
 async function speechFor(args: {
   cfg: ApaConfig;

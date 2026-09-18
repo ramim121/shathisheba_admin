@@ -392,3 +392,10 @@ td > .tag {
     justify-content: center;
   }
 }
+
+/* A zero in a stock or count column: not an error, but the thing a reader is
+   scanning the column for. */
+.cell-zero {
+  color: var(--ink-400);
+  font-weight: var(--fw-semibold);
+}

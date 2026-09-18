@@ -120,7 +120,18 @@ npm audit fix --force  # pulls next@16 — breaking, test thoroughly
   sale payment confirmation) run in transactions with `SELECT ... FOR UPDATE` on the
   stock rows.
 - Every approval decision and every admin login, successful or failed, is written to
-  `audit_logs`.
+  `audit_logs`. Record deletes are written there too, and the console exposes the
+  trail read-only at `/settings/audit` — it cannot be edited or removed from the UI.
+- Deleting a record shows its blast radius first (`/api/v1/admin/delete-impact`),
+  and each dependent relation can be expanded to the rows themselves
+  (`/admin/delete-impact/rows`). Both derive the table and column names from
+  `information_schema` for the target row and reject any relation name that is not
+  in that graph, so the relation key in the request cannot reach another table.
+- `DELETE …?cascade=1` clears the rows that the foreign keys would otherwise refuse,
+  deepest first, in one transaction with the record. It only ever touches relations
+  the graph reports as blocking, it is opt-in per request (the console makes the
+  admin tick a box after showing them the rows), and it is audited as
+  `record_deleted_cascade` with the per-table counts.
 
 ### Input and output
 

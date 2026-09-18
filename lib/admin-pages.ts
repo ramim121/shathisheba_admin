@@ -80,7 +80,8 @@ export const pages: Record<string, ManagementPageProps> = {
     columns: [
       { key: "title", label: "Title" },
       { key: "area", label: "Area" },
-      { key: "type", label: "Type" }
+      { key: "type", label: "Type" },
+      { key: "live_window", label: "Live window" }
     ],
     rows: marketUpdates.map((item) => ({
       id: item.title,
@@ -113,7 +114,10 @@ export const pages: Record<string, ManagementPageProps> = {
       { key: "code", label: "Listing" },
       { key: "farmer", label: "Farmer" },
       { key: "item", label: "Item" },
-      { key: "price", label: "Price/Earning" }
+      { key: "weight", label: "Weight" },
+      { key: "price", label: "Price/Earning" },
+      { key: "area", label: "Area" },
+      { key: "listed", label: "Listed" }
     ],
     rows: saleListings.map((item) => ({
       id: item.id,
@@ -195,7 +199,10 @@ export const pages: Record<string, ManagementPageProps> = {
       { key: "code", label: "Order" },
       { key: "customer", label: "Customer" },
       { key: "product", label: "Product" },
-      { key: "amount", label: "Amount" }
+      { key: "amount", label: "Amount" },
+      { key: "payment", label: "Payment" },
+      { key: "area", label: "Area" },
+      { key: "placed", label: "Placed" }
     ],
     rows: buyOrders.map((item) => ({
       id: item.id,
@@ -226,7 +233,9 @@ export const pages: Record<string, ManagementPageProps> = {
     columns: [
       { key: "title", label: "Module" },
       { key: "category", label: "Category" },
+      { key: "level", label: "Level" },
       { key: "contents", label: "Contents" },
+      { key: "learners", label: "Learners" },
       { key: "completion", label: "Completion" }
     ],
     rows: learningModules.map((item) => ({
@@ -255,8 +264,10 @@ export const pages: Record<string, ManagementPageProps> = {
     columns: [
       { key: "name", label: "Project" },
       { key: "lender", label: "Lender" },
-      { key: "enrollment", label: "Enrollment" },
-      { key: "progress", label: "Progress" }
+      { key: "area", label: "Area" },
+      { key: "investment", label: "Investment" },
+      { key: "enrollment", label: "Enrolled" },
+      { key: "progress", label: "Approved" }
     ],
     rows: partnerProjects.map((item) => ({
       id: item.id,
@@ -317,7 +328,10 @@ export const pages: Record<string, ManagementPageProps> = {
       { key: "code", label: "Application" },
       { key: "name", label: "Applicant" },
       { key: "project", label: "Project" },
-      { key: "step", label: "Step" }
+      { key: "step", label: "Step" },
+      { key: "documents", label: "Documents" },
+      { key: "officer", label: "Officer" },
+      { key: "updated", label: "Last moved" }
     ],
     rows: partnerApplications.map((item) => ({
       id: item.id,
@@ -390,7 +404,10 @@ export const pages: Record<string, ManagementPageProps> = {
       { key: "name", label: "User" },
       { key: "phone", label: "Phone" },
       { key: "location", label: "Location" },
-      { key: "roles", label: "Roles" }
+      { key: "roles", label: "Roles" },
+      { key: "kyc", label: "KYC" },
+      { key: "points", label: "Points" },
+      { key: "joined", label: "Joined" }
     ],
     rows: [
       { id: "USR-1", name: "Md. Rahim", phone: "01712-345678", location: "Mymensingh Sadar", roles: "shathisheba_buyer", status: "Active" },
@@ -541,6 +558,8 @@ export const nestedPages: Record<string, ManagementPageProps> = {
     columns: [
       { key: "name", label: "Division" },
       { key: "bangla", label: "Bangla" },
+      { key: "districts", label: "Districts" },
+      { key: "upazilas", label: "Upazilas" },
       { key: "sort_order", label: "Order" }
     ],
     rows: [],
@@ -558,7 +577,8 @@ export const nestedPages: Record<string, ManagementPageProps> = {
     columns: [
       { key: "name", label: "District" },
       { key: "bangla", label: "Bangla" },
-      { key: "division", label: "Division" }
+      { key: "division", label: "Division" },
+      { key: "upazilas", label: "Upazilas" }
     ],
     rows: [],
     formFields: [
@@ -849,7 +869,8 @@ export const nestedPages: Record<string, ManagementPageProps> = {
       { key: "amount", label: "Amount" },
       { key: "reason", label: "Reason" },
       { key: "from_order", label: "Issued for" },
-      { key: "used_on", label: "Used on" }
+      { key: "used_on", label: "Used on" },
+      { key: "expires", label: "Expires" }
     ],
     rows: [],
     formFields: [
@@ -888,7 +909,9 @@ export const nestedPages: Record<string, ManagementPageProps> = {
     columns: [
       { key: "listing", label: "Listing" },
       { key: "weight", label: "Actual Weight" },
-      { key: "amount", label: "Final Amount" }
+      { key: "amount", label: "Final Amount" },
+      { key: "otp", label: "OTP" },
+      { key: "confirmed", label: "Confirmed" }
     ],
     rows: [],
     formFields: [
@@ -987,7 +1010,8 @@ export const nestedPages: Record<string, ManagementPageProps> = {
       { key: "user", label: "User" },
       { key: "doc_type", label: "Type" },
       { key: "document_url", label: "Document" },
-      { key: "status", label: "Status" }
+      { key: "note", label: "Reviewer note" },
+      { key: "submitted", label: "Submitted" }
     ],
     rows: [],
     formFields: [
@@ -1360,6 +1384,28 @@ const financePages: Record<string, ManagementPageProps> = {
       { label: "Order", name: "sort_order", value: "1" },
       { label: "Active", name: "is_active", type: "select", options: ["1", "0"] }
     ]
+  },
+  // The audit trail has been recorded since migration 017 and had no screen:
+  // every login, approval, broadcast and delete was written down where nobody
+  // could read it.
+  "settings/audit": {
+    title: "Audit Trail",
+    description:
+      "Every administrative action the server records — sign-ins, approvals, broadcasts, deletes — newest first. Append-only: the console cannot edit or remove an entry, which is the point of keeping it.",
+    entityName: "Audit entry",
+    endpoint: "/api/v1/audit/logs",
+    readOnly: true,
+    columns: [
+      { key: "at", label: "When" },
+      { key: "actor", label: "Who" },
+      { key: "role", label: "Role" },
+      { key: "action", label: "Action" },
+      { key: "entity", label: "Record" },
+      { key: "ip", label: "From" },
+      { key: "payload", label: "Payload" }
+    ],
+    rows: [],
+    formFields: []
   },
   "settings/app": {
     title: "Platform Settings",

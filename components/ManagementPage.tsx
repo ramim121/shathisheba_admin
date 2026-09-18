@@ -55,6 +55,12 @@ export type ManagementPageProps = {
   }[];
   /** Shown between the page header and the table — e.g. a warning banner. */
   banner?: ReactNode;
+  /**
+   * Append-only data (the audit trail): no Create button and no edit/delete
+   * row actions, because there is no sane way to edit a record of what
+   * happened. The row still opens for reading.
+   */
+  readOnly?: boolean;
 };
 
 const PAGE_SIZES = [10, 25, 50, 100];
@@ -77,6 +83,22 @@ function formatMoney(text: string): string {
   });
 }
 
+/**
+ * Words the console uses for a state, and the tone each one carries. A column
+ * like "KYC" or "OTP" holds one of these and nothing else, so it reads far
+ * faster as a pill than as a sentence in a wall of grey text.
+ */
+const STATE_TONE: Record<string, string> = {
+  active: "green", verified: "green", approved: "green", paid: "green", delivered: "green",
+  confirmed: "green", completed: "green", granted: "green", live: "green", yes: "green",
+  pending: "gold", "not verified": "gold", unassigned: "gold", submitted: "gold", draft: "gold",
+  processing: "gold", awaiting: "gold", "in review": "gold", partial: "gold", requested: "gold",
+  rejected: "red", declined: "red", failed: "red", cancelled: "red", overdue: "red",
+  expired: "red", blocked: "red", suspended: "red", "out of stock": "red", revoked: "red",
+  inactive: "grey", used: "grey", none: "grey", "no otp": "grey", "no expiry": "grey",
+  archived: "grey", closed: "grey", hidden: "grey", no: "grey"
+};
+
 /** Presentation only — sorting, filtering and CSV export still use the raw value. */
 function renderCell(value: unknown): ReactNode {
   if (value === undefined || value === null || String(value).trim() === "") return <span className="cell-muted">—</span>;
@@ -90,6 +112,10 @@ function renderCell(value: unknown): ReactNode {
       </span>
     );
   }
+  const tone = STATE_TONE[raw.trim().toLowerCase()];
+  if (tone) return <span className={`status-pill ${tone}`}>{raw}</span>;
+  // "0" in a stock or count column is the one number worth noticing.
+  if (raw === "0") return <span className="cell-zero">0</span>;
   return raw;
 }
 
@@ -110,7 +136,8 @@ export function ManagementPage({
   columns,
   rows: initialRows,
   formFields: _formFields,
-  banner
+  banner,
+  readOnly = false
 }: ManagementPageProps) {
   const router = useRouter();
   const [rows, setRows] = useState<ManagementRow[]>(initialRows);
@@ -128,7 +155,14 @@ export function ManagementPage({
   const createHref = `/manage/form?resource=${encodeURIComponent(resource)}`;
   const detailHref = (id: string) =>
     DETAIL_ROUTES[resource]?.(id) ?? `/manage/view?resource=${encodeURIComponent(resource)}&id=${encodeURIComponent(id)}`;
-  const allColumns: ManagementColumn[] = useMemo(() => [...columns, { key: "status", label: "Status" }], [columns]);
+  // Only the resources that actually have a status get the column. The audit
+  // trail and the geography tables have none, and the default painted every
+  // row of them with a meaningless green "Active" pill.
+  const hasStatus = rows.length === 0 || rows.some((row) => row.status !== undefined && row.status !== null && row.status !== "");
+  const allColumns: ManagementColumn[] = useMemo(
+    () => (hasStatus ? [...columns, { key: "status", label: "Status" }] : [...columns]),
+    [columns, hasStatus]
+  );
 
   // global search -> per-column filters -> sort
   const filteredRows = useMemo(() => {
@@ -267,7 +301,7 @@ export function ManagementPage({
           </button>
           <button className="btn ghost" onClick={exportCsv} type="button"><Download size={18} /> Export</button>
           <button className="btn ghost" onClick={loadRows} type="button"><RefreshCw size={18} /> Refresh</button>
-          <Link className="btn primary" href={createHref}><Plus size={18} /> Create {entityName}</Link>
+          {readOnly ? null : <Link className="btn primary" href={createHref}><Plus size={18} /> Create {entityName}</Link>}
         </div>
       </section>
 
@@ -277,7 +311,11 @@ export function ManagementPage({
           <div className="panel-header">
             <div>
               <h2>{entityName} Records</h2>
-              <p>Click a row to open it. Sort by any column, filter, or export to CSV.</p>
+              <p>
+                {readOnly
+                  ? "Read-only. Sort by any column, filter, or export to CSV."
+                  : "Click a row to open it. Sort by any column, filter, or export to CSV."}
+              </p>
             </div>
             <Status label={loading ? "Loading" : `${filteredRows.length}${filteredRows.length !== rows.length ? ` of ${rows.length}` : ""} records`} />
           </div>
@@ -362,12 +400,16 @@ export function ManagementPage({
                     {columns.map((column) => (
                       <td key={column.key}>{renderCell(row[column.key])}</td>
                     ))}
-                    <td><Status label={row.status ?? "Active"} /></td>
+                    {hasStatus ? <td><Status label={row.status ?? "Active"} /></td> : null}
                     <td>
                       <div className="row-actions">
                         <Link href={detailHref(row.id)} title="View details"><Eye size={16} /></Link>
-                        <Link href={`/manage/form?resource=${encodeURIComponent(resource)}&id=${encodeURIComponent(row.id)}`} title="Edit"><Edit3 size={16} /></Link>
-                        <button onClick={() => askDelete(row)} title="Delete" type="button"><Trash2 size={16} /></button>
+                        {readOnly ? null : (
+                          <>
+                            <Link href={`/manage/form?resource=${encodeURIComponent(resource)}&id=${encodeURIComponent(row.id)}`} title="Edit"><Edit3 size={16} /></Link>
+                            <button onClick={() => askDelete(row)} title="Delete" type="button"><Trash2 size={16} /></button>
+                          </>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -395,7 +437,11 @@ export function ManagementPage({
                       ) : (
                         <>
                           <strong>No records yet.</strong>
-                          <span>Use “Create {entityName}” to add the first one.</span>
+                          <span>
+                            {readOnly
+                              ? "Nothing has been recorded here yet."
+                              : `Use “Create ${entityName}” to add the first one.`}
+                          </span>
                         </>
                       )}
                     </td>

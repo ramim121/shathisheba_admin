@@ -152,6 +152,7 @@ const groups: NavGroup[] = [
       { label: "Geo filters", href: "/settings" },
       { label: "Platform switches", href: "/settings/switches" },
       { label: "Admin users", href: "/admin-users" },
+      { label: "Audit trail", href: "/settings/audit" },
       { label: "API viewer", href: "/api-viewer" }
     ]
   }

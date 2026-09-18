@@ -140,6 +140,10 @@ const configs: Record<string, ResourceConfig> = {
         title_en AS title,
         CONCAT(COALESCE(district, 'All districts'), IFNULL(CONCAT(' / ', upazila), '')) AS area,
         update_type AS type,
+        CONCAT(
+          COALESCE(DATE_FORMAT(starts_at, '%d %b'), 'now'), ' → ',
+          COALESCE(DATE_FORMAT(ends_at, '%d %b %Y'), 'open ended')
+        ) AS live_window,
         status
       FROM market_updates
       ORDER BY sort_order, created_at DESC
@@ -164,14 +168,37 @@ const configs: Record<string, ResourceConfig> = {
   },
   "geo/divisions": {
     table: "geo_divisions",
-    listSql: "SELECT CAST(id AS CHAR) AS id, name_en AS name, name_bn AS bangla, sort_order FROM geo_divisions ORDER BY sort_order, name_en",
+    listSql: `
+      SELECT
+        CAST(v.id AS CHAR) AS id,
+        v.name_en AS name,
+        v.name_bn AS bangla,
+        v.sort_order,
+        COUNT(DISTINCT d.id) AS districts,
+        COUNT(DISTINCT z.id) AS upazilas
+      FROM geo_divisions v
+      LEFT JOIN geo_districts d ON d.division_id = v.id
+      LEFT JOIN geo_upazilas z ON z.district_id = d.id
+      GROUP BY v.id
+      ORDER BY v.sort_order, v.name_en`,
     allowedInsert: ["id", "name_en", "name_bn", "sort_order"],
     allowedUpdate: ["name_en", "name_bn", "sort_order"],
     defaults: { name_en: "New division" }
   },
   "geo/districts": {
     table: "geo_districts",
-    listSql: "SELECT CAST(d.id AS CHAR) AS id, d.name_en AS name, d.name_bn AS bangla, v.name_en AS division FROM geo_districts d JOIN geo_divisions v ON v.id = d.division_id ORDER BY v.name_en, d.name_en",
+    listSql: `
+      SELECT
+        CAST(d.id AS CHAR) AS id,
+        d.name_en AS name,
+        d.name_bn AS bangla,
+        v.name_en AS division,
+        COUNT(z.id) AS upazilas
+      FROM geo_districts d
+      JOIN geo_divisions v ON v.id = d.division_id
+      LEFT JOIN geo_upazilas z ON z.district_id = d.id
+      GROUP BY d.id
+      ORDER BY v.name_en, d.name_en`,
     allowedInsert: ["id", "division_id", "name_en", "name_bn"],
     allowedUpdate: ["division_id", "name_en", "name_bn"],
     defaults: { name_en: "New district", division_id: 1 }
@@ -192,6 +219,12 @@ const configs: Record<string, ResourceConfig> = {
         u.full_name AS farmer,
         CONCAT_WS(' / ', NULLIF(sc.name_en, ''), NULLIF(si.name_en, ''), NULLIF(b.name_en, '')) AS item,
         CONCAT('৳', COALESCE(l.farmer_expected_price, 0), ' · ৳', COALESCE(l.estimated_earning, 0)) AS price,
+        CONCAT(
+          COALESCE(l.verified_weight_kg, l.weight_kg, 0), ' kg',
+          IF(l.verified_weight_kg IS NULL, ' declared', ' verified')
+        ) AS weight,
+        CONCAT_WS(' / ', NULLIF(l.district, ''), NULLIF(l.upazila, '')) AS area,
+        DATE_FORMAT(l.created_at, '%d %b %Y') AS listed,
         l.status
       FROM sale_listings l
       JOIN app_users u ON u.id = l.user_id
@@ -451,6 +484,7 @@ const configs: Record<string, ResourceConfig> = {
         REPLACE(v.reason, '_', ' ') AS reason,
         COALESCE(so.order_code, '—') AS from_order,
         COALESCE(ro.order_code, '—') AS used_on,
+        COALESCE(DATE_FORMAT(v.expires_at, '%d %b %Y'), 'No expiry') AS expires,
         v.status
       FROM user_vouchers v
       JOIN app_users u ON u.id = v.user_id
@@ -525,6 +559,9 @@ const configs: Record<string, ResourceConfig> = {
           ELSE CONCAT(MIN(p.name_en), ' +', COUNT(oi.id) - 1, ' more')
         END AS product,
         CONCAT('৳', o.payable_amount) AS amount,
+        CONCAT(o.payment_status, ' · ', REPLACE(o.payment_method, '_', ' ')) AS payment,
+        CONCAT_WS(' / ', NULLIF(o.district, ''), NULLIF(o.upazila, '')) AS area,
+        DATE_FORMAT(o.created_at, '%d %b %Y') AS placed,
         o.fulfillment_status AS status
       FROM orders o
       JOIN app_users u ON u.id = o.user_id
@@ -572,12 +609,18 @@ const configs: Record<string, ResourceConfig> = {
         CAST(m.id AS CHAR) AS id,
         m.title_en AS title,
         c.name_en AS category,
-        CONCAT(COUNT(lc.id), ' contents') AS contents,
-        '0%' AS completion,
+        m.level,
+        CONCAT(COUNT(DISTINCT lc.id), ' contents') AS contents,
+        COUNT(DISTINCT ulp.user_id) AS learners,
+        CONCAT(
+          COALESCE(ROUND(100 * SUM(ulp.status = 'completed') / NULLIF(COUNT(ulp.learning_content_id), 0)), 0),
+          '%'
+        ) AS completion,
         m.status
       FROM learning_modules m
       JOIN learning_categories c ON c.id = m.learning_category_id
       LEFT JOIN learning_contents lc ON lc.learning_module_id = m.id
+      LEFT JOIN user_learning_progress ulp ON ulp.learning_content_id = lc.id
       GROUP BY m.id
       ORDER BY m.sort_order, m.id
     `,
@@ -618,8 +661,14 @@ const configs: Record<string, ResourceConfig> = {
         CAST(p.id AS CHAR) AS id,
         p.name_en AS name,
         p.lender_name AS lender,
-        CONCAT(COUNT(a.id), '/', p.capacity) AS enrollment,
-        '0%' AS progress,
+        CONCAT(COUNT(a.id), '/', COALESCE(NULLIF(p.capacity, 0), COUNT(a.id))) AS enrollment,
+        CONCAT(
+          COALESCE(SUM(a.status = 'approved'), 0), ' approved · ',
+          ROUND(100 * COALESCE(SUM(a.status = 'approved'), 0) / GREATEST(COALESCE(NULLIF(p.capacity, 0), COUNT(a.id)), 1)),
+          '%'
+        ) AS progress,
+        CONCAT('৳', FORMAT(COALESCE(p.investment_amount, 0), 0)) AS investment,
+        CONCAT_WS(' / ', NULLIF(p.division, ''), NULLIF(p.district, '')) AS area,
         p.status
       FROM partner_projects p
       LEFT JOIN partner_applications a ON a.partner_project_id = p.id
@@ -638,11 +687,15 @@ const configs: Record<string, ResourceConfig> = {
         a.application_code AS code,
         CONCAT(COALESCE(a.full_name_per_nid, u.full_name), ' · ', COALESCE(a.nid_number, 'NID pending')) AS name,
         p.name_en AS project,
-        a.current_step AS step,
+        REPLACE(a.current_step, '_', ' ') AS step,
+        COALESCE(o.name, 'Unassigned') AS officer,
+        IF(a.docs_verified_at IS NULL, 'Pending', 'Verified') AS documents,
+        DATE_FORMAT(a.updated_at, '%d %b %Y') AS updated,
         a.status
       FROM partner_applications a
       JOIN app_users u ON u.id = a.user_id
       JOIN partner_projects p ON p.id = a.partner_project_id
+      LEFT JOIN admin_users o ON o.id = a.assigned_officer_id
       ORDER BY a.updated_at DESC
     `,
     allowedInsert: ["application_code", "user_id", "partner_project_id", "current_step", "full_name_per_nid", "nid_number", "total_land_decimals", "livestock_count", "primary_income_source", "annual_household_income", "mobile_banking_provider", "banking_json", "farm_assessment_json", "verification_notes", "status", "assigned_officer_id", "field_visit_date", "field_visit_note", "docs_verified_at", "contract_started_at", "progress_note"],
@@ -991,11 +1044,25 @@ const configs: Record<string, ResourceConfig> = {
   // registry. Exposing them implied working features that did not exist. The
   // tables are left in place; restoring an endpoint is a few lines here once a
   // real writer exists behind it.
-  "audit/logs": simpleConfig(
-    "audit_logs",
-    ["actor_admin_id", "action", "entity_type", "entity_id", "before_json", "after_json", "ip_address", "user_agent"],
-    { action: "manual", entity_type: "system" }
-  ),
+  // Append-only: the console reads this, and only the server writes to it.
+  "audit/logs": {
+    table: "audit_logs",
+    listSql: `
+      SELECT
+        CAST(l.id AS CHAR) AS id,
+        DATE_FORMAT(l.created_at, '%d %b %Y, %H:%i') AS at,
+        COALESCE(a.name, IF(l.actor_admin_id IS NULL, 'System', CONCAT('Admin #', l.actor_admin_id))) AS actor,
+        COALESCE(a.role, '—') AS role,
+        REPLACE(REPLACE(l.action, '_', ' '), '.', ' · ') AS action,
+        CONCAT(REPLACE(l.entity_type, '_', ' '), IF(l.entity_id IS NULL, '', CONCAT(' #', l.entity_id))) AS entity,
+        COALESCE(NULLIF(l.ip_address, ''), '—') AS ip,
+        IF(l.before_json IS NULL AND l.after_json IS NULL, 'No payload', 'Recorded') AS payload
+      FROM audit_logs l
+      LEFT JOIN admin_users a ON a.id = l.actor_admin_id
+      ORDER BY l.id DESC`,
+    allowedInsert: [],
+    allowedUpdate: []
+  },
   users: {
     table: "app_users",
     listSql: `
@@ -1005,6 +1072,9 @@ const configs: Record<string, ResourceConfig> = {
         u.phone,
         CONCAT_WS(' / ', NULLIF(u.district, ''), NULLIF(u.upazila, '')) AS location,
         COALESCE(GROUP_CONCAT(r.role ORDER BY r.role SEPARATOR ', '), 'shathisheba_buyer') AS roles,
+        IF(u.is_kyc_verified = 1, 'Verified', 'Not verified') AS kyc,
+        DATE_FORMAT(u.created_at, '%d %b %Y') AS joined,
+        u.learning_points AS points,
         u.status
       FROM app_users u
       LEFT JOIN app_user_roles r ON r.user_id = u.id
@@ -1061,7 +1131,9 @@ const configs: Record<string, ResourceConfig> = {
     table: "app_user_kyc_documents",
     listSql: `
       SELECT CAST(k.id AS CHAR) AS id, CAST(k.user_id AS CHAR) AS user_id,
-             u.full_name AS user, k.doc_type, k.document_url, k.status, k.created_at
+             u.full_name AS user, REPLACE(k.doc_type, '_', ' ') AS doc_type, k.document_url, k.status,
+             COALESCE(NULLIF(k.note, ''), '—') AS note,
+             DATE_FORMAT(k.created_at, '%d %b %Y') AS submitted, k.created_at
       FROM app_user_kyc_documents k JOIN app_users u ON u.id = k.user_id
       ORDER BY k.created_at DESC, k.id DESC
     `,
@@ -1130,6 +1202,13 @@ const configs: Record<string, ResourceConfig> = {
         l.listing_code AS listing,
         CONCAT(COALESCE(pc.actual_weight_kg, 0), ' kg') AS weight,
         CONCAT('৳', COALESCE(pc.final_amount, 0)) AS amount,
+        COALESCE(DATE_FORMAT(pc.confirmed_at, '%d %b %Y, %H:%i'), '—') AS confirmed,
+        CASE
+          WHEN pc.confirmed_at IS NOT NULL THEN 'Used'
+          WHEN pc.otp_expires_at IS NULL THEN 'No OTP'
+          WHEN pc.otp_expires_at < NOW() THEN 'Expired'
+          ELSE CONCAT('Valid until ', DATE_FORMAT(pc.otp_expires_at, '%H:%i'))
+        END AS otp,
         pc.status
       FROM payment_confirmations pc
       JOIN sale_listings l ON l.id = pc.sale_listing_id

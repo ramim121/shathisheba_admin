@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState, type DragEvent } from "react";
 import Link from "next/link";
 import { ArrowDown, ArrowUp, Edit3, GripVertical, ImageIcon, Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { AdminShell } from "@/components/AdminShell";
+import { DeleteDialog } from "@/components/DeleteDialog";
 
 type Partner = {
   id: string;
@@ -53,6 +54,7 @@ export function PartnerStripManager() {
   const [message, setMessage] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<Partner | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -134,21 +136,10 @@ export function PartnerStripManager() {
     }
   }
 
-  async function remove(partner: Partner) {
-    if (!window.confirm(`Delete “${partner.name}” from the home strip? This cannot be undone.`)) return;
-    setBusy(`delete:${partner.id}`);
-    setMessage(null);
-    try {
-      const r = await fetch(`/api/v1/home/partners?id=${encodeURIComponent(partner.id)}`, { method: "DELETE" });
-      const j = await r.json();
-      if (!r.ok || !j.ok) throw new Error(j.message ?? "Delete failed.");
-      setPartners((list) => list.filter((p) => p.id !== partner.id));
-      setMessage({ tone: "ok", text: `${partner.name} deleted.` });
-    } catch (error) {
-      setMessage({ tone: "error", text: error instanceof Error ? error.message : "Delete failed." });
-    } finally {
-      setBusy("");
-    }
+  function afterDelete(partner: Partner) {
+    setPendingDelete(null);
+    setPartners((list) => list.filter((p) => p.id !== partner.id));
+    setMessage({ tone: "ok", text: `${partner.name} deleted.` });
   }
 
   const visible = partners.filter((p) => p.active);
@@ -266,12 +257,24 @@ export function PartnerStripManager() {
                 <button type="button" title="Move up" aria-label="Move up" disabled={index === 0 || busy !== ""} onClick={() => move(index, -1)}><ArrowUp size={15} /></button>
                 <button type="button" title="Move down" aria-label="Move down" disabled={index === partners.length - 1 || busy !== ""} onClick={() => move(index, 1)}><ArrowDown size={15} /></button>
                 <Link href={`${FORM_HREF}&id=${encodeURIComponent(partner.id)}`} title="Edit" aria-label={`Edit ${partner.name}`}><Edit3 size={15} /></Link>
-                <button type="button" className="danger" title="Delete" aria-label={`Delete ${partner.name}`} disabled={busy !== ""} onClick={() => void remove(partner)}><Trash2 size={15} /></button>
+                <button type="button" className="danger" title="Delete" aria-label={`Delete ${partner.name}`} disabled={busy !== ""} onClick={() => setPendingDelete(partner)}><Trash2 size={15} /></button>
               </div>
             </li>
           ))}
         </ol>
       </section>
+
+      {pendingDelete ? (
+        <DeleteDialog
+          resource="home/partners"
+          endpoint="/api/v1/home/partners"
+          entityName="Home partner"
+          id={pendingDelete.id}
+          fallbackTitle={pendingDelete.name}
+          onCancel={() => setPendingDelete(null)}
+          onDeleted={() => afterDelete(pendingDelete)}
+        />
+      ) : null}
     </AdminShell>
   );
 }

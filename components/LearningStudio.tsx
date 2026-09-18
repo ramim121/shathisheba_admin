@@ -5,6 +5,7 @@ import { FileText, Plus, RefreshCw, Save, Trash2, Video, X } from "lucide-react"
 import { AdminShell } from "@/components/AdminShell";
 import { Status } from "@/components/Status";
 import { MarkdownEditor } from "@/components/MarkdownEditor";
+import { DeleteDialog } from "@/components/DeleteDialog";
 
 type ModuleRow = { id: string; title: string; category: string; status: string };
 type ContentRow = {
@@ -39,6 +40,7 @@ export function LearningStudio() {
   const [contents, setContents] = useState<ContentRow[]>([]);
   const [moduleId, setModuleId] = useState<string>("");
   const [draft, setDraft] = useState<Draft | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<{ id: string; title: string } | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -125,16 +127,10 @@ export function LearningStudio() {
     }
   }
 
-  async function remove(id: string) {
-    setMessage("");
-    try {
-      const res = await fetch(`/api/v1/learning/contents?id=${id}`, { method: "DELETE" });
-      const json = await res.json();
-      if (!res.ok || !json.ok) throw new Error(json.message ?? "Delete failed.");
-      await load();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Delete failed.");
-    }
+  async function afterDelete() {
+    setPendingDelete(null);
+    setMessage("Content deleted.");
+    await load();
   }
 
   function setQ(i: number, patch: Partial<Question>) {
@@ -186,7 +182,7 @@ export function LearningStudio() {
                     <td>
                       <div className="row-actions">
                         <button onClick={() => editContent(c)} title="Edit" type="button"><FileText size={15} /></button>
-                        <button onClick={() => void remove(c.id)} title="Delete" type="button"><Trash2 size={15} /></button>
+                        <button onClick={() => setPendingDelete({ id: c.id, title: c.title_en })} title="Delete" type="button"><Trash2 size={15} /></button>
                       </div>
                     </td>
                   </tr>
@@ -266,6 +262,17 @@ export function LearningStudio() {
           </div>
         ) : null}
       </section>
+      {pendingDelete ? (
+        <DeleteDialog
+          resource="learning/contents"
+          endpoint="/api/v1/learning/contents"
+          entityName="Learning content"
+          id={pendingDelete.id}
+          fallbackTitle={pendingDelete.title}
+          onCancel={() => setPendingDelete(null)}
+          onDeleted={() => void afterDelete()}
+        />
+      ) : null}
     </AdminShell>
   );
 }

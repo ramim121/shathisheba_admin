@@ -17,7 +17,7 @@
 
 .dashboard-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1.45fr) minmax(340px, 0.75fr);
+  grid-template-columns: minmax(0, 1.45fr) minmax(360px, 0.85fr);
   gap: var(--s3);
   align-items: start;
 }
@@ -26,6 +26,19 @@
   display: grid;
   gap: var(--s3);
   align-content: start;
+  min-width: 0;
+}
+
+/* The record-detail rail holds JSON blocks and related-record tables that are
+   naturally wider than 340px; they scroll inside the panel. */
+.dashboard-layout aside .panel {
+  overflow: hidden auto;
+}
+
+.dashboard-layout aside .related-block,
+.dashboard-layout aside .json-box {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .crud-layout {
@@ -651,6 +664,16 @@
   padding: var(--s2) var(--s4) var(--s4);
 }
 
+.related-block table {
+  min-width: 0;
+}
+
+.related-block .table-wrap {
+  max-height: 320px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+}
+
 .related-title {
   display: flex;
   align-items: center;
@@ -856,3 +879,76 @@
 .meter-fill.full { background: var(--ok-solid); }
 .meter-fill.part { background: var(--warn-solid); }
 .meter-fill.low { background: var(--bad-solid); }
+
+/* --- record detail: grouped fields, headline numbers, attention notes ---- */
+
+.detail-metrics {
+  margin-bottom: var(--s4);
+}
+
+.detail-alerts {
+  display: grid;
+  gap: 6px;
+  margin-bottom: var(--s4);
+}
+
+/* What someone has to act on: a manual review flag, a rejection reason, a
+   count of reports. Above the grid, not buried in row 31 of it. */
+.detail-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 0;
+  padding: 10px var(--s4);
+  border: 1px solid;
+  border-radius: var(--r-md);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+}
+
+.detail-alert svg {
+  flex: none;
+  margin-top: 1px;
+}
+
+.detail-alert.is-bad {
+  border-color: var(--bad-line);
+  background: var(--bad-bg);
+  color: var(--bad-fg);
+}
+
+.detail-alert.is-warn {
+  border-color: var(--warn-line);
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+}
+
+.def-section {
+  padding-top: var(--s3);
+}
+
+.def-section + .def-section {
+  border-top: 1px solid var(--line);
+}
+
+.def-section-title {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  margin: 0;
+  padding: 0 var(--s4);
+  color: var(--ink-500);
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-bold);
+  text-transform: uppercase;
+  letter-spacing: var(--track-caps);
+}
+
+.def-section-count {
+  padding: 0 6px;
+  border-radius: var(--r-pill);
+  background: var(--surface-sunken);
+  color: var(--ink-400);
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-semibold);
+}

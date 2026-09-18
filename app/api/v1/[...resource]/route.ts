@@ -179,7 +179,7 @@ import { notifyListing } from "@/lib/notices";
 import { assertCanPost, postListingMilestone, postsLeftToday, shareListingToCommunity } from "@/lib/community-posts";
 import { getAppMarketOverview, getAppPartners, reorderPartners } from "@/lib/endpoints/engagement";
 import { getDashboardOverview } from "@/lib/endpoints/dashboard";
-import { getDeleteImpact } from "@/lib/endpoints/delete-impact";
+import { getDeleteImpact, getDeleteImpactRows, clearDeleteBlockers } from "@/lib/endpoints/delete-impact";
 
 // App-facing list reads. The mobile app hits these generic resource paths and
 // needs raw bilingual/detail columns; the admin panel reads lib/db-resources
@@ -245,6 +245,8 @@ const appReadHandlers: Record<string, AppReadHandler> = {
   // `target`/`target_id`, not `resource`/`id`: a bare ?id= means "one record"
   // to the generic resolver and would never reach this handler.
   "admin/delete-impact": (q) => getDeleteImpact(q.get("target"), q.get("target_id")),
+  // The dependent rows behind one relation, for the modal's "View" disclosure.
+  "admin/delete-impact/rows": (q) => getDeleteImpactRows(q.get("target"), q.get("target_id"), q.get("relation")),
   "admin/notifications/audience": (q) =>
     audienceSummary(q.get("target") ?? "all", (q.get("roles") ?? "").split(",").filter(Boolean), (q.get("user_ids") ?? "").split(",").filter(Boolean)),
   // Catalogue sticker: is the first-purchase offer still this buyer's.
@@ -1113,17 +1115,33 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 export async function DELETE(request: NextRequest, { params }: Params) {
   const context = await resolveResourceContext(params, request);
   const resource = context.resource;
-  const { deny } = await guard(request, resource, "DELETE");
+  const { deny, caller } = await guard(request, resource, "DELETE");
   if (deny) return deny;
   const payload = await request.json().catch(() => ({}));
   const id = context.id ?? String((payload as Record<string, unknown>).id ?? "");
+  // The console asks for this only after showing the admin the blocking rows
+  // and having them tick a box; the rows cleared are the ones the FK graph
+  // reports as blocking, never a table named in the request.
+  const cascade = request.nextUrl.searchParams.get("cascade") === "1";
   if (hasDbResource(resource)) {
     if (!id) {
       return NextResponse.json({ ok: false, message: "Missing id for delete." }, { status: 400 });
     }
     try {
+      const cleared = cascade ? await clearDeleteBlockers(resource, id) : [];
       const result = await deleteResource(resource, id);
-      return NextResponse.json({ ok: true, source: "mysql", action: "deleted", resource, id, result });
+      if (caller?.kind === "admin") {
+        await recordAudit({
+          actorAdminId: caller.admin.id,
+          action: cascade ? "record_deleted_cascade" : "record_deleted",
+          entityType: resource,
+          entityId: id,
+          before: cascade ? { cleared } : undefined,
+          ip: clientIp(request),
+          userAgent: request.headers.get("user-agent")
+        });
+      }
+      return NextResponse.json({ ok: true, source: "mysql", action: "deleted", resource, id, result, cleared });
     } catch (error) {
       return dbError(error);
     }

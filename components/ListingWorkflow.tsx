@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { Status } from "@/components/Status";
 import { Select } from "@/components/Select";
+import { DeleteDialog } from "@/components/DeleteDialog";
 import "./listing-workflow.css";
 
 /**
@@ -196,6 +197,7 @@ export function ListingWorkflow({ listingId }: { listingId: string }) {
   const [vaxDoc, setVaxDoc] = useState("");
   const [vaxKey, setVaxKey] = useState(0);
   const [modal, setModal] = useState<"" | "cancel" | "reject">("");
+  const [pendingDose, setPendingDose] = useState<{ id: string; name: string } | null>(null);
   const [reason, setReason] = useState("");
 
   const adopt = useCallback((next: Workflow) => {
@@ -558,7 +560,7 @@ export function ListingWorkflow({ listingId }: { listingId: string }) {
                         type="button"
                         className="lw-mini bad"
                         disabled={busy === "vaccination"}
-                        onClick={() => { if (window.confirm(`Delete the ${s(row.vaccine_name)} dose?`)) void act("vaccination", "delete_vaccination", { id: row.id }, "Dose deleted."); }}
+                        onClick={() => setPendingDose({ id: String(row.id), name: s(row.vaccine_name) })}
                       ><Trash2 size={13} /></button>
                     </div>
                   </div>
@@ -929,6 +931,23 @@ export function ListingWorkflow({ listingId }: { listingId: string }) {
             </div>
           </div>
         </div>
+      ) : null}
+
+      {/* A dose is a row inside the listing, not a resource of its own, so the
+          dialog confirms and hands the work back through onConfirm. */}
+      {pendingDose ? (
+        <DeleteDialog
+          resource="sale/listings"
+          endpoint=""
+          entityName="Vaccination dose"
+          id={pendingDose.id}
+          fallbackTitle={`${pendingDose.name} dose`}
+          heading="Delete this vaccination dose?"
+          description="The dose is removed from this listing's vaccination record. Nothing else on the listing changes."
+          onCancel={() => setPendingDose(null)}
+          onConfirm={async () => { await act("vaccination", "delete_vaccination", { id: pendingDose.id }, "Dose deleted."); }}
+          onDeleted={() => setPendingDose(null)}
+        />
       ) : null}
     </>
   );

@@ -6,7 +6,9 @@ import { invalidateVocabulary } from "@/lib/apa/vocabulary";
 import { setEntitlementGrant } from "@/lib/apa/entitlement";
 import { MODEL_PRICES, speechCostPerMinute } from "@/lib/apa/quota";
 import { jsonArray } from "@/lib/endpoints/apa";
-import { FREE_RPD, forgetSpentModels, modelCallsToday, modelCallsTrend, spentModels } from "@/lib/apa/models";
+import {
+  FREE_LIMITS, coolingModels, forgetSpentModels, modelCallsToday, modelCallsTrend, spentModels
+} from "@/lib/apa/models";
 import { cacheStats, pruneAnswerCache } from "@/lib/apa/cache";
 import { prewarmAnswer } from "@/lib/apa/prewarm";
 
@@ -817,23 +819,29 @@ export async function reviewApaFeedback(payload: Row, adminId: number) {
    --------------------------------------------------------------------------- */
 
 /**
- * How many calls went to each model today, and how much of its daily allowance
- * that is likely to be.
+ * How many calls went to each model today, against both of its limits.
  *
- * This page exists because the free tier caps requests **per model per project
- * per day** — measured: `gemini-3.6-flash` reports `quotaValue: 20` — so
- * "how many calls have we made" is only a meaningful question per model. The
- * old Usage page could not answer it at all, and the first sign of trouble was
- * a farmer being told the assistant was busy.
+ * This page exists because of two properties of the free tier that nothing else
+ * in the console could show. The first is that the caps are **per model, per
+ * project** — so "how many calls have we made" is only meaningful per model,
+ * which the Usage page could not answer.
  *
- * The allowances below are observed, not published: Google's rate-limit page
- * now defers to AI Studio, so `KNOWN_FREE_RPD` holds what this project's own
- * 429s reported and `observed` marks which of them we have actually seen. A
- * figure nobody has confirmed is shown as unknown rather than guessed at.
+ * The second is that there are **two** caps, per minute and per day, and
+ * Google's 429 does not reliably say which one fired: the same metric name
+ * carries both, and both come back with a retry delay in seconds. Reading a
+ * per-minute limit as a daily cap is how this console came to report
+ * "gemini-3.5-flash-lite: 15 a day, 13 remaining" for a model that allows
+ * fifteen a minute and fifteen hundred a day. Every allowance is now shown with
+ * its source — observed, published, or assumed — so a figure nobody has
+ * verified cannot be mistaken for one that has been.
+ *
+ * The chains are here too, because on this tier the chain is what keeps the
+ * service up: when one model is rate limited the next has its own allowance,
+ * and a chain quietly running on its last entry is the warning that matters.
  */
-// The allowances themselves live in lib/apa/models.ts, beside the runner that
-// trips over them and the fair-share guard that rations what is left.
-const KNOWN_FREE_RPD = FREE_RPD;
+// The allowances live in lib/apa/models.ts, beside the runner that trips over
+// them and the fair-share guard that rations what is left.
+const LIMITS = FREE_LIMITS;
 
 export async function getApaQuota() {
   const cfg = await apaConfig();
@@ -913,7 +921,7 @@ export async function getApaQuota() {
   const models = Array.from(byModel.values())
     .map((row): Row => {
       const model = String(row.model);
-      const known = KNOWN_FREE_RPD[model];
+      const known = LIMITS[model];
       const used = Number(row.calls);
       return {
         ...row,
@@ -923,9 +931,17 @@ export async function getApaQuota() {
         // First in a chain is the one we want; the rest are the safety net.
         is_primary: Object.values(cfg.models).some((chain) => (chain as string[])[0] === model),
         free_rpd: known?.rpd ?? null,
-        free_rpd_observed: known?.observed ?? false,
-        remaining: known ? Math.max(0, known.rpd - used) : null,
-        used_pct: known ? Math.min(100, Math.round((used / known.rpd) * 100)) : null,
+        free_rpm: known?.rpm ?? null,
+        // "observed", "published" or "assumed" — never presented as fact when
+        // it is not. The old boolean could not express "Google says so but we
+        // have not checked", which was most of the table.
+        limit_source: known?.source ?? "assumed",
+        free_rpd_observed: known?.source === "observed",
+        remaining: typeof known?.rpd === "number" && known.rpd > 0 ? Math.max(0, known.rpd - used) : null,
+        used_pct:
+          typeof known?.rpd === "number" && known.rpd > 0
+            ? Math.min(100, Math.round((used / known.rpd) * 100))
+            : null,
         exhausted: spent.has(model) || Number(row.quota_errors) > 0
       };
     })
@@ -965,7 +981,11 @@ export async function getApaQuota() {
     },
     trend,
     cache,
-    exhausted: Array.from(spent)
+    exhausted: Array.from(spent),
+    // Models rate limited for the next few seconds. Distinct from `exhausted`,
+    // which means the daily cap: one clears itself in under a minute and the
+    // other does not clear until midnight Pacific.
+    cooling: coolingModels()
   };
 }
 

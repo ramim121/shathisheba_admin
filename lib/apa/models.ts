@@ -81,48 +81,126 @@ export type FailureKind = "daily_quota" | "minute_quota" | "transient" | "fatal"
  * the page that displays it, and the fair-share guard that rations the last of
  * the day's allowance.
  */
-export const FREE_RPD: Record<string, { rpd: number; observed: boolean }> = {
-  // --- observed: this project has seen a 429 quoting the figure -------------
-  //
-  // Read this table before choosing a primary model. The quality ranking and
-  // the allowance ranking are close to inverted, which is the single most
-  // important fact about serving farmers on this tier.
-  //
-  // gemini-3.5-flash-lite is the best model measured (11/11 on the capability
-  // battery, 6/6 on restraint, ~1.4s) and allows **fifteen requests a day**.
-  // gemini-3.1-flash-lite is measurably worse (9/11, 5/6, ~3.2s) and is the
-  // only model here that can carry real volume. Neither is "the right choice";
-  // the chain is, in that order — the first fifteen questions of the day get
-  // the better answer and everything after falls through to the one that can
-  // actually serve it.
-  "gemini-3.5-flash-lite": { rpd: 15, observed: true },
-  "gemini-2.5-flash": { rpd: 20, observed: true },
-  "gemini-3.6-flash": { rpd: 20, observed: true },
-
-  // --- assumed: no 429 seen yet --------------------------------------------
-  //
-  // gemini-3.1-flash-lite served more than forty requests in a day without
-  // complaint, so its ceiling is at least that and the figure below is a
-  // placeholder rather than a measurement. It is the model the service
-  // actually runs on, so its real allowance is the most valuable unknown left
-  // on this list.
-  "gemini-3.1-flash-lite": { rpd: 1000, observed: false },
-  "gemini-3.5-flash": { rpd: 20, observed: false },
-  "gemini-3.8-flash": { rpd: 20, observed: false },
-  "gemini-3.7-flash": { rpd: 20, observed: false },
-  "gemini-3.5-transcribe": { rpd: 100, observed: false },
-  "gemini-2.5-flash-preview-tts": { rpd: 100, observed: false },
-  "gemini-3.1-flash-tts-preview": { rpd: 100, observed: false },
-  "gemma-4-31b-it": { rpd: 14400, observed: false },
-
-  // --- retired --------------------------------------------------------------
-  // 404 for new projects since 2026; Google names 3.5-flash-lite instead.
-  "gemini-2.5-flash-lite": { rpd: 0, observed: true }
+export type Allowance = {
+  /** Requests per minute. */
+  rpm: number | null;
+  /** Requests per day. */
+  rpd: number | null;
+  /** How each figure was arrived at, shown in the console. */
+  source: "observed" | "published" | "assumed";
 };
 
-export function freeRpd(model: string): { rpd: number; observed: boolean } | null {
-  return FREE_RPD[model] ?? null;
+/**
+ * What each model's free tier allows — per minute **and** per day.
+ *
+ * ## Read this before trusting a 429
+ *
+ * Google's quota payload cannot be taken at face value, and reading it wrongly
+ * cost this project a day of bad conclusions. The same metric name carries both
+ * limits:
+ *
+ *     quotaMetric: generativelanguage.googleapis.com/generate_content_free_tier_requests
+ *
+ * and the id that distinguishes them is not always the one you expect:
+ *
+ *     GenerateRequestsPerMinutePerProjectPerModel-FreeTier   limit 15, retry 26s
+ *     GenerateRequestsPerDayPerProjectPerModel-FreeTier      limit 20, retry 18s
+ *
+ * Both arrive as HTTP 429 with a retry delay in seconds. Reading the first as a
+ * daily cap produced "gemini-3.5-flash-lite allows 15 requests a day", which is
+ * wrong by two orders of magnitude — it allows 15 a *minute* and 1,500 a day.
+ * Measured directly: 16 calls fired flat out gets a 429 quoting 15, and the
+ * same model then serves 25 more when they are paced 5 seconds apart.
+ *
+ * `classifyFailure` therefore discriminates on the **retry delay**, not on the
+ * quota name. See the note there.
+ *
+ * ## Which figures are real
+ *
+ *   * `observed`  — this project has seen a 429 quoting it, with the matching
+ *                   quotaId, and the behaviour is consistent with it.
+ *   * `published` — from Google's own free-tier table. Not verified here, and
+ *                   they change it without announcement.
+ *   * `assumed`   — neither. A planning number; the console says so.
+ *
+ * Measuring the daily figure costs a whole day's allowance for that model,
+ * which is why most of them are `published` rather than `observed`. The probe
+ * that does it is `Resources/apa-probes/limits.cjs --rpd`.
+ */
+export const FREE_LIMITS: Record<string, Allowance> = {
+  // 15 RPM observed (quotaId says PerMinute); 1,500 RPD is Google's figure and
+  // is consistent with 25 calls served in 2.3 minutes without a daily 429.
+  "gemini-3.5-flash-lite": { rpm: 15, rpd: 1500, source: "observed" },
+  // 15 RPM observed the same way; 1,000 RPD published. Served 40+ in a day.
+  "gemini-3.1-flash-lite": { rpm: 15, rpd: 1000, source: "observed" },
+
+  // These two 429 with a quotaId that genuinely says PerDay, at limit 20, after
+  // about that many calls in a day. Small daily caps on heavier models.
+  "gemini-2.5-flash": { rpm: null, rpd: 20, source: "observed" },
+  "gemini-3.6-flash": { rpm: null, rpd: 20, source: "observed" },
+
+  // Same family as 3.6; not separately observed. Both have answered 503 "high
+  // demand" more often than they have answered anything else.
+  "gemini-3.5-flash": { rpm: 10, rpd: 20, source: "assumed" },
+  "gemini-3.7-flash": { rpm: 10, rpd: 20, source: "assumed" },
+  "gemini-3.8-flash": { rpm: 10, rpd: 20, source: "assumed" },
+
+  // The specialised models. Neither dimension has been observed: both still had
+  // headroom after a day of use, and probing the daily figure would spend it.
+  // The text-to-speech allowance is the most valuable unmeasured number here,
+  // because spoken output is the largest line in the bill.
+  "gemini-3.5-transcribe": { rpm: null, rpd: null, source: "assumed" },
+  "gemini-2.5-flash-preview-tts": { rpm: null, rpd: null, source: "assumed" },
+  "gemini-3.1-flash-tts-preview": { rpm: null, rpd: null, source: "assumed" },
+
+  "gemma-4-31b-it": { rpm: 30, rpd: 14400, source: "assumed" },
+
+  // 404 for new projects since 2026; Google names 3.5-flash-lite instead.
+  "gemini-2.5-flash-lite": { rpm: 0, rpd: 0, source: "observed" }
+};
+
+export function freeLimits(model: string): Allowance | null {
+  return FREE_LIMITS[model] ?? null;
 }
+
+/**
+ * How many answering requests the project can still make today.
+ *
+ * Summed across the chain, because that is the point of the chain: each model
+ * has its own separate allowance. A model whose daily figure is unknown
+ * contributes nothing to the total rather than a guess, so this reads low
+ * rather than optimistically — which is the right direction for a number used
+ * to decide whether to start rationing.
+ */
+export async function dayHeadroom(chain: string[]): Promise<{
+  cap: number;
+  used: number;
+  left: number;
+  pct: number;
+  unknown: string[];
+}> {
+  const rows = await queryRows<Row>(
+    `SELECT model, calls FROM apa_model_calls WHERE for_day = ? AND model IN (${chain.map(() => "?").join(", ") || "''"})`,
+    [today(), ...chain]
+  );
+  const used = rows.reduce((sum, row) => sum + Number(row.calls ?? 0), 0);
+  let cap = 0;
+  const unknown: string[] = [];
+  for (const model of chain) {
+    const rpd = FREE_LIMITS[model]?.rpd;
+    if (typeof rpd === "number") cap += rpd;
+    else unknown.push(model);
+  }
+  return {
+    cap,
+    used,
+    left: Math.max(0, cap - used),
+    pct: cap ? Math.min(100, Math.round((used / cap) * 100)) : 0,
+    unknown
+  };
+}
+
+
 
 /**
  * Models that reject `thinkingConfig` outright.
@@ -179,34 +257,74 @@ export function thinkingFor(model: string): { thinkingConfig?: { thinkingBudget:
  * whose ceiling nobody has observed still counts — leaving it out would
  * understate the headroom and ration the service earlier than necessary.
  */
-export async function dayHeadroom(chain: string[]): Promise<{ cap: number; used: number; left: number; pct: number }> {
-  const rows = await queryRows<Row>(
-    `SELECT model, calls FROM apa_model_calls WHERE for_day = ? AND model IN (${chain.map(() => "?").join(", ") || "''"})`,
-    [today(), ...chain]
-  );
-  const used = rows.reduce((sum, row) => sum + Number(row.calls ?? 0), 0);
-  const cap = chain.reduce((sum, model) => sum + (FREE_RPD[model]?.rpd ?? 0), 0);
-  return {
-    cap,
-    used,
-    left: Math.max(0, cap - used),
-    pct: cap ? Math.min(100, Math.round((used / cap) * 100)) : 0
-  };
+
+
+/**
+ * How long Google says to wait, in seconds, if it said anything.
+ *
+ * This is the only reliable discriminator between a per-minute rate limit and
+ * a spent daily cap, and getting it wrong is expensive in both directions.
+ */
+export function retrySeconds(raw: string): number | null {
+  // "Please retry in 18.604534858s." — the message form.
+  const inline = raw.match(/retry in (\d+(?:\.\d+)?)s/i);
+  if (inline) return Number(inline[1]);
+  // "retryDelay":"18s" — the RetryInfo detail, when the caller stringified it.
+  const detail = raw.match(/retryDelay["'\s:]+(\d+(?:\.\d+)?)s/i);
+  if (detail) return Number(detail[1]);
+  return null;
 }
 
+/**
+ * What kind of failure this was, and therefore what to do about it.
+ *
+ * **Read the retry delay, not the quota name.** This function used to test the
+ * message for `PerDay` and `free_tier_requests` and return `daily_quota` on a
+ * match — which was wrong on both counts, because Google names the per-minute
+ * limit
+ *
+ *     quotaId:     GenerateRequestsPerDayPerProjectPerModel-FreeTier
+ *     quotaMetric: generativelanguage.googleapis.com/generate_content_free_tier_requests
+ *     quotaValue:  15
+ *     retryDelay:  18s
+ *
+ * The id says "PerDay", the metric says "free_tier_requests", and the thing
+ * clears in eighteen seconds. Measured: `gemini-3.5-flash-lite` 429s with
+ * `limit: 15` after fifteen calls in a minute, and then serves 25 more without
+ * complaint when the calls are spaced five seconds apart. Its real daily
+ * allowance is 1,500.
+ *
+ * The consequence of the old behaviour was not cosmetic: a per-minute limit
+ * classified as `daily_quota` made the runner mark the model spent for a whole
+ * hour, so a burst of traffic pushed every answer for the next hour onto a
+ * slower, worse fallback — and the console reported the primary as exhausted.
+ *
+ * So: a 429 with a short retry delay is a minute limit, and a 429 with a long
+ * one or none is a daily cap. Nothing else is trusted to tell them apart.
+ */
 export function classifyFailure(error: unknown): FailureKind {
   const raw = error instanceof Error ? error.message : String(error);
-  if (/PerDay|RequestsPerDay|per_day|free_tier_requests/i.test(raw)) return "daily_quota";
-  if (/\b429\b|RESOURCE_EXHAUSTED|exceeded your current quota|rate.?limit/i.test(raw)) {
-    // A 429 with no quotaId at all is safer treated as the daily kind: moving
-    // to the next model costs one request, retrying a spent cap costs the rest.
-    return /PerMinute|per_minute|retry in \d+(\.\d+)?s/i.test(raw) ? "minute_quota" : "daily_quota";
+  const rateLimited = /429|RESOURCE_EXHAUSTED|exceeded your current quota|rate.?limit/i.test(raw);
+
+  if (rateLimited) {
+    const wait = retrySeconds(raw);
+    // Anything Google expects to clear inside two minutes is a per-minute
+    // limit, whatever the quota is named.
+    if (wait !== null) return wait <= 120 ? "minute_quota" : "daily_quota";
+    // An explicit per-minute marker, for the shapes that carry one.
+    if (/PerMinute|per_minute|RequestsPerMinute/i.test(raw)) return "minute_quota";
+    // A 429 that says nothing about when to come back. Treated as the daily
+    // kind because moving to the next model costs one request, while retrying
+    // a genuinely spent cap costs every request left in the burst.
+    return "daily_quota";
   }
-  if (/\b(500|502|503|504)\b|UNAVAILABLE|overloaded|high demand|INTERNAL|timeout|abort|ECONNRESET|fetch failed/i.test(raw)) {
+
+  if (/(500|502|503|504)|UNAVAILABLE|overloaded|high demand|INTERNAL|timeout|abort|ECONNRESET|fetch failed/i.test(raw)) {
     return "transient";
   }
   return "fatal";
 }
+
 
 /* ---------------------------------------------------------------------------
    Remembering a spent model, so we stop asking
@@ -234,13 +352,64 @@ function markSpent(model: string) {
   spent.set(model, Date.now() + 60 * 60 * 1000);
 }
 
+/**
+ * Models that have just hit their **per-minute** limit.
+ *
+ * Kept apart from `spent` because the two need opposite responses and
+ * conflating them was a real bug: a per-minute limit was being classified as a
+ * daily cap, which benched the primary model for an hour over something that
+ * clears in eighteen seconds.
+ *
+ * A minute limit is a reason to use the next model *now*, not to wait — a
+ * farmer would rather have a good-enough answer in three seconds than a
+ * slightly better one in twenty. But it is still worth remembering for those
+ * few seconds, so that the requests arriving behind this one skip the model
+ * instead of each discovering the limit for themselves.
+ */
+const cooling = new Map<string, number>();
+
+function isCooling(model: string): boolean {
+  const until = cooling.get(model);
+  if (!until) return false;
+  if (Date.now() > until) {
+    cooling.delete(model);
+    return false;
+  }
+  return true;
+}
+
+/** Seconds until this model is worth trying again, or null if it is ready. */
+function coolingFor(model: string): number | null {
+  const until = cooling.get(model);
+  if (!until) return null;
+  const left = until - Date.now();
+  return left > 0 ? left : null;
+}
+
+function markCooling(model: string, advisedSeconds: number | null) {
+  // Google's own figure where it gave one, bounded so a malformed delay cannot
+  // park a model for minutes.
+  const ms = advisedSeconds === null
+    ? MINUTE_WAIT_MS
+    : Math.min(90_000, Math.max(1_000, Math.ceil(advisedSeconds * 1000) + 500));
+  cooling.set(model, Date.now() + ms);
+}
+
 /** Cleared by the console when a key is changed or billing is enabled. */
 export function forgetSpentModels() {
   spent.clear();
+  cooling.clear();
 }
 
 export function spentModels(): string[] {
   return Array.from(spent.keys()).filter(isSpent);
+}
+
+/** Models rate-limited for the next few seconds, for the console. */
+export function coolingModels(): Array<{ model: string; seconds: number }> {
+  return Array.from(cooling.keys())
+    .filter(isCooling)
+    .map((model) => ({ model, seconds: Math.ceil((coolingFor(model) ?? 0) / 1000) }));
 }
 
 /* ---------------------------------------------------------------------------
@@ -348,18 +517,16 @@ export async function runWithChain<T>(input: {
   const skipped: string[] = [];
   const started = Date.now();
   let lastError: unknown = new Error("no model in the chain was reachable");
+  // Models this attempt found rate-limited, so the last resort below knows
+  // waiting is worth trying rather than hopeless.
+  const limited: string[] = [];
 
-  for (const model of input.chain) {
-    if (isSpent(model)) {
-      skipped.push(`${model} (known spent)`);
-      continue;
-    }
-
+  const tryModel = async (model: string): Promise<{ done: true; value: T } | { done: false }> => {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
         const { value, usage } = await input.call(model);
         await record({ model, job: input.job, outcome: "ok", usage });
-        return { result: value, model, skipped, latencyMs: Date.now() - started };
+        return { done: true, value };
       } catch (error) {
         lastError = error;
         const kind = classifyFailure(error);
@@ -369,12 +536,18 @@ export async function runWithChain<T>(input: {
           markSpent(model);
           await record({ model, job: input.job, outcome: "daily_quota", error: message });
           skipped.push(`${model} (daily quota)`);
-          break; // next model, not another attempt at this one
+          return { done: false };
         }
-        if (kind === "minute_quota" && attempt === 0) {
+        if (kind === "minute_quota") {
+          // Do not wait here. The next model in the chain has its own
+          // per-minute allowance and will answer now; a farmer would rather
+          // have a good-enough answer in three seconds than a marginally
+          // better one in twenty.
+          markCooling(model, retrySeconds(message));
+          limited.push(model);
           await record({ model, job: input.job, outcome: "other", error: message });
-          await new Promise((r) => setTimeout(r, MINUTE_WAIT_MS));
-          continue; // same model, once
+          skipped.push(`${model} (rate limited)`);
+          return { done: false };
         }
         if (kind === "transient" && attempt === 0) {
           await record({ model, job: input.job, outcome: "other", error: message });
@@ -383,9 +556,38 @@ export async function runWithChain<T>(input: {
         }
         await record({ model, job: input.job, outcome: "other", error: message });
         skipped.push(`${model} (${kind})`);
-        break;
+        return { done: false };
       }
     }
+    return { done: false };
+  };
+
+  for (const model of input.chain) {
+    if (isSpent(model)) {
+      skipped.push(`${model} (known spent)`);
+      continue;
+    }
+    if (isCooling(model)) {
+      skipped.push(`${model} (rate limited, ${Math.ceil((coolingFor(model) ?? 0) / 1000)}s)`);
+      limited.push(model);
+      continue;
+    }
+    const out = await tryModel(model);
+    if (out.done) return { result: out.value, model, skipped, latencyMs: Date.now() - started };
+  }
+
+  // Every model was either spent, rate limited, or failed. If any of them was
+  // only rate limited then waiting is the difference between an answer and an
+  // error — which matters most for a single-model chain like transcription,
+  // where there is nothing to fall through to.
+  const waitable = input.chain.filter((m) => limited.includes(m) && !isSpent(m));
+  if (waitable.length) {
+    const model = waitable[0];
+    const wait = Math.min(90_000, coolingFor(model) ?? MINUTE_WAIT_MS);
+    await new Promise((r) => setTimeout(r, wait));
+    cooling.delete(model);
+    const out = await tryModel(model);
+    if (out.done) return { result: out.value, model, skipped, latencyMs: Date.now() - started };
   }
 
   throw friendlyModelError(lastError);

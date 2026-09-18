@@ -61,8 +61,11 @@ const { bengaliDate } = await load("../lib/apa/calendar.ts");
 // models.ts imports the database, so only the pure classifier is lifted out of
 // it — by source, so that a change to the patterns is still covered here.
 const modelsSrc = readFileSync(new URL("../lib/apa/models.ts", import.meta.url), "utf8");
+// From retrySeconds, not from classifyFailure: the classifier now discriminates
+// on the retry delay and calls that helper, so slicing below it lifts a
+// function with a missing dependency.
 const classifySrc = modelsSrc.slice(
-  modelsSrc.indexOf("export function classifyFailure"),
+  modelsSrc.indexOf("export function retrySeconds"),
   modelsSrc.indexOf("export async function runWithChain")
 );
 const thinkingSrc = modelsSrc.slice(
@@ -344,22 +347,47 @@ check("a figure that moves during the day gets a shorter window", () => {
 
 console.log("\nmodel fallback");
 
-check("a spent daily quota is not retried", () => {
-  // The free tier caps requests per model per day. Retrying a model that has
-  // said "PerDay" is guaranteed to fail again, so it has to be classified
-  // apart from a rate limit that will clear in twenty seconds.
-  for (const message of [
-    "429 RESOURCE_EXHAUSTED: Quota exceeded for quota metric GenerateRequestsPerDayPerProjectPerModel",
-    "free_tier_requests limit reached",
-    "quota_metric: generate_content_free_tier_requests, per_day"
-  ]) {
-    assert.equal(classifyFailure(new Error(message)), "daily_quota", message.slice(0, 40));
-  }
+check("a 429 is classified on its retry delay, not its quota name", () => {
+  // The bug this locks down. Google names the PER-MINUTE limit
+  //   quotaId: GenerateRequestsPerMinutePerProjectPerModel-FreeTier
+  // but ALSO returns, for a genuine daily cap,
+  //   quotaId: GenerateRequestsPerDayPerProjectPerModel-FreeTier   retry 18s
+  // and the metric name `generate_content_free_tier_requests` appears on both.
+  // Matching those strings classified every rate limit as a daily exhaustion,
+  // which benched the primary model for an hour over something that clears in
+  // eighteen seconds. Only the retry delay distinguishes them.
+  const minute =
+    "429 RESOURCE_EXHAUSTED: Quota exceeded for metric: " +
+    "generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 15. " +
+    "Please retry in 26.5s. quotaId: GenerateRequestsPerMinutePerProjectPerModel-FreeTier";
+  assert.equal(classifyFailure(new Error(minute)), "minute_quota", "short retry = per minute");
+
+  // The trap: "PerDay" in the id and "free_tier_requests" in the metric, but it
+  // clears in 18 seconds, so it is still a per-minute limit in practice.
+  const mislabelled =
+    "429 RESOURCE_EXHAUSTED: generate_content_free_tier_requests, limit: 20. " +
+    "Please retry in 18.6s. quotaId: GenerateRequestsPerDayPerProjectPerModel-FreeTier";
+  assert.equal(classifyFailure(new Error(mislabelled)), "minute_quota", "18s is not a day");
+
+  // A 429 that says nothing about when to come back is treated as the daily
+  // kind: moving to the next model costs one request, retrying a spent cap
+  // costs every request left in the burst.
+  assert.equal(
+    classifyFailure(new Error("429 RESOURCE_EXHAUSTED: quota exceeded")),
+    "daily_quota",
+    "no retry delay = assume the expensive case"
+  );
+
+  // A long delay really is a daily cap.
+  assert.equal(
+    classifyFailure(new Error("429 RESOURCE_EXHAUSTED: quota exceeded. Please retry in 4200s.")),
+    "daily_quota"
+  );
 });
 
-check("a per-minute limit is told apart from a per-day one", () => {
+check("an explicit per-minute marker is honoured with no delay given", () => {
   assert.equal(
-    classifyFailure(new Error("429 rate limit exceeded, retry in 12.3s (PerMinute)")),
+    classifyFailure(new Error("429 rate limit exceeded (RequestsPerMinute)")),
     "minute_quota"
   );
 });

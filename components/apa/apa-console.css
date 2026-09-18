@@ -992,3 +992,44 @@ tr.is-bad-row > td { background: var(--warn-bg); }
   font-size: var(--fs-xs);
   font-style: italic;
 }
+
+/* Two limits, two states. A per-minute limit clears itself inside a minute; a
+   daily cap does not clear until midnight Pacific, so they must not look alike. */
+.apa-quota-allow {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.apa-quota-allow > span:first-child {
+  color: var(--ink-900);
+  font-variant-numeric: tabular-nums;
+}
+
+.apa-quota-allow .muted { font-size: var(--fs-xs); }
+
+.apa-quota-src.is-observed {
+  background: color-mix(in srgb, var(--ok-solid) 12%, transparent);
+  color: var(--ok-solid);
+}
+
+.apa-quota-src.is-published {
+  background: color-mix(in srgb, var(--sky, #2f6fb3) 14%, transparent);
+  color: #2f6fb3;
+}
+
+.apa-quota-src.is-assumed {
+  background: var(--surface-sunken);
+  color: var(--ink-500);
+}
+
+.apa-quota-tag.is-cooling,
+.apa-chain-link.is-cooling {
+  border-color: color-mix(in srgb, var(--gold) 45%, transparent);
+  background: color-mix(in srgb, var(--gold) 12%, transparent);
+  color: var(--warn-fg);
+}
+
+/* Struck through is reserved for the daily cap — a model that will not answer
+   again today. A rate-limited one answers again in seconds. */
+.apa-chain-link.is-cooling { text-decoration: none; }

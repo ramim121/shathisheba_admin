@@ -49,6 +49,8 @@ type Model = Row & {
   est_cost_usd: number;
   last_error: string | null;
   free_rpd: number | null;
+  free_rpm: number | null;
+  limit_source: "observed" | "published" | "assumed";
   free_rpd_observed: boolean;
   remaining: number | null;
   used_pct: number | null;
@@ -78,6 +80,7 @@ type Quota = {
     top: Row[];
   };
   exhausted: string[];
+  cooling: Array<{ model: string; seconds: number }>;
 };
 
 const money = (v: unknown) => `$${n(v).toFixed(4)}`;
@@ -117,7 +120,7 @@ export function ApaQuota() {
     if (!feed.data) return;
     const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
     const lines = [
-      ["Model", "Used for", "Calls", "Succeeded", "Quota errors", "Other errors", "Daily cap", "Cap source", "Remaining", "Tokens in", "Tokens out", "Cached tokens", "Estimated cost USD"]
+      ["Model", "Used for", "Calls", "Succeeded", "Quota errors", "Other errors", "Per day", "Per minute", "Limit source", "Remaining", "Tokens in", "Tokens out", "Cached tokens", "Estimated cost USD"]
         .map(esc)
         .join(","),
       ...feed.data.models.map((m) =>
@@ -126,7 +129,8 @@ export function ApaQuota() {
           (m.configured_for.length ? m.configured_for : m.jobs).map(jobName).join(" / "),
           m.calls, m.ok_calls, m.quota_errors, m.other_errors,
           m.free_rpd ?? "unknown",
-          m.free_rpd === null ? "unknown" : m.free_rpd_observed ? "observed" : "assumed",
+          m.free_rpm ?? "unknown",
+          m.limit_source,
           m.remaining ?? "unknown",
           m.tokens_in, m.tokens_out, m.cached_tokens,
           n(m.est_cost_usd).toFixed(6)
@@ -152,6 +156,9 @@ export function ApaQuota() {
   const atRisk = (d?.models ?? []).filter(
     (m) => m.exhausted || (m.used_pct !== null && m.used_pct >= 80)
   );
+  // Rate limited is a few seconds, not a day, so it is shown separately and
+  // deliberately does not count toward "at risk".
+  const cooling = new Map((d?.cooling ?? []).map((c) => [c.model, c.seconds]));
   const peak = Math.max(1, ...(d?.trend ?? []).map((t) => n(t.calls)));
 
   return (
@@ -262,22 +269,28 @@ export function ApaQuota() {
                               {m.is_primary ? <em className="apa-quota-tag is-primary">first choice</em> : null}
                               {m.in_use && !m.is_primary ? <em className="apa-quota-tag">fallback</em> : null}
                               {!m.in_use ? <em className="apa-quota-tag is-off">not configured</em> : null}
-                              {m.exhausted ? <em className="apa-quota-tag is-spent">spent</em> : null}
+                              {m.exhausted ? <em className="apa-quota-tag is-spent">daily cap reached</em> : null}
+                              {cooling.has(m.model) ? (
+                                <em className="apa-quota-tag is-cooling">
+                                  rate limited · {cooling.get(m.model)}s
+                                </em>
+                              ) : null}
                             </span>
                           </div>
                         </td>
                         <td>{jobs.map(jobName).join(", ") || <span className="muted">—</span>}</td>
                         <td>{num(m.calls)}</td>
                         <td>
-                          {m.free_rpd === null ? (
+                          {m.free_rpd === null && m.free_rpm === null ? (
                             <span className="muted">not known</span>
                           ) : (
-                            <>
-                              {num(m.free_rpd)} a day{" "}
-                              <em className={`apa-quota-src${m.free_rpd_observed ? " is-observed" : ""}`}>
-                                {m.free_rpd_observed ? "observed" : "assumed"}
-                              </em>
-                            </>
+                            <div className="apa-quota-allow">
+                              {m.free_rpd !== null ? <span>{num(m.free_rpd)} a day</span> : null}
+                              {m.free_rpm !== null ? (
+                                <span className="muted">{num(m.free_rpm)} a minute</span>
+                              ) : null}
+                              <em className={`apa-quota-src is-${m.limit_source}`}>{m.limit_source}</em>
+                            </div>
                           )}
                         </td>
                         <td>
@@ -319,8 +332,11 @@ export function ApaQuota() {
                 <div>
                   <h2>Fallback order</h2>
                   <p>
-                    Tried left to right. A model that has returned a quota error today is skipped for
-                    an hour, so the order shown is the order it will actually be attempted in.
+                    Tried left to right. A model that has hit its <strong>daily</strong> cap is
+                    skipped for an hour; one that has hit its <strong>per-minute</strong> limit is
+                    skipped only for the few seconds it takes to clear, because the next model in
+                    the chain has its own allowance and can answer now. So the order shown is the
+                    order it will actually be attempted in.
                   </p>
                 </div>
               </div>
@@ -333,12 +349,22 @@ export function ApaQuota() {
                         chain.map((model, i) => {
                           const row = d.models.find((m) => m.model === model);
                           const spent = Boolean(row?.exhausted);
+                          const cool = cooling.has(model);
                           const forThisJob = d.job_calls[job]?.[model] ?? 0;
                           return (
                             <span
                               key={model}
-                              className={`apa-chain-link${spent ? " is-spent" : ""}${i === 0 ? " is-first" : ""}`}
-                              title={spent ? "Skipped — out of quota today" : undefined}
+                              className={
+                                `apa-chain-link${spent ? " is-spent" : ""}` +
+                                `${cool && !spent ? " is-cooling" : ""}${i === 0 ? " is-first" : ""}`
+                              }
+                              title={
+                                spent
+                                  ? "Skipped — daily cap reached"
+                                  : cool
+                                    ? `Rate limited for another ${cooling.get(model)}s — the next model answers meanwhile`
+                                    : undefined
+                              }
                             >
                               {model}
                               {forThisJob ? <em>{num(forThisJob)}</em> : null}
@@ -436,9 +462,12 @@ export function ApaQuota() {
 
           <p className="muted apa-quota-foot">
             Daily counters reset at midnight Pacific, which is {d.resets_at.dhaka} in Dhaka —{" "}
-            {d.resets_at.hours_away} hours from now. “Spent-model hints” are this server&apos;s
-            in-memory note that a model returned a quota error; clearing them makes it retry
-            immediately, which is what you want after changing the API key.
+            {d.resets_at.hours_away} hours from now. Per-minute limits clear on their own within
+            the minute. “Spent-model hints” are this server&apos;s in-memory note that a model has
+            hit a cap; clearing them makes it retry immediately, which is what you want after
+            changing the API key. An allowance marked <em>published</em> is Google&apos;s own
+            figure and has not been verified here — they change it without announcement, so re-run{" "}
+            <code>Resources/apa-probes/limits.cjs</code> now and again.
           </p>
         </>
       ) : null}

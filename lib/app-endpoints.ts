@@ -31,6 +31,9 @@ export * from "./endpoints/mpoweru";
 export * from "./endpoints/lender-pack";
 export * from "./endpoints/finance-notifications";
 export * from "./endpoints/admin-maintenance";
+export * from "./endpoints/apa";
+export * from "./endpoints/apa-console";
+export * from "./endpoints/app-ai";
 
 import { getUserRoles, safeJson, type Row } from "./endpoints/shared";
 import { buildAppUser, buildKycSummary } from "./endpoints/auth";

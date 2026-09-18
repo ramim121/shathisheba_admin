@@ -312,7 +312,7 @@ export type AssistRequest = {
 const MAX_IMAGE_BYTES = 6 * 1024 * 1024;
 
 /** Accepts a data: URL, bare base64, or an /uploads path served by this app. */
-async function resolveImage(image: string): Promise<{ data: string; mimeType: string }> {
+export async function resolveImage(image: string): Promise<{ data: string; mimeType: string }> {
   const value = (image ?? "").trim();
   if (!value) throw new Error("An image is required for this task.");
 

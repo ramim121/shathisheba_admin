@@ -19,6 +19,7 @@ import {
   Search,
   Settings2,
   ShieldCheck,
+  Sparkles,
   ShoppingCart,
   Store,
   UsersRound
@@ -113,9 +114,23 @@ const groups: NavGroup[] = [
       { label: "Learning CMS", href: "/learning" },
       { label: "Learning studio", href: "/learning/studio" },
       { label: "Learning progress", href: "/learning/progress" },
-      { label: "Ask Shathi Apa", href: "/assistant" },
       { label: "FAQ & help", href: "/faq" },
       { label: "App interests", href: "/interests" }
+    ]
+  },
+  {
+    // The assistant's own console. Seven pages because seven different people
+    // ask seven different questions of it: what are farmers asking, what did
+    // the scope gate get wrong, what is it costing, who is it reaching.
+    label: "Shathi Apa", icon: Sparkles, tabs: [
+      { label: "Conversations", href: "/apa" },
+      { label: "Scope review", href: "/apa/scope" },
+      { label: "Vocabulary", href: "/apa/vocabulary" },
+      { label: "Voice config", href: "/apa/config" },
+      { label: "Usage & cost", href: "/apa/usage" },
+      { label: "Access & tiers", href: "/apa/access" },
+      { label: "Feedback", href: "/apa/feedback" },
+      { label: "Home card prompts", href: "/assistant" }
     ]
   },
   {

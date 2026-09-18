@@ -154,7 +154,20 @@ export const ADMIN_ONLY = new Set<string>([
   "app/community/moderate",
   "app/community/ai-flag",
   "app/community/ai-scan",
-  "app/learning/progress-overview"
+  "app/learning/progress-overview",
+  // Shathi Apa console. The farmer-facing paths are app/apa/* and carry their
+  // own entitlement check; everything here reads across every conversation.
+  "admin/apa/conversations",
+  "admin/apa/conversation/flag",
+  "admin/apa/scope-review",
+  "admin/apa/scope-correct",
+  "admin/apa/vocabulary",
+  "admin/apa/config",
+  "admin/apa/usage",
+  "admin/apa/access",
+  "admin/apa/grant",
+  "admin/apa/feedback",
+  "admin/apa/feedback/review"
 ]);
 
 // Generic-CRUD tables an authenticated app user may create rows in. Every other
@@ -243,6 +256,9 @@ function domainOf(resource: string): AdminDomain {
   if (resource.startsWith("sale/") || resource.startsWith("buy/") || resource.startsWith("orders/")) return "marketplace";
   if (resource.startsWith("learning/") || resource.startsWith("market-updates") || resource.startsWith("weather")
       || resource.startsWith("faq") || resource.startsWith("assistant/") || resource.startsWith("interests")) return "content";
+  // Who may use the assistant is an access decision; how it answers is content.
+  if (resource === "admin/apa/grant") return "users";
+  if (resource.startsWith("admin/apa/")) return "content";
   if (resource.startsWith("community/") || resource.startsWith("app/community/")) return "community";
   if (resource.startsWith("users") || resource.startsWith("app/user") || resource.startsWith("user/")) return "users";
   return "system";

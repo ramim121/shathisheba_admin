@@ -1,0 +1,718 @@
+/* ===========================================================================
+   Shathi Apa console — the seven pages.
+
+   Everything here sits on the tokens and the .panel / .metric / table layers
+   already in app/styles. What it adds is the handful of shapes those layers
+   have no opinion about: a conversation read as a transcript, a review queue
+   where the decision is two buttons, a funnel, and a bias list.
+   =========================================================================== */
+
+.apa-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: var(--s4) var(--s5);
+  color: var(--ink-500);
+  font-size: var(--fs-sm);
+}
+
+.apa-state.is-bad {
+  color: var(--bad-fg);
+}
+
+.apa-spin {
+  animation: apa-spin 0.8s linear infinite;
+}
+
+@keyframes apa-spin {
+  to { transform: rotate(360deg); }
+}
+
+.apa-empty {
+  display: grid;
+  gap: 4px;
+  padding: var(--s6) var(--s5);
+  color: var(--ink-400);
+  text-align: center;
+}
+
+.apa-empty strong {
+  color: var(--ink-600);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+}
+
+.apa-empty span {
+  font-size: var(--fs-xs);
+}
+
+.apa-tab-count {
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: var(--r-pill);
+  background: var(--surface-sunken);
+  color: var(--ink-500);
+  font-size: var(--fs-2xs);
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+}
+
+.filter-tab.active .apa-tab-count {
+  background: rgb(255 255 255 / 0.22);
+  color: inherit;
+}
+
+/* --- a proportion, where the number alone would not land ----------------- */
+
+.apa-bar {
+  display: block;
+  overflow: hidden;
+  width: 100%;
+  height: 6px;
+  border-radius: var(--r-pill);
+  background: var(--surface-sunken);
+}
+
+.apa-bar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--brand-500);
+}
+
+.apa-bar.tone-leaf i { background: var(--ok-solid); }
+.apa-bar.tone-gold i { background: var(--gold); }
+.apa-bar.tone-red i { background: var(--bad-solid); }
+
+/* --- toolbars above a table ---------------------------------------------- */
+
+.apa-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+  padding: var(--s3) var(--s4);
+  border-bottom: 1px solid var(--line);
+}
+
+.apa-toolbar .search-box {
+  min-width: 240px;
+}
+
+.apa-toolbar-right {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+/* --- 1. Conversations ----------------------------------------------------- */
+
+.apa-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(360px, 0.9fr);
+  gap: var(--s3);
+  align-items: start;
+}
+
+@media (max-width: 1180px) {
+  .apa-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.apa-row-q {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.apa-row-q strong {
+  overflow: hidden;
+  color: var(--ink-900);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.apa-row-q span {
+  color: var(--ink-500);
+  font-size: var(--fs-xs);
+}
+
+/* The transcript, read the way it happened. */
+.apa-thread {
+  display: grid;
+  gap: var(--s3);
+  max-height: calc(100vh - 240px);
+  padding: var(--s4);
+  overflow-y: auto;
+}
+
+.apa-turn {
+  display: grid;
+  gap: 5px;
+  max-width: 92%;
+  padding: 9px var(--s3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-snug);
+}
+
+.apa-turn.is-user {
+  justify-self: end;
+  border-color: var(--brand-200);
+  background: var(--brand-50);
+}
+
+.apa-turn.is-refused {
+  border-color: var(--warn-line);
+  background: var(--warn-bg);
+}
+
+.apa-turn-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-500);
+  font-size: var(--fs-2xs);
+  text-transform: uppercase;
+  letter-spacing: var(--track-caps);
+}
+
+.apa-turn-body {
+  margin: 0;
+  color: var(--ink-800);
+  white-space: pre-wrap;
+}
+
+.apa-turn-advice {
+  padding: 7px var(--s3);
+  border-left: 3px solid var(--brand-400);
+  border-radius: var(--r-xs);
+  background: var(--brand-50);
+  color: var(--ink-800);
+}
+
+.apa-turn-photo {
+  width: 120px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.apa-turn-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
+}
+
+.apa-source {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border: 1px solid var(--brand-200);
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  color: var(--brand-700);
+  font-size: var(--fs-2xs);
+}
+
+.apa-suggest {
+  display: inline-flex;
+  padding: 1px 8px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-pill);
+  color: var(--ink-500);
+  font-size: var(--fs-2xs);
+}
+
+/* --- 2. Scope review ------------------------------------------------------ */
+
+.apa-review {
+  display: grid;
+  gap: var(--s3);
+  padding: var(--s4);
+}
+
+.apa-review-item {
+  display: grid;
+  gap: var(--s2);
+  padding: var(--s3) var(--s4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+
+.apa-review-item.is-refused {
+  border-color: var(--bad-line);
+}
+
+.apa-review-item.is-ambiguous {
+  border-color: var(--warn-line);
+}
+
+.apa-review-item.is-done {
+  border-color: var(--ok-line);
+  background: var(--ok-bg);
+}
+
+.apa-review-q {
+  margin: 0;
+  color: var(--ink-900);
+  font-size: var(--fs-md);
+  line-height: var(--lh-snug);
+}
+
+.apa-review-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 10px;
+  color: var(--ink-500);
+  font-size: var(--fs-xs);
+}
+
+.apa-review-answer {
+  margin: 0;
+  padding: 7px var(--s3);
+  border-radius: var(--r-sm);
+  background: var(--surface-sunken);
+  color: var(--ink-600);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-snug);
+}
+
+.apa-review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+/* --- 3. Vocabulary -------------------------------------------------------- */
+
+.apa-vocab-groups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: var(--s3) var(--s4);
+  border-bottom: 1px solid var(--line);
+}
+
+.apa-term {
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+}
+
+.apa-candidates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: var(--s3) var(--s4) var(--s4);
+}
+
+.apa-candidate {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px dashed var(--brand-300);
+  border-radius: var(--r-pill);
+  background: var(--brand-50);
+  color: var(--brand-700);
+  font-size: var(--fs-sm);
+}
+
+.apa-candidate em {
+  color: var(--ink-500);
+  font-size: var(--fs-2xs);
+  font-style: normal;
+}
+
+/* --- 4. Voice config ------------------------------------------------------ */
+
+.apa-config {
+  display: grid;
+  gap: var(--s3);
+  container-type: inline-size;
+}
+
+.apa-setting {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 220px;
+  gap: var(--s3);
+  align-items: center;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.apa-setting:last-child {
+  border-bottom: 0;
+}
+
+.apa-setting-label strong {
+  display: block;
+  color: var(--ink-900);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+}
+
+.apa-setting-label span {
+  display: block;
+  margin-top: 2px;
+  color: var(--ink-500);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-snug);
+}
+
+.apa-setting code {
+  color: var(--ink-400);
+  font-size: var(--fs-2xs);
+}
+
+/* The control column is a fixed 220px, so inside .panel-grid's narrower
+   columns the label was left with 95px and its own text overflowed it. Below
+   560px of panel the two stack instead — a label that has to be read is worth
+   more than a control that sits on the same line. */
+@container (max-width: 560px) {
+  .apa-setting {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+  }
+}
+
+@media (max-width: 860px) {
+  .apa-setting {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+  }
+}
+
+.apa-prompt {
+  display: grid;
+  gap: 6px;
+}
+
+.apa-prompt textarea {
+  min-height: 220px;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: var(--fs-xs);
+  line-height: 1.55;
+}
+
+.apa-locked-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 0;
+  padding: 9px var(--s3);
+  border: 1px solid var(--warn-line);
+  border-radius: var(--r-md);
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-snug);
+}
+
+.apa-locked-note svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+/* --- 5. Usage and cost ---------------------------------------------------- */
+
+.apa-budget {
+  display: grid;
+  gap: 7px;
+  padding: var(--s4) var(--s5);
+}
+
+.apa-budget-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s3);
+}
+
+.apa-budget-top strong {
+  color: var(--ink-900);
+  font-size: var(--fs-2xl);
+  font-variant-numeric: tabular-nums;
+}
+
+.apa-budget-top span {
+  color: var(--ink-500);
+  font-size: var(--fs-sm);
+}
+
+.apa-trend {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--s3);
+  height: 128px;
+  padding: var(--s4) var(--s5);
+}
+
+.apa-trend-col {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  height: 100%;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.apa-trend-col i {
+  width: 100%;
+  max-width: 44px;
+  min-height: 2px;
+  border-radius: var(--r-xs) var(--r-xs) 0 0;
+  background: var(--brand-400);
+}
+
+.apa-trend-col b {
+  color: var(--ink-700);
+  font-size: var(--fs-2xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.apa-trend-col span {
+  color: var(--ink-400);
+  font-size: var(--fs-2xs);
+  white-space: nowrap;
+}
+
+/* --- 6. Access and tiers -------------------------------------------------- */
+
+.apa-funnel {
+  display: grid;
+  gap: 10px;
+  padding: var(--s4) var(--s5);
+}
+
+.apa-funnel-step {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 96px;
+  gap: var(--s3);
+  align-items: center;
+}
+
+.apa-funnel-step > div:first-child {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.apa-funnel-step strong {
+  color: var(--ink-800);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+}
+
+.apa-funnel-step b {
+  color: var(--ink-900);
+  font-size: var(--fs-md);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.apa-funnel-step em {
+  display: block;
+  color: var(--ink-400);
+  font-size: var(--fs-2xs);
+  font-style: normal;
+  text-align: right;
+}
+
+.apa-grant {
+  display: grid;
+  gap: var(--s3);
+  padding: var(--s4) var(--s5);
+}
+
+/* --- 7. Feedback ---------------------------------------------------------- */
+
+.apa-feedback-item {
+  display: grid;
+  gap: var(--s2);
+  padding: var(--s3) var(--s4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+}
+
+.apa-feedback-item.is-down {
+  border-color: var(--bad-line);
+}
+
+.apa-feedback-item.is-reviewed {
+  opacity: 0.72;
+}
+
+.apa-feedback-q {
+  margin: 0;
+  color: var(--ink-900);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+}
+
+.apa-feedback-a {
+  margin: 0;
+  padding: 7px var(--s3);
+  border-radius: var(--r-sm);
+  background: var(--surface-sunken);
+  color: var(--ink-600);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-snug);
+  white-space: pre-wrap;
+}
+
+.apa-reasons {
+  display: grid;
+  gap: 8px;
+  padding: var(--s4) var(--s5);
+}
+
+.apa-reason {
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr) 44px;
+  gap: var(--s3);
+  align-items: center;
+  font-size: var(--fs-sm);
+}
+
+.apa-reason b {
+  color: var(--ink-800);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* --- a switch, matching the notifications console's ---------------------- */
+
+.apa-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink-500);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  cursor: pointer;
+}
+
+.apa-toggle.on {
+  border-color: var(--brand-300);
+  background: var(--brand-50);
+  color: var(--brand-600);
+}
+
+.apa-toggle:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.apa-switch {
+  position: relative;
+  display: inline-block;
+  flex: none;
+  width: 28px;
+  height: 16px;
+  border-radius: var(--r-pill);
+  background: var(--ink-200);
+  transition: background 140ms ease;
+}
+
+.apa-toggle.on .apa-switch {
+  background: var(--brand-600);
+}
+
+.apa-switch i {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.2);
+  transition: transform 140ms ease;
+}
+
+.apa-toggle.on .apa-switch i {
+  transform: translateX(12px);
+}
+
+/* --- the access override dialog ------------------------------------------ */
+
+.apa-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--s5);
+  background: rgb(27 16 24 / 0.55);
+  backdrop-filter: blur(2px);
+  overscroll-behavior: contain;
+}
+
+.apa-modal {
+  display: flex;
+  flex-direction: column;
+  width: min(560px, 100%);
+  max-height: min(90vh, 820px);
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: 0 32px 80px rgb(27 16 24 / 0.35);
+}
+
+.apa-modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s3);
+  padding: var(--s4) var(--s5);
+  border-bottom: 1px solid var(--line-strong);
+}
+
+.apa-modal-head h2 {
+  margin: 0;
+  color: var(--ink-900);
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold);
+}
+
+.apa-modal-head p {
+  margin: 2px 0 0;
+  font-size: var(--fs-sm);
+}
+
+.apa-modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--s2);
+  padding: var(--s3) var(--s5);
+  border-top: 1px solid var(--line-strong);
+  background: var(--surface-sunken);
+}
+
+.apa-modal .apa-grant {
+  overflow-y: auto;
+}

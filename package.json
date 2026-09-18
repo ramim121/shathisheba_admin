@@ -6,7 +6,8 @@
     "dev": "next dev --hostname 0.0.0.0",
     "build": "next build",
     "start": "next start --hostname 0.0.0.0",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test": "node scripts/test-apa.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1066.0",

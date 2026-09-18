@@ -183,6 +183,35 @@ import { getDashboardOverview } from "@/lib/endpoints/dashboard";
 import { getDeleteImpact, getDeleteImpactRows, clearDeleteBlockers } from "@/lib/endpoints/delete-impact";
 import { isAiConfigured, runAssist, type AssistRequest } from "@/lib/ai-assist";
 import { getFarmerFile, searchFarmers } from "@/lib/endpoints/farmer-file";
+import { askApa } from "@/lib/apa";
+import { appAnalyzePhoto, appListingDescription, appSpeak, appSummarize } from "@/lib/endpoints/app-ai";
+import { ApaLockedError } from "@/lib/apa/entitlement";
+import { closeLiveSession, markLiveConnected, saveLiveTranscript, startLiveSession } from "@/lib/apa/live";
+import {
+  clearApaHistory,
+  getApaConversation,
+  getApaConversations,
+  getApaEntitlement,
+  getApaSettings,
+  saveApaSettings,
+  submitApaFeedback
+} from "@/lib/endpoints/apa";
+import {
+  correctApaScope,
+  flagApaConversation,
+  getApaAccess,
+  getApaConsoleConversation,
+  getApaConsoleConversations,
+  getApaFeedback,
+  getApaScopeReview,
+  getApaUsage,
+  getApaVocabulary,
+  getApaVoiceConfig,
+  grantApaTier,
+  reviewApaFeedback,
+  saveApaVocabulary,
+  saveApaVoiceConfig
+} from "@/lib/endpoints/apa-console";
 
 // App-facing list reads. The mobile app hits these generic resource paths and
 // needs raw bilingual/detail columns; the admin panel reads lib/db-resources
@@ -353,7 +382,12 @@ const CODED_STATUS: Record<string, number> = {
   location_required: 422,
   zone_inactive: 403,
   invalid_geo: 400,
-  promo_invalid: 422
+  promo_invalid: 422,
+  // Shathi Apa: a busy model is the server's problem, not a bad request.
+  apa_busy: 503,
+  apa_unconfigured: 503,
+  apa_timeout: 504,
+  apa_failed: 502
 };
 
 // Creations a farmer makes inherit the farmer's approved location, at the
@@ -363,6 +397,17 @@ const GEO_INHERIT: Record<string, GeoFeature> = {
   "community/posts": "community_posts",
   "community/reports": "community_posts"
 };
+
+// A farmer who has not verified is not an error. The refusal carries the whole
+// unlock screen — the steps, how many are done, what verification buys — so the
+// app renders the state the server decided rather than a hard-coded guess at it.
+function apaLocked(error: ApaLockedError) {
+  const status = error.code === "apa_disabled" ? 503 : error.code === "apa_live_unavailable" ? 409 : 403;
+  return NextResponse.json(
+    { ok: false, message: error.message, code: error.code, entitlement: error.entitlement },
+    { status }
+  );
+}
 
 function dbError(error: unknown) {
   // A deliberate refusal is not a database failure — surface it as 429 so the
@@ -483,6 +528,65 @@ export async function GET(request: NextRequest, { params }: Params) {
       });
       return envelope(quote, { source: "mysql", surface: "app", resource });
     } catch (error) {
+      return dbError(error);
+    }
+  }
+
+  // ---- Shathi Apa ---------------------------------------------------------
+  if (resource.startsWith("app/apa/") || resource.startsWith("admin/apa/")) {
+    try {
+      switch (resource) {
+        case "app/apa/entitlement":
+          return envelope(await getApaEntitlement(searchParams.get("user_id")), { source: "mysql", surface: "app", resource });
+        case "app/apa/conversations":
+          return envelope(
+            id
+              ? await getApaConversation(searchParams.get("user_id"), id)
+              : await getApaConversations(searchParams.get("user_id"), Number(searchParams.get("limit") ?? 20)),
+            { source: "mysql", surface: "app", resource }
+          );
+        case "app/apa/settings":
+          return envelope(await getApaSettings(searchParams.get("user_id")), { source: "mysql", surface: "app", resource });
+        case "admin/apa/conversations":
+          return envelope(
+            id
+              ? await getApaConsoleConversation(id)
+              : await getApaConsoleConversations({
+                  q: searchParams.get("q"),
+                  filter: searchParams.get("filter"),
+                  district: searchParams.get("district"),
+                  limit: Number(searchParams.get("limit") ?? 50)
+                }),
+            { source: "mysql", surface: "admin", resource }
+          );
+        case "admin/apa/scope-review":
+          return envelope(
+            await getApaScopeReview({ verdict: searchParams.get("verdict"), limit: Number(searchParams.get("limit") ?? 60) }),
+            { source: "mysql", surface: "admin", resource }
+          );
+        case "admin/apa/vocabulary":
+          return envelope(await getApaVocabulary({ group: searchParams.get("group"), q: searchParams.get("q") }), {
+            source: "mysql", surface: "admin", resource
+          });
+        case "admin/apa/config":
+          return envelope(await getApaVoiceConfig(), { source: "mysql", surface: "admin", resource });
+        case "admin/apa/usage":
+          return envelope(await getApaUsage({ months: Number(searchParams.get("months") ?? 6) }), {
+            source: "mysql", surface: "admin", resource
+          });
+        case "admin/apa/access":
+          return envelope(
+            await getApaAccess({ q: searchParams.get("q"), tier: searchParams.get("tier"), limit: Number(searchParams.get("limit") ?? 50) }),
+            { source: "mysql", surface: "admin", resource }
+          );
+        case "admin/apa/feedback":
+          return envelope(
+            await getApaFeedback({ vote: searchParams.get("vote"), state: searchParams.get("state"), limit: Number(searchParams.get("limit") ?? 60) }),
+            { source: "mysql", surface: "admin", resource }
+          );
+      }
+    } catch (error) {
+      if (error instanceof ApaLockedError) return apaLocked(error);
       return dbError(error);
     }
   }
@@ -948,6 +1052,117 @@ export async function POST(request: NextRequest, { params }: Params) {
       });
       return NextResponse.json({ ok: true, action: "broadcast_sent", result });
     }
+    // ---- App-side AI help that is not the assistant -----------------------
+    // The listing writer, the photo reader, the article summariser and every
+    // read-aloud button. They lived on the phone with the key until now.
+    if (exact.startsWith("app/ai/")) {
+      const p = payload as Record<string, unknown>;
+      switch (exact) {
+        case "app/ai/speak":
+          return NextResponse.json({ ok: true, action: "ai_speak", result: await appSpeak(p) });
+        case "app/ai/summarize":
+          return NextResponse.json({ ok: true, action: "ai_summarize", result: await appSummarize(p) });
+        case "app/ai/listing-description":
+          return NextResponse.json({ ok: true, action: "ai_listing_description", result: await appListingDescription(p) });
+        case "app/ai/analyze-photo":
+          return NextResponse.json({ ok: true, action: "ai_analyze_photo", result: await appAnalyzePhoto(p) });
+      }
+    }
+
+    // ---- Shathi Apa -------------------------------------------------------
+    if (exact.startsWith("app/apa/") || exact.startsWith("admin/apa/")) {
+      const p = payload as Record<string, unknown>;
+      try {
+        switch (exact) {
+          case "app/apa/ask": {
+            const mode = String(p.mode ?? "text");
+            const result = await askApa({
+              userId: String(p.user_id ?? ""),
+              mode: mode === "voice" || mode === "photo" ? mode : "text",
+              text: p.text ? String(p.text) : null,
+              audio: p.audio && typeof p.audio === "object"
+                ? {
+                    data: String((p.audio as Record<string, unknown>).data ?? ""),
+                    mimeType: String((p.audio as Record<string, unknown>).mime_type ?? "audio/m4a")
+                  }
+                : null,
+              imageUrl: p.image_url ? String(p.image_url) : null,
+              conversationId: p.conversation_id ? Number(p.conversation_id) : null,
+              speakAnswer: p.speak === true,
+              ip: clientIp(request)
+            });
+            return NextResponse.json({ ok: true, action: "apa_answer", result });
+          }
+          case "app/apa/live/start":
+            return NextResponse.json({
+              ok: true,
+              action: "apa_live_started",
+              result: await startLiveSession({
+                userId: String(p.user_id ?? ""),
+                conversationId: p.conversation_id ? Number(p.conversation_id) : null,
+                ip: clientIp(request)
+              })
+            });
+          case "app/apa/live/connected":
+            await markLiveConnected(Number(p.session_id ?? 0), String(p.user_id ?? ""));
+            return NextResponse.json({ ok: true, action: "apa_live_connected" });
+          case "app/apa/live/close":
+            return NextResponse.json({
+              ok: true,
+              action: "apa_live_closed",
+              result: await closeLiveSession({
+                sessionId: Number(p.session_id ?? 0),
+                userId: String(p.user_id ?? ""),
+                seconds: Number(p.seconds ?? 0),
+                bytes: Number(p.bytes ?? 0),
+                reason: String(p.reason ?? "ended"),
+                resumed: Number(p.resumed ?? 0)
+              })
+            });
+          case "app/apa/live/transcript":
+            return NextResponse.json({
+              ok: true,
+              action: "apa_live_transcript",
+              result: {
+                saved: await saveLiveTranscript({
+                  userId: String(p.user_id ?? ""),
+                  sessionId: Number(p.session_id ?? 0),
+                  turns: Array.isArray(p.turns) ? (p.turns as Array<{ role: "user" | "assistant"; text: string }>) : []
+                })
+              }
+            });
+          case "app/apa/feedback":
+            return NextResponse.json({ ok: true, action: "apa_feedback", result: await submitApaFeedback(p) });
+          case "app/apa/settings":
+            return NextResponse.json({ ok: true, action: "apa_settings_saved", result: await saveApaSettings(p) });
+          case "app/apa/history/clear":
+            return NextResponse.json({ ok: true, action: "apa_history_cleared", result: await clearApaHistory(String(p.user_id ?? "")) });
+        }
+
+        if (caller.kind !== "admin") return forbidden("The Shathi Apa console is staff-only.");
+        switch (exact) {
+          case "admin/apa/conversation/flag":
+            return NextResponse.json({
+              ok: true,
+              result: await flagApaConversation(String(p.id ?? ""), p.flagged !== false, caller.admin.id)
+            });
+          case "admin/apa/scope-correct":
+            return NextResponse.json({ ok: true, result: await correctApaScope(p, caller.admin.id) });
+          case "admin/apa/vocabulary":
+            return NextResponse.json({ ok: true, result: await saveApaVocabulary(p, caller.admin.id) });
+          case "admin/apa/config":
+            return NextResponse.json({ ok: true, result: await saveApaVoiceConfig(p, caller.admin.id) });
+          case "admin/apa/grant":
+            return NextResponse.json({ ok: true, result: await grantApaTier(p, caller.admin.id) });
+          case "admin/apa/feedback/review":
+            return NextResponse.json({ ok: true, result: await reviewApaFeedback(p, caller.admin.id) });
+        }
+      } catch (error) {
+        if (error instanceof ApaLockedError) return apaLocked(error);
+        return dbError(error);
+      }
+    }
+
     if (exact === "admin/ai/assist") {
       if (caller.kind !== "admin") return forbidden("Only staff can use AI assistance.");
       if (!isAiConfigured()) {

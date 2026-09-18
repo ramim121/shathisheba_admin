@@ -27,6 +27,7 @@ import {
 } from "@/lib/db-resources";
 import {
   aiFlagCommunityPost,
+  postCommunityNotice,
   aiScanCommunityPosts,
   submitKycApplication,
   createSaleConfirmation,
@@ -180,6 +181,8 @@ import { assertCanPost, postListingMilestone, postsLeftToday, shareListingToComm
 import { getAppMarketOverview, getAppPartners, reorderPartners } from "@/lib/endpoints/engagement";
 import { getDashboardOverview } from "@/lib/endpoints/dashboard";
 import { getDeleteImpact, getDeleteImpactRows, clearDeleteBlockers } from "@/lib/endpoints/delete-impact";
+import { isAiConfigured, runAssist, type AssistRequest } from "@/lib/ai-assist";
+import { getFarmerFile, searchFarmers } from "@/lib/endpoints/farmer-file";
 
 // App-facing list reads. The mobile app hits these generic resource paths and
 // needs raw bilingual/detail columns; the admin panel reads lib/db-resources
@@ -244,6 +247,10 @@ const appReadHandlers: Record<string, AppReadHandler> = {
   "admin/dashboard/overview": () => getDashboardOverview(),
   // `target`/`target_id`, not `resource`/`id`: a bare ?id= means "one record"
   // to the generic resolver and would never reach this handler.
+  // The console's act-for-a-farmer console: who they are, and what the
+  // platform would refuse to let them do.
+  "admin/farmers/search": (q) => searchFarmers(q.get("q"), Number(q.get("limit") ?? 20) || 20),
+  "admin/farmer-file": (q) => getFarmerFile(q.get("user_id")),
   "admin/delete-impact": (q) => getDeleteImpact(q.get("target"), q.get("target_id")),
   // The dependent rows behind one relation, for the modal's "View" disclosure.
   "admin/delete-impact/rows": (q) => getDeleteImpactRows(q.get("target"), q.get("target_id"), q.get("relation")),
@@ -862,7 +869,24 @@ export async function POST(request: NextRequest, { params }: Params) {
       return NextResponse.json({ ok: true, source: "mysql", action: "schedule_previewed", result: await getQuoteSchedule(payload) }, { status: 200 });
     }
     if (exact === "app/finance/applications") {
-      return NextResponse.json({ ok: true, source: "mysql", action: "application_created", result: await createLoanApplication(payload) }, { status: 201 });
+      // `filed_by_admin` is decided here, from the session, so an app caller
+      // cannot ask to skip the GPS check-in by putting it in the body.
+      const result = await createLoanApplication({
+        ...(payload as Record<string, unknown>),
+        filed_by_admin: caller.kind === "admin"
+      });
+      if (caller.kind === "admin") {
+        await recordAudit({
+          actorAdminId: caller.admin.id,
+          action: "loan_application_filed_for_farmer",
+          entityType: "loan_application",
+          entityId: String((result as Record<string, unknown>)?.id ?? ""),
+          after: { user_id: (payload as Record<string, unknown>).user_id ?? null },
+          ip: clientIp(request),
+          userAgent: request.headers.get("user-agent")
+        });
+      }
+      return NextResponse.json({ ok: true, source: "mysql", action: "application_created", result }, { status: 201 });
     }
     if (segments[0] === "app" && segments[1] === "finance" && segments[2] === "applications" && segments[4] === "withdraw") {
       const uid = String((payload as Record<string, unknown>).user_id ?? "");
@@ -923,6 +947,22 @@ export async function POST(request: NextRequest, { params }: Params) {
         userAgent: request.headers.get("user-agent")
       });
       return NextResponse.json({ ok: true, action: "broadcast_sent", result });
+    }
+    if (exact === "admin/ai/assist") {
+      if (caller.kind !== "admin") return forbidden("Only staff can use AI assistance.");
+      if (!isAiConfigured()) {
+        return NextResponse.json({ ok: false, message: "AI assistance is not configured on this server." }, { status: 503 });
+      }
+      try {
+        const result = await runAssist(payload as unknown as AssistRequest);
+        return NextResponse.json({ ok: true, action: "ai_assist", task: (payload as Record<string, unknown>).task, result });
+      } catch (error) {
+        // A model or quota failure is the admin's problem to see, not a 500.
+        return NextResponse.json(
+          { ok: false, message: error instanceof Error ? error.message : "The AI request failed." },
+          { status: 422 }
+        );
+      }
     }
     if (exact === "admin/partners/reorder") {
       if (caller.kind !== "admin") return forbidden();
@@ -988,6 +1028,20 @@ export async function POST(request: NextRequest, { params }: Params) {
     if (exact === "app/admin/set-required-docs") {
       return NextResponse.json({ ok: true, source: "mysql", action: "requirements_saved", result: await setApprovalRequirements(payload) }, { status: 200 });
     }
+    if (exact === "app/community/notice") {
+      if (caller.kind !== "admin") return forbidden("Only staff can post an official notice.");
+      const result = await postCommunityNotice(payload as Record<string, unknown>, caller.admin.id);
+      await recordAudit({
+        actorAdminId: caller.admin.id,
+        action: "community_notice_posted",
+        entityType: "community_post",
+        entityId: result.id,
+        after: { scope: result.scope, reach: result.reach },
+        ip: clientIp(request),
+        userAgent: request.headers.get("user-agent")
+      });
+      return NextResponse.json({ ok: true, action: "notice_posted", result }, { status: 201 });
+    }
     if (exact === "app/community/moderate") {
       return NextResponse.json({ ok: true, source: "mysql", action: "post_moderated", result: await moderateCommunityPost(payload) }, { status: 200 });
     }
@@ -1004,7 +1058,23 @@ export async function POST(request: NextRequest, { params }: Params) {
       return NextResponse.json({ ok: true, source: "mysql", action: "quiz_graded", result: await submitLearningQuiz(payload) }, { status: 200 });
     }
     if (exact === "app/orders") {
-      return NextResponse.json({ ok: true, source: "mysql", action: "order_placed", result: await placeOrder(payload) }, { status: 201 });
+      const result = await placeOrder(payload);
+      // An order a staff member placed for a farmer is worth being able to find.
+      if (caller.kind === "admin") {
+        await recordAudit({
+          actorAdminId: caller.admin.id,
+          action: "order_placed_for_farmer",
+          entityType: "order",
+          entityId: String((result as Record<string, unknown>)?.id ?? ""),
+          after: {
+            user_id: (payload as Record<string, unknown>).user_id ?? null,
+            order_code: (result as Record<string, unknown>)?.order_code ?? null
+          },
+          ip: clientIp(request),
+          userAgent: request.headers.get("user-agent")
+        });
+      }
+      return NextResponse.json({ ok: true, source: "mysql", action: "order_placed", result }, { status: 201 });
     }
     if (exact === "app/kyc/submit") {
       return NextResponse.json({ ok: true, source: "mysql", action: "kyc_submitted", result: await submitKycApplication(payload) }, { status: 201 });

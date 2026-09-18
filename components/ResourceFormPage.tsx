@@ -25,6 +25,7 @@ import { GeoFields, type GeoValue } from "@/components/GeoFields";
 import { Select, fromLookup, type SelectOption } from "@/components/Select";
 import { MultiSelect, splitIds } from "@/components/MultiSelect";
 import { checkShape, feeKind, fieldFromMessage, formatNote, kindOf } from "@/lib/form-validation";
+import { AiAssistLaunch, AiAssistPanel } from "@/components/AiAssist";
 import "@/components/admin-forms.css";
 
 type Props = {
@@ -46,6 +47,27 @@ type FeeMode = "pct" | "flat";
 type Tone = "ok" | "warn" | "error";
 
 const REQUIRED_MESSAGE = "This field is required";
+/**
+ * Fields worth offering AI help on: free text a human has to compose. Ids,
+ * codes, slugs, dates, numbers and pickers are left alone — a model guessing a
+ * slug or an amount is a liability, not a help.
+ */
+const AI_TEXT_FIELD = /(^|_)(description|body|summary|detail|details|note|notes|tagline|answer|question|explanation|rationale|reason|guidance|overview|content|message|advice|model|terms)(_|$)/i;
+const AI_TITLE_FIELD = /(^|_)(title|name|label|headline|subtitle|short_name)(_|$)/i;
+
+function aiLengthFor(name: string): "short" | "medium" | "long" {
+  if (AI_TITLE_FIELD.test(name)) return "short";
+  if (/(body|detail|details|overview|content|model|market_overview)(_|$)/i.test(name)) return "long";
+  return "medium";
+}
+
+/** Bangla twin of an English field: `name_bn` ← `name_en`, `body_bn` ← `body_en`. */
+function enSiblingOf(name: string): string | null {
+  if (/_bn$/i.test(name)) return name.replace(/_bn$/i, "_en");
+  if (/_bangla$/i.test(name)) return name.replace(/_bangla$/i, "_en");
+  return null;
+}
+
 const FEE_HINT = "Flat ৳/kg, when set, is used instead of a percentage.";
 
 // Columns that make a record meaningless when blank, wherever they appear. It
@@ -266,6 +288,8 @@ export function ResourceFormPage({ config, resource, id }: Props) {
   const sections = useMemo(() => buildSections(formFields), [formFields]);
   const wizard = sections.length > 1 && formFields.length > SINGLE_PAGE_MAX_FIELDS;
   const [step, setStep] = useState(0);
+  // Which field has the AI panel open, and what it should run on open.
+  const [aiField, setAiField] = useState<{ name: string; mode: "draft" | "translate" } | null>(null);
   const [visited, setVisited] = useState<Set<number>>(() => new Set([0]));
   useEffect(() => { setStep(0); setVisited(new Set([0])); }, [resource, id]);
 
@@ -399,6 +423,23 @@ export function ResourceFormPage({ config, resource, id }: Props) {
   function setValue(key: string, value: string, errorKey = key) {
     setFormValues((current) => ({ ...current, [key]: value }));
     clearError(errorKey);
+  }
+
+  /**
+   * What the model is told about the record: the other fields on the form,
+   * under their human labels, minus the one being written and anything that
+   * would only confuse it (ids, codes, urls, the Bangla twin).
+   */
+  function aiContext(skip: string) {
+    const out: Record<string, unknown> = {};
+    for (const field of formFields) {
+      if (field.name === skip) continue;
+      const value = formValues[field.name];
+      if (!value || !String(value).trim()) continue;
+      if (/_url$|_json$|^id$|_id$|password/i.test(field.name)) continue;
+      out[field.label] = String(value).slice(0, 300);
+    }
+    return out;
   }
 
   function valueOf(field: FormField) {
@@ -802,6 +843,16 @@ export function ResourceFormPage({ config, resource, id }: Props) {
     const showHintRow = Boolean(hint);
     const describedBy = [error ? `${control}-error` : "", showHintRow ? `${control}-hint` : ""].filter(Boolean).join(" ") || undefined;
     const wide = field.type === "textarea" || field.type === "geo" || field.type === "multi-lookup";
+    // Only text the admin has to compose, and never a read-only box.
+    const aiEligible =
+      !field.readOnly &&
+      !field.lookup &&
+      (field.type === "textarea" || field.type === "text" || field.type === undefined) &&
+      (AI_TEXT_FIELD.test(field.name) || AI_TITLE_FIELD.test(field.name));
+    const enSibling = enSiblingOf(field.name);
+    const ai = aiEligible
+      ? { translateFrom: enSibling ? formValues[enSibling] ?? "" : "" }
+      : null;
     return (
       <div
         className={`field${wide ? " field-wide" : ""}${error ? " has-error" : ""}${field.readOnly ? " is-readonly" : ""}`}
@@ -813,8 +864,30 @@ export function ResourceFormPage({ config, resource, id }: Props) {
           {required ? <b aria-hidden="true">*</b> : null}
           {required ? <span className="sr-only"> (required)</span> : null}
           {field.readOnly ? <span className="field-lock"><Lock size={11} aria-hidden="true" /> Read-only</span> : null}
+          {ai ? (
+            <AiAssistLaunch
+              label={field.label}
+              hasText={Boolean((formValues[field.name] ?? "").trim())}
+              canTranslate={Boolean(ai.translateFrom.trim())}
+              onOpen={(mode) => setAiField({ name: field.name, mode })}
+            />
+          ) : null}
         </label>
         {renderControl(field, { control, label, describedBy })}
+        {ai && aiField?.name === field.name ? (
+          <AiAssistPanel
+            label={field.label}
+            resource={resource}
+            language={/_bn$|_bangla$/i.test(field.name) ? "bn" : "en"}
+            length={aiLengthFor(field.name)}
+            value={formValues[field.name] ?? ""}
+            translateFrom={ai.translateFrom}
+            autoRun={aiField.mode}
+            context={() => aiContext(field.name)}
+            onInsert={(text) => setValue(field.name, text)}
+            onClose={() => setAiField(null)}
+          />
+        ) : null}
         {error ? (
           <small className="field-error" id={`${control}-error`} role="alert">
             <AlertCircle size={13} aria-hidden="true" /> {error}

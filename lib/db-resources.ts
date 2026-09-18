@@ -1044,6 +1044,25 @@ const configs: Record<string, ResourceConfig> = {
   // registry. Exposing them implied working features that did not exist. The
   // tables are left in place; restoring an endpoint is a few lines here once a
   // real writer exists behind it.
+  "media/assets": {
+    table: "media_assets",
+    listSql: `
+      SELECT
+        CAST(a.id AS CHAR) AS id,
+        a.title,
+        a.asset_type,
+        a.url,
+        REPLACE(a.owner_type, '_', ' ') AS owner_type,
+        CAST(a.owner_id AS CHAR) AS owner_id,
+        a.mime_type,
+        CONCAT(ROUND(COALESCE(a.size_bytes, 0) / 1024), ' KB') AS size,
+        DATE_FORMAT(a.created_at, '%d %b %Y') AS added
+      FROM media_assets a
+      ORDER BY a.id DESC`,
+    allowedInsert: ["owner_type", "owner_id", "asset_type", "title", "alt_text", "url", "mime_type", "size_bytes", "metadata", "uploaded_by"],
+    allowedUpdate: ["owner_type", "owner_id", "asset_type", "title", "alt_text", "url", "mime_type", "size_bytes", "metadata"],
+    defaults: { owner_type: "system", asset_type: "image" }
+  },
   // Append-only: the console reads this, and only the server writes to it.
   "audit/logs": {
     table: "audit_logs",

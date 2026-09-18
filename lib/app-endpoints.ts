@@ -54,6 +54,9 @@ export async function getOnboardingTree() {
         name_en,
         name_bn,
         emoji,
+        -- The icon has always been an id into media_assets; nothing resolved it,
+        -- so every category reached the app with an emoji and no artwork.
+        (SELECT url FROM media_assets a WHERE a.id = interest_categories.icon_asset_id) AS icon_url,
         sort_order,
         step_group,
         is_selectable,

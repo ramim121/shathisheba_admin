@@ -15,6 +15,24 @@ import { queryRows } from "@/lib/db";
 export type LookupOption = { id: string; label: string; group?: string };
 
 const LOOKUPS: Record<string, string> = {
+  sale_categories: `
+    SELECT CAST(id AS CHAR) AS id, name_en AS label
+      FROM sale_categories WHERE is_active = 1 ORDER BY sort_order, name_en`,
+  sale_items: `
+    SELECT CAST(i.id AS CHAR) AS id,
+           i.name_en AS label,
+           c.name_en AS \`group\`
+      FROM sale_items i
+      JOIN sale_categories c ON c.id = i.sale_category_id
+     WHERE i.status = 'active' ORDER BY c.sort_order, i.name_en`,
+  loan_products: `
+    SELECT CAST(id AS CHAR) AS id,
+           CONCAT(name_en, ' · ', interest_rate_annual, '%') AS label
+      FROM loan_products WHERE is_active = 1 AND coming_soon = 0 ORDER BY sort_order, name_en`,
+  // The application stores purpose_code, so the code is the value.
+  loan_purposes: `
+    SELECT code AS id, label_en AS label
+      FROM loan_purposes WHERE is_active = 1 ORDER BY sort_order, label_en`,
   users: `
     SELECT CAST(id AS CHAR) AS id,
            CONCAT(full_name, ' · ', phone) AS label,

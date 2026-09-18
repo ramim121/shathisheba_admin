@@ -1,0 +1,139 @@
+/* The writing help that sits on a form field. Deliberately quiet until it is
+   opened: a form with twenty fields would otherwise be twenty purple buttons
+   competing with the labels. */
+
+.ai-launch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.ai-chip-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 7px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  color: var(--ink-500);
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-bold);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  transition: background var(--t-fast), border-color var(--t-fast), color var(--t-fast);
+}
+
+.ai-chip-btn:hover:not(:disabled) {
+  border-color: var(--brand-300);
+  background: var(--brand-50);
+  color: var(--brand-700);
+}
+
+.ai-chip-btn:disabled {
+  opacity: 0.45;
+}
+
+.ai-panel {
+  display: grid;
+  gap: var(--s2);
+  margin-top: 6px;
+  padding: var(--s3);
+  border: 1px solid var(--brand-200);
+  border-radius: var(--r-md);
+  background: var(--brand-50);
+}
+
+.ai-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s2);
+}
+
+.ai-panel-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--brand-700);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold);
+  text-transform: uppercase;
+  letter-spacing: var(--track-caps);
+}
+
+.ai-panel-close {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: var(--r-xs);
+  background: none;
+  color: var(--ink-500);
+}
+
+.ai-panel-close:hover {
+  background: var(--surface);
+  color: var(--ink-900);
+}
+
+.ai-panel-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ai-panel-row .input {
+  flex: 1 1 200px;
+  height: var(--h-sm);
+  font-size: var(--fs-sm);
+}
+
+.ai-panel-result {
+  padding: var(--s2) var(--s3);
+  border: 1px solid var(--brand-200);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink-900);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-normal);
+  white-space: pre-wrap;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.ai-panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.ai-panel-note {
+  margin: 0;
+  color: var(--ink-500);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-snug);
+}
+
+.ai-panel-error {
+  margin: 0;
+  padding: 7px var(--s2);
+  border: 1px solid var(--bad-line);
+  border-radius: var(--r-sm);
+  background: var(--bad-bg);
+  color: var(--bad-fg);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+}
+
+.ai-spin {
+  animation: ai-spin 0.8s linear infinite;
+}
+
+@keyframes ai-spin {
+  to { transform: rotate(360deg); }
+}

@@ -69,6 +69,10 @@ export const ADMIN_ONLY = new Set<string>([
   "brands/distributors",
   // Notifications and the home partner strip (the app reads app/partners).
   "admin/dashboard/overview",
+  "admin/ai/assist",
+  "app/community/notice",
+  "admin/farmers/search",
+  "admin/farmer-file",
   "admin/delete-impact",
   "admin/delete-impact/rows",
   "admin/notifications/status",
@@ -81,6 +85,7 @@ export const ADMIN_ONLY = new Set<string>([
   "notifications/templates",
   "notifications/broadcasts",
   "notifications/outbox",
+  "media/assets",
   "audit/logs",
   "reports",
   // Finance back-office. The farmer's own finance data is reached through

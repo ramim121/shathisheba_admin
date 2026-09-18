@@ -1,6 +1,7 @@
 import { executeQuery, queryRows, withTransaction } from "@/lib/db";
 import type { Row } from "./shared";
 import { moderatePostText } from "@/lib/gemini";
+import { normaliseGeoPayload } from "@/lib/geo";
 
 // Community feed: likes, the moderation queue, and the Gemini-assisted
 // flagging the console uses. AI output is advisory — it never removes a post
@@ -29,9 +30,27 @@ export async function getCommunityModeration(filter?: string | null) {
       SELECT CAST(p.id AS CHAR) AS id, u.full_name AS author, CAST(p.user_id AS CHAR) AS user_id,
              p.post_type, p.scope, p.body, p.image_url, p.is_official,
              p.like_count, p.comment_count, p.report_count, p.status,
-             p.ai_flag, p.ai_reason, p.ai_checked_at, p.district, p.upazila, p.created_at
+             p.ai_flag, p.ai_reason, p.ai_checked_at, p.district, p.upazila, p.created_at,
+             -- Who actually sees it: the ids are what the feed filters on, and a
+             -- post whose scope says "district" but carries no district id
+             -- reaches the whole country.
+             CAST(p.division_id AS CHAR) AS division_id,
+             CAST(p.district_id AS CHAR) AS district_id,
+             CAST(p.upazila_id AS CHAR) AS upazila_id,
+             COALESCE(gz.name_en, gd.name_en, gv.name_en, 'Bangladesh') AS reach,
+             CASE
+               WHEN p.scope = 'bangladesh' THEN 'national'
+               WHEN p.upazila_id IS NOT NULL THEN 'upazila'
+               WHEN p.district_id IS NOT NULL THEN 'district'
+               WHEN p.division_id IS NOT NULL THEN 'division'
+               ELSE 'national'
+             END AS reach_level,
+             p.source_type
       FROM community_posts p
       JOIN app_users u ON u.id = p.user_id
+      LEFT JOIN geo_divisions gv ON gv.id = p.division_id
+      LEFT JOIN geo_districts gd ON gd.id = p.district_id
+      LEFT JOIN geo_upazilas gz ON gz.id = p.upazila_id
       WHERE ${where}
       ORDER BY p.is_official DESC,
                FIELD(p.ai_flag, 'remove', 'review') DESC,
@@ -121,4 +140,96 @@ export async function aiScanCommunityPosts(payload: Row) {
     }
   }
   return { scanned: results.length, counts, results };
+}
+
+
+type NoticeInput = {
+  body?: unknown;
+  scope?: unknown;
+  post_type?: unknown;
+  image_url?: unknown;
+  district?: unknown;
+  upazila?: unknown;
+  division_id?: unknown;
+  author_user_id?: unknown;
+};
+
+/**
+ * POST /api/v1/app/community/notice — an official post, written by staff.
+ *
+ * The app has no way for the platform itself to speak in the feed: every post
+ * belongs to a farmer. An official notice still needs an author row, so it is
+ * attributed to a chosen account (by default the oldest active one, which is
+ * the platform's own seed user) and flagged `is_official`, which is what the
+ * app sorts to the top.
+ *
+ * Reach is by ids, not by the text: `scope` says what the intent was and the
+ * ids say who will actually see it, so a district notice cannot silently go
+ * national.
+ */
+export async function postCommunityNotice(payload: NoticeInput, adminId: number) {
+  const body = String(payload.body ?? "").trim();
+  if (body.length < 10) throw new Error("Write the notice first (at least a sentence).");
+  if (body.length > 4000) throw new Error("That notice is too long for a feed card.");
+
+  const scope = ["bangladesh", "division", "district", "upazila"].includes(String(payload.scope))
+    ? String(payload.scope)
+    : "district";
+  const postType = ["notice", "tip", "alert", "market", "general"].includes(String(payload.post_type))
+    ? String(payload.post_type)
+    : "notice";
+
+  const districtName = scope === "district" || scope === "upazila" ? String(payload.district ?? "").trim() : "";
+  const upazilaName = scope === "upazila" ? String(payload.upazila ?? "").trim() : "";
+  if ((scope === "district" || scope === "upazila") && !districtName) {
+    throw new Error("Pick the district this notice is for.");
+  }
+  if (scope === "upazila" && !upazilaName) throw new Error("Pick the upazila this notice is for.");
+  const divisionId = scope === "division" ? Number(payload.division_id) || null : null;
+  if (scope === "division" && !divisionId) throw new Error("Pick the division this notice is for.");
+
+  let authorId = Number(payload.author_user_id) || 0;
+  if (!authorId) {
+    const [fallback] = await queryRows<Row>(
+      "SELECT id FROM app_users WHERE status = 'active' ORDER BY id LIMIT 1"
+    );
+    authorId = Number(fallback?.id ?? 0);
+  }
+  if (!authorId) throw new Error("No account to attribute the notice to.");
+
+  // Names resolve to ids through the same helper the generic writes use, so a
+  // misspelt district fails here instead of quietly becoming a national post.
+  const geo = await normaliseGeoPayload(
+    { district: districtName || null, upazila: upazilaName || null },
+    ["district", "upazila"]
+  );
+
+  const result = await executeQuery(
+    `INSERT INTO community_posts
+       (user_id, scope, post_type, body, image_url, is_official, status,
+        district, upazila, division_id, district_id, upazila_id,
+        moderated_by, moderated_at, created_at, updated_at)
+     VALUES (?,?,?,?,?,1,'visible', ?,?,?,?,?, ?, NOW(), NOW(), NOW())`,
+    [
+      authorId,
+      scope,
+      postType,
+      body,
+      String(payload.image_url ?? "").trim() || null,
+      (geo as Row).district ?? null,
+      (geo as Row).upazila ?? null,
+      divisionId ?? (geo as Row).division_id ?? null,
+      (geo as Row).district_id ?? null,
+      (geo as Row).upazila_id ?? null,
+      adminId
+    ]
+  );
+
+  return {
+    id: String(result.insertId),
+    scope,
+    post_type: postType,
+    reach: scope === "bangladesh" ? "Bangladesh" : upazilaName || districtName || "division",
+    author_user_id: String(authorId)
+  };
 }

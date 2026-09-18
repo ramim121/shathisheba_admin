@@ -1385,6 +1385,35 @@ const financePages: Record<string, ManagementPageProps> = {
       { label: "Active", name: "is_active", type: "select", options: ["1", "0"] }
     ]
   },
+  // media_assets had five live references (a learning module thumbnail, four
+  // interest icons) and no screen, and nothing resolved the ids either — so the
+  // artwork existed and never reached the app. Both ends are wired now.
+  "settings/media": {
+    title: "Media Library",
+    description:
+      "Artwork registered for the app: learning module thumbnails, interest icons, product images. The id of a row here is what learning_modules.thumbnail_asset_id and interest_categories.icon_asset_id point at, and the app now reads the URL through that link.",
+    entityName: "Asset",
+    endpoint: "/api/v1/media/assets",
+    columns: [
+      { key: "title", label: "Title" },
+      { key: "asset_type", label: "Type" },
+      { key: "url", label: "URL" },
+      { key: "owner_type", label: "Belongs to" },
+      { key: "owner_id", label: "Owner id" },
+      { key: "size", label: "Size" },
+      { key: "added", label: "Added" }
+    ],
+    rows: [],
+    formFields: [
+      { label: "Title", name: "title", value: "", hint: "What this artwork is, for whoever picks it later." },
+      { label: "Image", name: "url", type: "image", folder: "media", required: true, hint: "Upload or paste a URL. This is what the app loads." },
+      { label: "Asset type", name: "asset_type", type: "select", options: ["thumbnail", "icon", "image", "banner", "document"] },
+      { label: "Belongs to", name: "owner_type", type: "select", options: ["system", "learning_module", "interest_category", "zone_officer", "product", "partner_project"] },
+      { label: "Owner id", name: "owner_id", hint: "The record this belongs to, when it is not a shared system asset." },
+      { label: "Alt text", name: "alt_text", type: "textarea", value: "", hint: "Described for a farmer using a screen reader." },
+      { label: "MIME type", name: "mime_type", value: "" }
+    ]
+  },
   // The audit trail has been recorded since migration 017 and had no screen:
   // every login, approval, broadcast and delete was written down where nobody
   // could read it.

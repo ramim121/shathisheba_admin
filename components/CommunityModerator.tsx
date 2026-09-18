@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { EyeOff, Eye, RefreshCw, Sparkles, Star, Trash2 } from "lucide-react";
+import { EyeOff, Eye, Megaphone, MessageSquare, RefreshCw, Sparkles, Star, ThumbsUp, Trash2 } from "lucide-react";
 import { AdminShell } from "@/components/AdminShell";
 import { Status } from "@/components/Status";
+import { NoticeComposer } from "@/components/NoticeComposer";
 
 type Post = {
   id: string;
@@ -24,6 +25,9 @@ type Post = {
   district?: string | null;
   upazila?: string | null;
   created_at: string;
+  reach?: string | null;
+  reach_level?: string | null;
+  source_type?: string | null;
 };
 
 type Filter = "all" | "flagged" | "official" | "hidden";
@@ -55,6 +59,7 @@ export function CommunityModerator() {
   const [scanning, setScanning] = useState(false);
   const [busyId, setBusyId] = useState<string>("");
   const [message, setMessage] = useState("");
+  const [composing, setComposing] = useState(false);
 
   const load = useCallback(async (f: Filter) => {
     setLoading(true);
@@ -147,6 +152,9 @@ export function CommunityModerator() {
         </div>
         <div className="toolbar">
           <button className="btn ghost" onClick={() => void load(filter)} type="button"><RefreshCw size={18} /> Refresh</button>
+          <button className={`btn ghost${composing ? " active" : ""}`} onClick={() => setComposing((c) => !c)} type="button">
+            <Megaphone size={18} /> Post a notice
+          </button>
           <button className="btn primary" onClick={() => void aiScan()} disabled={scanning} type="button">
             <Sparkles size={18} /> {scanning ? "Scanning…" : "AI Scan"}
           </button>
@@ -170,6 +178,13 @@ export function CommunityModerator() {
         </div>
       </section>
 
+      {composing ? (
+        <NoticeComposer
+          onPosted={(text) => { setComposing(false); setMessage(text); void load(filter); }}
+          onCancel={() => setComposing(false)}
+        />
+      ) : null}
+
       <div className="filter-tabs">
         {FILTERS.map((f) => (
           <button className={`filter-tab${filter === f.key ? " active" : ""}`} key={f.key} onClick={() => setFilter(f.key)} type="button">
@@ -188,7 +203,10 @@ export function CommunityModerator() {
         <div className="table-wrap">
           <table>
             <thead>
-              <tr><th>Author</th><th>Post</th><th>Scope</th><th>AI</th><th>Reports</th><th>Status</th><th>Actions</th></tr>
+              <tr>
+                <th>Author</th><th>Post</th><th>Reach</th><th>Engagement</th>
+                <th>AI</th><th>Reports</th><th>Status</th><th>Actions</th>
+              </tr>
             </thead>
             <tbody>
               {posts.map((p) => (
@@ -216,7 +234,23 @@ export function CommunityModerator() {
                       <span className="post-body">{p.body || <em className="cell-muted">(no text)</em>}</span>
                     </div>
                   </td>
-                  <td>{p.scope}<div className="subtext">{p.post_type}</div></td>
+                  <td>
+                    <span className={`status-pill ${p.reach_level === "national" ? "blue" : p.reach_level === "upazila" ? "green" : "rose"}`}>
+                      {p.reach ?? "Bangladesh"}
+                    </span>
+                    <div className="subtext">
+                      {p.reach_level ?? "national"}
+                      {p.reach_level && p.scope !== p.reach_level && !(p.scope === "bangladesh" && p.reach_level === "national")
+                        ? ` · tagged ${p.scope}`
+                        : ""}
+                      {p.source_type === "seed" ? " · seeded" : ""}
+                    </div>
+                  </td>
+                  <td className="comm-engagement">
+                    <span><ThumbsUp size={12} /> {p.like_count}</span>
+                    <span><MessageSquare size={12} /> {p.comment_count}</span>
+                    <div className="subtext">{p.post_type}</div>
+                  </td>
                   <td>
                     <span className={aiClass(p.ai_flag)} title={p.ai_reason ?? ""}>{p.ai_flag ?? "—"}</span>
                   </td>
@@ -237,7 +271,7 @@ export function CommunityModerator() {
                 </tr>
               ))}
               {!loading && posts.length === 0 ? (
-                <tr><td colSpan={7} className="table-empty"><strong>No posts match this filter.</strong><span>Try another tab above.</span></td></tr>
+                <tr><td colSpan={8} className="table-empty"><strong>No posts match this filter.</strong><span>Try another tab above.</span></td></tr>
               ) : null}
             </tbody>
           </table>

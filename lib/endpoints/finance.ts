@@ -565,6 +565,20 @@ async function loanCheckin(payload: Row, profile: Row | undefined): Promise<Loan
   if (mode === "off") {
     return { status: "not_required", lat: null, lng: null, district_id: null, upazila_id: null, review: null };
   }
+  // Filed from the console for a farmer who phoned it in: there is no phone in
+  // the field to take a fix from, so the application carries the profile's own
+  // district and says on the record that a human filed it. The route sets this
+  // flag from the caller's identity, never from the request body.
+  if (payload.filed_by_admin === true) {
+    return {
+      status: "not_required",
+      lat: null,
+      lng: null,
+      district_id: toGeoId(profile?.district_id),
+      upazila_id: toGeoId(profile?.upazila_id),
+      review: "Filed by staff on the farmer's behalf — no GPS check-in was taken."
+    };
+  }
   const lat = payload.checkin_lat == null || payload.checkin_lat === "" ? NaN : Number(payload.checkin_lat);
   const lng = payload.checkin_lng == null || payload.checkin_lng === "" ? NaN : Number(payload.checkin_lng);
   if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0)) {

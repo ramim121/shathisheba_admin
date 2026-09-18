@@ -707,3 +707,67 @@ tr.late td:first-child {
 .api-group th:nth-child(2) {
   width: 38%;
 }
+
+/* --- community moderation ------------------------------------------------ */
+
+.comm-engagement span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: var(--s2);
+  color: var(--ink-700);
+  font-variant-numeric: tabular-nums;
+}
+
+.comm-engagement svg {
+  color: var(--ink-400);
+}
+
+/* The official notice composer above the moderation table. */
+.notice-composer {
+  display: grid;
+  gap: var(--s3);
+  margin-bottom: var(--s3);
+  border-color: var(--brand-200);
+}
+
+.notice-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+}
+
+.notice-head h3 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  color: var(--ink-900);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+}
+
+.notice-grid {
+  padding: 0;
+  gap: var(--s4) var(--s5);
+}
+
+.notice-media {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+}
+
+.notice-media label.btn {
+  cursor: pointer;
+}
+
+.notice-thumb {
+  width: 64px;
+  height: 64px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  object-fit: cover;
+}

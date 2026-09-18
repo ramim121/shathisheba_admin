@@ -122,6 +122,7 @@ export async function getAppLearningCategoryModules(categoryId?: string | null, 
     `
       SELECT CAST(m.id AS CHAR) AS id, m.title_en, m.title_bn, m.subtitle_en, m.subtitle_bn,
              m.level, m.emoji,
+             (SELECT url FROM media_assets a WHERE a.id = m.thumbnail_asset_id) AS thumbnail_url,
              COUNT(DISTINCT ct.id) AS content_count,
              COUNT(DISTINCT CASE WHEN p.status = 'completed' THEN ct.id END) AS completed_count,
              COALESCE(SUM(ct.points), 0) AS total_points

@@ -132,6 +132,7 @@ const groups: NavGroup[] = [
   {
     label: "Users", icon: UsersRound, tabs: [
       { label: "All users", href: "/users" },
+      { label: "Act for a farmer", href: "/act" },
       { label: "Roles", href: "/users/roles" },
       { label: "Banking", href: "/users/banking" },
       { label: "Farm info", href: "/users/farm" },
@@ -152,6 +153,7 @@ const groups: NavGroup[] = [
       { label: "Geo filters", href: "/settings" },
       { label: "Platform switches", href: "/settings/switches" },
       { label: "Admin users", href: "/admin-users" },
+      { label: "Media library", href: "/settings/media" },
       { label: "Audit trail", href: "/settings/audit" },
       { label: "API viewer", href: "/api-viewer" }
     ]

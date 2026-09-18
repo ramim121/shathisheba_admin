@@ -18,11 +18,12 @@ utility layers and then the handwritten layers in order:
 | `app/styles/forms.css` | field stack, wizard steps, save bar, sign-in, editors |
 | `app/styles/feedback.css` | status pills, badges, notices, banners, drawers |
 | `app/styles/modules.css` | screen-specific modules (notifications, broadcasts, partner strip, geography, approvals queue, sale workflow) |
-| `app/styles/screens.css` | the loan workspace, loan queue, credit dashboard, collections, lender pipeline and API viewer |
+| `app/styles/screens.css` | the loan workspace, loan queue, credit dashboard, collections, lender pipeline, API viewer, community moderation |
 
-Three components keep their own file next to them, imported from the
-component: `components/admin-forms.css`, `components/listing-workflow.css`,
-`components/DeleteDialog.css`.
+Five components keep their own file next to them, imported from the component:
+`components/admin-forms.css`, `components/listing-workflow.css`,
+`components/DeleteDialog.css`, `components/ai-assist.css`,
+`components/act-for-farmer.css`.
 
 Add a **value** to `tokens.css`. Add a **rule** to the layer that owns that
 kind of surface. A rule that only one screen will ever use goes in

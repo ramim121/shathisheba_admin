@@ -1,4 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
+import { retrySeconds } from "@/lib/apa/pure";
 
 /**
  * The one place the Gemini key is read.
@@ -94,23 +95,32 @@ export function parseJson<T>(raw: string, fallback: T): T {
  * will see it. What comes back to the app is one sentence in Bangla, and a code
  * the app can branch on if it wants to offer a retry.
  */
-export function friendlyModelError(error: unknown): Error & { code?: string } {
+export function friendlyModelError(
+  error: unknown
+): Error & { code?: string; retryAfterSeconds?: number } {
   const raw = error instanceof Error ? error.message : String(error);
   console.error("apa model call failed:", raw.slice(0, 600));
 
-  const coded = (code: string, message: string) => Object.assign(new Error(message), { code });
+  const coded = (code: string, message: string, retryAfterSeconds?: number) =>
+    Object.assign(new Error(message), { code, retryAfterSeconds });
+
+  // Google says how long to wait. Passing it through is what lets the app count
+  // down and re-enable its own retry button at the right moment, rather than
+  // telling her "a minute" and hoping.
+  const advised = retrySeconds(raw);
+  const busyWait = advised === null ? 30 : Math.min(120, Math.max(5, Math.ceil(advised)));
 
   if (/\b429\b|RESOURCE_EXHAUSTED|exceeded your current quota|rate.?limit/i.test(raw)) {
-    return coded("apa_busy", "এখন অনেকে একসাথে প্রশ্ন করছেন। এক মিনিট পরে আবার চেষ্টা করুন।");
+    return coded("apa_busy", "এখন অনেকে একসাথে প্রশ্ন করছেন। এক মিনিট পরে আবার চেষ্টা করুন।", busyWait);
   }
   if (/\b(503|500)\b|UNAVAILABLE|overloaded|high demand|INTERNAL/i.test(raw)) {
-    return coded("apa_busy", "এখন একটু ব্যস্ত আছি। একটু পরে আবার চেষ্টা করুন।");
+    return coded("apa_busy", "এখন একটু ব্যস্ত আছি। একটু পরে আবার চেষ্টা করুন।", 15);
   }
   if (/\b(401|403)\b|API key|PERMISSION_DENIED|UNAUTHENTICATED/i.test(raw)) {
     return coded("apa_unconfigured", "শাথী আপা এখন বন্ধ আছে। একটু পরে আবার দেখুন।");
   }
   if (/abort|timeout|ETIMEDOUT|ECONNRESET|fetch failed/i.test(raw)) {
-    return coded("apa_timeout", "উত্তর আসতে দেরি হচ্ছে। আরেকবার চেষ্টা করুন।");
+    return coded("apa_timeout", "উত্তর আসতে দেরি হচ্ছে। আরেকবার চেষ্টা করুন।", 5);
   }
   return coded("apa_failed", "এখন উত্তর দিতে পারছি না। একটু পরে আবার চেষ্টা করুন।");
 }

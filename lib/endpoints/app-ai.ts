@@ -2,7 +2,7 @@ import { executeQuery, queryRows } from "@/lib/db";
 import { RateLimitError } from "@/lib/errors";
 import { resolveImage } from "@/lib/ai-assist";
 import { genai, isApaConfigured, parseJson, friendlyModelError, isOurError } from "@/lib/apa/client";
-import { apaConfig, type ApaConfig } from "@/lib/apa/config";
+import { apaConfig, apaPrompt, type ApaConfig } from "@/lib/apa/config";
 import { runWithChain, thinkingFor, usageOf } from "@/lib/apa/models";
 import { speak } from "@/lib/apa/tts";
 import { addUsage } from "@/lib/apa/quota";
@@ -248,6 +248,18 @@ export async function appSpeak(payload: Row): Promise<SpeakResult> {
  * is only readable by the farmer it was written for.
  */
 async function lookupText(userId: string, source: string, id: string): Promise<string> {
+  // The opening greeting. Identical for every farmer, so it is synthesised once
+  // and served from the speech cache thereafter — one Gemini call for the whole
+  // platform, forever, rather than the phone's own voice reading it.
+  //
+  // It is also the one piece of spoken text that was wrong before: with no
+  // server source it fell through to the device engine, whose default voice on
+  // most handsets is male. A farmer told she is talking to Shathi Apa and
+  // greeted by a man is not hearing a different voice, she is hearing a
+  // different person.
+  if (source === "intro") {
+    return String((await apaPrompt("intro_bn")) ?? "");
+  }
   if (!id) return "";
   if (source === "apa_message") {
     const [row] = await queryRows<Row>(
@@ -452,6 +464,11 @@ export async function appSpeechConfig(): Promise<Row> {
   const cfg: ApaConfig = await apaConfig();
   return {
     mode: cfg.ttsMode,
+    // The greeting, so the chat renders exactly the string that will be spoken.
+    // Held server-side because it has to match byte for byte: the speech cache
+    // is keyed on the text, and a greeting that differed by a full stop would
+    // synthesise a second clip for every farmer.
+    intro: String((await apaPrompt("intro_bn")) ?? ""),
     // The phone checks its own installed voices against this and reports back
     // through `needs_server` when it has none.
     preferred_language: "bn-BD",

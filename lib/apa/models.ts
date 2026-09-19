@@ -1,6 +1,11 @@
 import { executeQuery, queryRows } from "@/lib/db";
 import { costOf } from "@/lib/apa/pure";
 import { friendlyModelError } from "@/lib/apa/client";
+import { retrySeconds } from "@/lib/apa/pure";
+
+// Re-exported: it lives in pure.ts so that client.ts can use it too without
+// the two files importing each other.
+export { retrySeconds };
 
 /**
  * Which model actually answers, and what it cost.
@@ -259,21 +264,7 @@ export function thinkingFor(model: string): { thinkingConfig?: { thinkingBudget:
  */
 
 
-/**
- * How long Google says to wait, in seconds, if it said anything.
- *
- * This is the only reliable discriminator between a per-minute rate limit and
- * a spent daily cap, and getting it wrong is expensive in both directions.
- */
-export function retrySeconds(raw: string): number | null {
-  // "Please retry in 18.604534858s." — the message form.
-  const inline = raw.match(/retry in (\d+(?:\.\d+)?)s/i);
-  if (inline) return Number(inline[1]);
-  // "retryDelay":"18s" — the RetryInfo detail, when the caller stringified it.
-  const detail = raw.match(/retryDelay["'\s:]+(\d+(?:\.\d+)?)s/i);
-  if (detail) return Number(detail[1]);
-  return null;
-}
+
 
 /**
  * What kind of failure this was, and therefore what to do about it.

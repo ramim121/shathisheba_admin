@@ -148,7 +148,7 @@ export async function apaConfig(): Promise<ApaConfig> {
 const PROMPT_TTL_MS = 30_000;
 let promptCache: { at: number; values: Map<string, string> } | null = null;
 
-export type ApaPromptKey = "persona" | "scope" | "examples" | "live" | "refusal_bn" | "classify";
+export type ApaPromptKey = "persona" | "scope" | "examples" | "live" | "refusal_bn" | "classify" | "intro_bn";
 
 /**
  * Persona, scope, examples, refusal and live instructions live in

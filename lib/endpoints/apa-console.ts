@@ -454,12 +454,27 @@ export async function getApaVoiceConfig() {
 }
 
 /** The prebuilt Gemini voices worth offering for Bangla. */
+/**
+ * The voices Shathi Apa may use — all female, on purpose.
+ *
+ * "Apa" is an elder sister. A farmer who has been told she is talking to Shathi
+ * Apa and hears a man is not hearing a different voice, she is hearing a
+ * different person, and the trust the whole persona is built on goes with it.
+ * The list used to include Puck and Charon, which are male, so the console
+ * offered a setting that would have broken the product.
+ *
+ * Restricted rather than annotated, because a dropdown that contains a wrong
+ * answer will eventually be used to pick it.
+ */
 const VOICES = [
-  { name: "Aoede", note: "Warm, measured — the current default" },
+  { name: "Aoede", note: "Warm, measured — the default" },
   { name: "Kore", note: "Firm, clear on a poor speaker" },
-  { name: "Puck", note: "Brighter, younger" },
-  { name: "Charon", note: "Lower, slower" }
+  { name: "Leda", note: "Younger, brighter" },
+  { name: "Zephyr", note: "Lighter, quicker" }
 ];
+
+/** Enforced on save as well as offered in the dropdown. */
+export const FEMALE_VOICES = new Set(VOICES.map((v) => v.name));
 
 export async function saveApaVoiceConfig(payload: Row, adminId: number) {
   const settings = (payload.settings ?? {}) as Record<string, unknown>;
@@ -474,6 +489,13 @@ export async function saveApaVoiceConfig(payload: Row, adminId: number) {
     );
   }
   for (const [key, value] of Object.entries(settings)) {
+    // Shathi Apa is a woman. A male voice here is not a preference, it is a
+    // different person speaking, so it is refused rather than accepted.
+    if (key === "apa_voice_name" && !FEMALE_VOICES.has(String(value))) {
+      throw new Error(
+        `"${String(value)}" is not one of Shathi Apa's voices. Choose one of: ${[...FEMALE_VOICES].join(", ")}.`
+      );
+    }
     await executeQuery(
       `INSERT INTO app_settings (setting_key, value_text) VALUES (?, ?)
        ON DUPLICATE KEY UPDATE value_text = VALUES(value_text)`,

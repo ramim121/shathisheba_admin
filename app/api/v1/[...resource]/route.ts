@@ -434,7 +434,19 @@ function dbError(error: unknown) {
     // location_required the prompt to finish the profile.
     const code = (error as { code?: unknown } | null)?.code;
     if (typeof code === "string" && CODED_STATUS[code]) {
-      return NextResponse.json({ ok: false, message, code }, { status: CODED_STATUS[code] });
+      // A masked model failure carries how long to wait, where the upstream
+      // told us. The app counts that down and keeps its retry button disabled
+      // until it reaches zero, which is the difference between "try again
+      // later" and a button that works when pressed.
+      const wait = (error as { retryAfterSeconds?: unknown } | null)?.retryAfterSeconds;
+      const seconds = typeof wait === "number" && Number.isFinite(wait) ? Math.ceil(wait) : null;
+      return NextResponse.json(
+        { ok: false, message, code, ...(seconds ? { retry_after: seconds } : {}) },
+        {
+          status: CODED_STATUS[code],
+          ...(seconds ? { headers: { "Retry-After": String(seconds) } } : {})
+        }
+      );
     }
     return NextResponse.json({ ok: false, message, code: "invalid_request" }, { status: 400 });
   }

@@ -61,13 +61,19 @@ const { bengaliDate } = await load("../lib/apa/calendar.ts");
 // models.ts imports the database, so only the pure classifier is lifted out of
 // it — by source, so that a change to the patterns is still covered here.
 const modelsSrc = readFileSync(new URL("../lib/apa/models.ts", import.meta.url), "utf8");
-// From retrySeconds, not from classifyFailure: the classifier now discriminates
-// on the retry delay and calls that helper, so slicing below it lifts a
-// function with a missing dependency.
-const classifySrc = modelsSrc.slice(
-  modelsSrc.indexOf("export function retrySeconds"),
-  modelsSrc.indexOf("export async function runWithChain")
-);
+// classifyFailure lives in models.ts and calls retrySeconds, which lives in
+// pure.ts so that client.ts can use it without the two importing each other.
+// Both sources are lifted and compiled together.
+const pureSrc = readFileSync(new URL("../lib/apa/pure.ts", import.meta.url), "utf8");
+const RETRY_AT = pureSrc.indexOf("export function retrySeconds");
+const retrySrc = pureSrc.slice(RETRY_AT, pureSrc.indexOf("\n}", RETRY_AT) + 2);
+const classifySrc = [
+  retrySrc,
+  modelsSrc.slice(
+    modelsSrc.indexOf("export function classifyFailure"),
+    modelsSrc.indexOf("export async function runWithChain")
+  )
+].join("\n");
 const thinkingSrc = modelsSrc.slice(
   modelsSrc.indexOf("const NO_THINKING_BUDGET"),
   modelsSrc.indexOf("export function classifyFailure")

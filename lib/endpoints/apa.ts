@@ -2,6 +2,7 @@ import { executeQuery, queryRows } from "@/lib/db";
 import { apaConfig } from "@/lib/apa/config";
 import { isApaConfigured } from "@/lib/apa/client";
 import { resolveEntitlement } from "@/lib/apa/entitlement";
+import { startersFor } from "@/lib/apa/starters";
 import { safeJson, type Row } from "@/lib/endpoints/shared";
 
 /**
@@ -25,12 +26,20 @@ export async function getApaEntitlement(userId?: string | null) {
     // Configured separately from enabled: a server with no key must present a
     // closed feature rather than a broken one.
     configured: isApaConfigured(),
-    starters: STARTERS,
+    // Hers, from her own interests and farm record, with one model request a
+    // week at most. The four fixed strings below are only the last resort.
+    starters: await startersFor(userId),
     unlock: UNLOCK_BENEFITS
   };
 }
 
-/** The four chips on an empty chat, and the three under a refusal. */
+/**
+ * The last-resort chips.
+ *
+ * Only reached when there is no user id at all — see lib/apa/starters.ts, which
+ * builds a set from her own record without a model call and caches a generated
+ * one for the week.
+ */
 const STARTERS = [
   { text: "আজ কি বৃষ্টি হবে?", icon: "weather" },
   { text: "গরুর অসুখ দেখাতে চাই", icon: "photo" },

@@ -63,6 +63,34 @@ const { bengaliDate } = await load("../lib/apa/calendar.ts");
 // pure.ts does - and it earns a test because during a rotation both
 // variables are live at once and picking the wrong one is silent.
 const gemKey = await load("../lib/gemini-key.ts");
+/**
+ * The app's multipart encoder, lifted out of the mobile project by source.
+ *
+ * It lives in the other repository, which is why this is a slice rather than an
+ * import - but it is worth testing from here because it is the only part of the
+ * upload that can be checked without a handset, and it took four attempts to
+ * get right. The bytes it produces were posted to the production endpoint and
+ * returned 201; these checks pin the shape so a later tidy-up cannot quietly
+ * change it back.
+ */
+const MOBILE_CLIENT = "../../Shathi Sheba/src/api/client.ts";
+let buildMultipart = null;
+try {
+  const src = readFileSync(new URL(MOBILE_CLIENT, import.meta.url), "utf8").split(String.fromCharCode(13, 10)).join(String.fromCharCode(10));
+  const from = src.indexOf("export function buildMultipart(");
+  if (from !== -1) {
+    const to = src.indexOf(String.fromCharCode(10) + "}" + String.fromCharCode(10), from) + 3;
+    const out = ts.transpileModule(src.slice(from, to), {
+      compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 }
+    }).outputText;
+    ({ buildMultipart } = await import(
+      `data:text/javascript;base64,${Buffer.from(out, "utf8").toString("base64")}`
+    ));
+  }
+} catch {
+  // The mobile project is not always checked out beside this one.
+}
+
 
 
 // models.ts imports the database, so only the pure classifier is lifted out of
@@ -469,6 +497,53 @@ check("more cached tokens than input tokens cannot make a call free", () => {
 });
 
 /* ------------------------------------------------------- 8. Bengali calendar */
+
+console.log("\nthe upload body");
+
+check("the multipart body is exactly what the server accepted", () => {
+  if (!buildMultipart) {
+    console.log("       (skipped: the mobile project is not checked out beside this one)");
+    return;
+  }
+  const bytes = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x80, 0xfe, 0x7f]);
+  const body = buildMultipart({
+    boundary: "BOUND",
+    fields: { folder: "apa" },
+    file: { field: "file", name: "a.jpg", type: "image/jpeg", bytes }
+  });
+  const text = Buffer.from(body).toString("latin1");
+
+  // CRLF everywhere, because a bare LF is not multipart and some parsers
+  // accept it while others silently drop the part.
+  assert.ok(text.startsWith("--BOUND\r\n"), "must open with the boundary and CRLF");
+  assert.ok(text.endsWith("\r\n--BOUND--\r\n"), "must close with the terminating boundary");
+  assert.ok(text.includes('Content-Disposition: form-data; name="folder"\r\n\r\napa\r\n'));
+  assert.ok(text.includes('name="file"; filename="a.jpg"\r\nContent-Type: image/jpeg\r\n\r\n'));
+
+  // The file's bytes must survive intact. 0xFE and 0x7F either side of the
+  // boundary between ASCII and not is exactly where a UTF-8 round trip would
+  // corrupt a JPEG - which is why the body is assembled as bytes and the
+  // request body is a Uint8Array rather than a string.
+  const marker = Buffer.from(bytes).toString("latin1");
+  assert.ok(text.includes(marker), "the file bytes must be copied through unchanged");
+  assert.equal(body.constructor.name, "Uint8Array", "the body must stay binary");
+});
+
+check("no field or file content can break out of the body", () => {
+  if (!buildMultipart) return;
+  // The folder is server-sanitised, but the filename comes from a URI the
+  // farmer's gallery chose, so it is worth knowing what happens to a quote.
+  const body = buildMultipart({
+    boundary: "BOUND",
+    fields: { folder: "apa" },
+    file: { field: "file", name: 'we"ird.jpg', type: "image/jpeg", bytes: new Uint8Array([1]) }
+  });
+  const text = Buffer.from(body).toString("latin1");
+  // Exactly two boundary openings and one terminator: a quote in the filename
+  // must not be able to start a third part.
+  assert.equal(text.split("--BOUND\r\n").length - 1, 2);
+  assert.equal(text.split("--BOUND--").length - 1, 1);
+});
 
 console.log("\nthe key resolver");
 

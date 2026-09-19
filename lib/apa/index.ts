@@ -19,6 +19,7 @@ import {
   openConversation
 } from "@/lib/apa/log";
 import { addUsage, assertAskRate } from "@/lib/apa/quota";
+import { budgetState, BUDGET_SPENT_MESSAGE, type BudgetState } from "@/lib/apa/budget";
 import { costOf } from "@/lib/apa/pure";
 import { answer, type ApaAnswer } from "@/lib/apa/reason";
 import { speak } from "@/lib/apa/tts";
@@ -128,6 +129,11 @@ async function runAsk(input: AskInput): Promise<AskResult> {
   const entitlement = await assertApaAccess(input.userId, FEATURE[input.mode], cfg);
   await assertAskRate(input.userId, cfg);
 
+  // What is left of the month's money, which decides how much of the pipeline
+  // may run. Read once per question: three of the steps below consult it and it
+  // cannot move between them.
+  const budget = await budgetState(cfg);
+
   const lang = input.lang === "en" ? "en" : "bn";
   const profile = await loadProfile(input.userId);
   const districtName = (profile?.district_bn ?? profile?.district_en ?? null) as string | null;
@@ -143,6 +149,13 @@ async function runAsk(input: AskInput): Promise<AskResult> {
   let question = String(input.text ?? "").trim();
   let transcript: AskResult["transcript"] = null;
   let transcribeSeconds = 0;
+
+  // A spoken question has to be transcribed before anything can be looked up,
+  // and transcription is itself a billed call — so unlike a typed question it
+  // cannot be served from the cache for free, and the check has to come first.
+  if (input.mode === "voice" && !budget.allowFresh) {
+    return budgetRefusal({ input, cfg, conversationId, entitlement, started, transcript: null, logUserTurn: true });
+  }
 
   if (input.mode === "voice") {
     if (!input.audio?.data) throw new Error("No audio was received.");
@@ -199,9 +212,16 @@ async function runAsk(input: AskInput): Promise<AskResult> {
   });
   await nameConversation(conversationId, question);
 
+  // Everything from here costs money: the scope gate, the answer, the vision
+  // call. A cache hit does not, which is why this sits *after* the lookup — at
+  // the ceiling the assistant still answers whatever the district asked today.
+  if (!cached && !budget.allowFresh) {
+    return budgetRefusal({ input, cfg, conversationId, entitlement, started, transcript, transcribeSeconds });
+  }
+
   if (cached) {
     const officer = cached.needs_officer ? await firstOfficer(input.userId) : null;
-    const speech = await speechFor({ cfg, input, text: spokenText(cached), entitlement });
+    const speech = await speechFor({ cfg, input, text: spokenText(cached), entitlement, budget });
     const messageId = await logMessage({
       conversationId,
       userId: input.userId,
@@ -289,7 +309,7 @@ async function runAsk(input: AskInput): Promise<AskResult> {
       refused: true,
       answer: { text: refusal, advice: null, caution: null, suggestions, sources: [] },
       officer: null,
-      speech: await speechFor({ cfg, input, text: refusal, entitlement }),
+      speech: await speechFor({ cfg, input, text: refusal, entitlement, budget }),
       asked_clarification: false,
       from_cache: false,
       entitlement: await resolveEntitlement(input.userId, cfg),
@@ -317,7 +337,8 @@ async function runAsk(input: AskInput): Promise<AskResult> {
     cfg,
     input,
     text: spokenText(result),
-    entitlement
+    entitlement,
+    budget
   });
 
   /* --- write it all down -------------------------------------------------- */
@@ -435,13 +456,97 @@ function spokenText(answer: {
   return [answer.text, advice?.body, answer.caution].filter(Boolean).join(". ");
 }
 
+/**
+ * The answer when the month's budget is gone.
+ *
+ * Shaped as a refusal rather than thrown as an error, deliberately. An error
+ * becomes the app's failure card — "something went wrong", a retry button and a
+ * countdown — which is wrong twice over: nothing went wrong, and retrying will
+ * not help until the first of the month. A refusal is a normal turn with an
+ * honest sentence and the field officer's number attached, which is the thing
+ * that actually resolves her problem today.
+ *
+ * The turn is logged like any other so the console shows what was refused and
+ * why, and it never spends a trial question — she asked and got nothing.
+ */
+async function budgetRefusal(args: {
+  input: AskInput;
+  cfg: ApaConfig;
+  conversationId: number | null;
+  entitlement: ApaEntitlement;
+  started: number;
+  transcript: AskResult["transcript"];
+  transcribeSeconds?: number;
+  logUserTurn?: boolean;
+}): Promise<AskResult> {
+  const { input, cfg, conversationId, entitlement, started, transcript } = args;
+
+  if (args.logUserTurn) {
+    await logMessage({
+      conversationId,
+      userId: input.userId,
+      role: "user",
+      inputMode: input.mode,
+      body: null,
+      ip: input.ip
+    });
+  }
+
+  const officer = await firstOfficer(input.userId);
+  const crops = await farmerCrops(input.userId);
+  const suggestions = refusalSuggestions(crops);
+
+  const messageId = await logMessage({
+    conversationId,
+    userId: input.userId,
+    role: "assistant",
+    inputMode: input.mode,
+    body: BUDGET_SPENT_MESSAGE,
+    suggestions,
+    refused: true,
+    refusalReason: "budget_exhausted",
+    model: "none",
+    latencyMs: Date.now() - started
+  });
+
+  await addUsage(input.userId, {
+    ask_count: 1,
+    refused_count: 1,
+    transcribe_seconds: Math.round(args.transcribeSeconds ?? 0)
+  });
+
+  return {
+    conversation_id: conversationId,
+    message_id: messageId,
+    transcript,
+    refused: true,
+    answer: { text: BUDGET_SPENT_MESSAGE, advice: null, caution: null, suggestions, sources: [] },
+    officer,
+    // Spoken by the phone. Paying Google to say "we have run out of money"
+    // would be a small joke at our own expense.
+    speech: entitlement.features.read_aloud
+      ? {
+          mode: "device",
+          text: BUDGET_SPENT_MESSAGE,
+          language: input.lang === "en" ? "en-US" : "bn-BD",
+          rate: cfg.speechRate
+        }
+      : null,
+    asked_clarification: false,
+    from_cache: false,
+    entitlement,
+    latency_ms: Date.now() - started
+  };
+}
+
 async function speechFor(args: {
   cfg: ApaConfig;
   input: AskInput;
   text: string;
   entitlement: ApaEntitlement;
+  budget: BudgetState;
 }): Promise<ApaSpeech | null> {
-  const { cfg, input, text, entitlement } = args;
+  const { cfg, input, text, entitlement, budget } = args;
   if (!text.trim() || !entitlement.features.read_aloud) return null;
 
   // Voice in, voice out, without being asked. A typed question gets a speaker
@@ -450,9 +555,15 @@ async function speechFor(args: {
   const wanted = input.speakAnswer === true || (cfg.autoplayVoice && input.mode !== "text");
   if (!wanted) return null;
 
-  const deviceOnly = cfg.ttsMode === "device";
-  const serverOnly = cfg.ttsMode === "server";
-  const useServer = serverOnly || (cfg.ttsMode === "device_then_server" && input.needsServerSpeech === true);
+  // Past the critical band the phone's own voice does the reading. It is the
+  // cheapest degradation available — she still hears the answer, in Bangla,
+  // just not in Apa's voice — and it is the difference between spending
+  // $0.015 a minute on speech and spending nothing.
+  const deviceOnly = cfg.ttsMode === "device" || !budget.allowServerTts;
+  const serverOnly = cfg.ttsMode === "server" && budget.allowServerTts;
+  const useServer =
+    budget.allowServerTts &&
+    (serverOnly || (cfg.ttsMode === "device_then_server" && input.needsServerSpeech === true));
 
   if (!useServer || deviceOnly) {
     // The phone speaks it. Free, instant, offline, and no 300 KB download.

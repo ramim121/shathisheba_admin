@@ -6,6 +6,7 @@ import { openConversation } from "@/lib/apa/log";
 import { addUsage, estimateLiveCost, reconcileAbandonedSessions } from "@/lib/apa/quota";
 import { chargeableSeconds } from "@/lib/apa/pure";
 import { mintLiveToken, type LiveToken } from "@/lib/apa/token";
+import { budgetState } from "@/lib/apa/budget";
 
 /**
  * A live conversation: minting, accounting, and the honest receipt at the end.
@@ -52,6 +53,19 @@ export async function startLiveSession(input: {
   // Re-checked at mint time and not merely at screen-open time: the token is
   // the thing that costs money, so it is the thing the check has to guard.
   const entitlement = await assertApaAccess(input.userId, "live", cfg);
+
+  // The platform's own ceiling, checked before her personal one. Live audio is
+  // the most expensive thing this product does — roughly $0.023 a minute
+  // against $0.0002 for a typed answer, so one live call costs what a hundred
+  // questions cost — which makes it the first feature to close when the
+  // month's money runs short and the one whose closure buys the most.
+  //
+  // She is pointed at voice messages rather than turned away: same assistant,
+  // same answer, two orders of magnitude cheaper.
+  const budget = await budgetState(cfg);
+  if (!budget.allowLive) {
+    throw new Error("লাইভ কথা এখন বন্ধ আছে। ভয়েস মেসেজ পাঠান — উত্তর একই রকম পাবেন।");
+  }
 
   const allowed = Math.min(entitlement.live.session_seconds_max, entitlement.live.seconds_left);
   if (allowed < 30) {

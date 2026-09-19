@@ -4,10 +4,12 @@ import { recordAudit } from "@/lib/audit";
 import { apaConfig, invalidateApaPrompts } from "@/lib/apa/config";
 import { invalidateVocabulary } from "@/lib/apa/vocabulary";
 import { setEntitlementGrant } from "@/lib/apa/entitlement";
+import { budgetState, forgetSpend } from "@/lib/apa/budget";
 import { MODEL_PRICES, speechCostPerMinute } from "@/lib/apa/quota";
 import { jsonArray } from "@/lib/endpoints/apa";
 import {
-  FREE_LIMITS, coolingModels, forgetSpentModels, modelCallsToday, modelCallsTrend, spentModels
+  FREE_LIMITS, billingEnabled, coolingModels, forgetBilling, forgetSpentModels, modelCallsToday,
+  modelCallsTrend, spentModels
 } from "@/lib/apa/models";
 import { cacheStats, pruneAnswerCache } from "@/lib/apa/cache";
 import { prewarmAnswer } from "@/lib/apa/prewarm";
@@ -436,7 +438,11 @@ const SETTING_KEYS = [
   "apa_ask_per_day", "apa_budget_usd",
   // The cost and quota controls.
   "apa_tts_mode", "apa_answer_cache_hours", "apa_speech_cache_enabled", "apa_prompt_examples",
-  "apa_image_max_px", "apa_fair_share_pct", "apa_prewarm_enabled", "apa_retention_days"
+  "apa_image_max_px", "apa_fair_share_pct", "apa_prewarm_enabled", "apa_retention_days",
+  // Which Gemini tier is in force. Turning it off restores the free-tier
+  // request caps and fair-share rationing, which is what should happen if
+  // billing ever lapses.
+  "apa_billing_enabled"
 ];
 
 export async function getApaVoiceConfig() {
@@ -502,6 +508,14 @@ export async function saveApaVoiceConfig(payload: Row, adminId: number) {
       [key, String(value ?? "").slice(0, 255)]
     );
     written.push(key);
+    // The month's spend is cached for a minute on the ask path. An operator
+    // raising the ceiling to unblock the pilot should see it take effect on the
+    // next question, not wonder for a minute whether the save worked.
+    if (key === "apa_budget_usd") forgetSpend();
+    // The tier decides whether the free-tier day caps apply at all, so a
+    // stale cached answer here would keep rationing farmers after an
+    // operator has switched billing on.
+    if (key === "apa_billing_enabled") forgetBilling();
   }
 
   const prompts = (payload.prompts ?? {}) as Record<string, unknown>;
@@ -604,9 +618,23 @@ export async function getApaUsage(params: { months?: number }) {
   );
 
   const cost = Number(now?.cost ?? 0);
+  // What the ceiling is currently *doing*, not just how full it is. A page that
+  // shows "87%" without saying that live calls are already closed leaves staff
+  // to discover the degradation from a farmer's complaint.
+  const budget = await budgetState(cfg);
   return {
     period: period(),
     budget_usd: cfg.budgetUsd,
+    budget: {
+      band: budget.band,
+      pct: budget.pct,
+      left_usd: Number(budget.leftUsd.toFixed(2)),
+      live: budget.allowLive,
+      server_tts: budget.allowServerTts,
+      prewarm: budget.allowPrewarm,
+      fresh: budget.allowFresh,
+      blind: budget.blind
+    },
     metrics: {
       asks: Number(now?.asks ?? 0),
       voice: Number(now?.voice ?? 0),
@@ -863,6 +891,12 @@ export async function reviewApaFeedback(payload: Row, adminId: number) {
  */
 // The allowances live in lib/apa/models.ts, beside the runner that trips over
 // them and the fair-share guard that rations what is left.
+//
+// Only in force while `apa_billing_enabled` is off. On a billed key they are
+// shown as history rather than as limits — see the `tier` field below, which is
+// what the page renders against. Keeping them visible is deliberate: they are
+// what the service falls back to if billing lapses, and an operator deciding
+// whether to let it lapse should be able to see the shape of that.
 const LIMITS = FREE_LIMITS;
 
 export async function getApaQuota() {
@@ -940,10 +974,15 @@ export async function getApaQuota() {
   }
 
   const spent = new Set(spentModels());
+  const paid = await billingEnabled();
   const models = Array.from(byModel.values())
     .map((row): Row => {
       const model = String(row.model);
-      const known = LIMITS[model];
+      // A retired model stays retired on a billed key: 2.5-flash-lite 404s for
+      // projects created since 2026, and that is a withdrawal, not a quota.
+      const free = LIMITS[model];
+      const retired = free?.rpd === 0 && free?.rpm === 0;
+      const known = paid && !retired ? undefined : free;
       const used = Number(row.calls);
       return {
         ...row,
@@ -957,7 +996,11 @@ export async function getApaQuota() {
         // "observed", "published" or "assumed" — never presented as fact when
         // it is not. The old boolean could not express "Google says so but we
         // have not checked", which was most of the table.
-        limit_source: known?.source ?? "assumed",
+        limit_source: paid ? "observed" : known?.source ?? "assumed",
+        // What the free tier would have allowed, so the page can say what
+        // billing is buying rather than merely showing a blank column.
+        free_tier_rpd: free?.rpd ?? null,
+        free_tier_rpm: free?.rpm ?? null,
         free_rpd_observed: known?.source === "observed",
         remaining: typeof known?.rpd === "number" && known.rpd > 0 ? Math.max(0, known.rpd - used) : null,
         used_pct:
@@ -983,12 +1026,34 @@ export async function getApaQuota() {
   const answers = Number(asked.answers ?? 0);
   const fromCache = Number(asked.from_cache ?? 0);
 
+  // The quota page is where staff look when the assistant is refusing things,
+  // and on a billed key the reason is far more likely to be the budget than a
+  // request cap — so the band belongs on this page too, not only on Usage.
+  const bud = await budgetState(cfg);
+  const budgetSummary = {
+    band: bud.band,
+    pct: bud.pct,
+    spent_usd: Number(bud.spentUsd.toFixed(4)),
+    left_usd: Number(bud.leftUsd.toFixed(2)),
+    budget_usd: bud.budgetUsd,
+    live: bud.allowLive,
+    server_tts: bud.allowServerTts,
+    prewarm: bud.allowPrewarm,
+    fresh: bud.allowFresh
+  };
+
   return {
     day: new Date().toISOString().slice(0, 10),
     // Google's daily quotas reset at midnight Pacific, which is what a staff
     // member in Dhaka needs told rather than left to work out.
     resets_at: nextPacificMidnight(),
     tts_mode: cfg.ttsMode,
+    // Which tier is actually in force. The page has to say this out loud: every
+    // per-day figure on it means something different depending on the answer,
+    // and the same screen was, for two days, showing free-tier caps against a
+    // billed key.
+    tier: paid ? "paid" : "free",
+    budget: budgetSummary,
     chains: cfg.models,
     job_calls: jobCalls,
     models,

@@ -1,7 +1,8 @@
 import { GoogleGenAI } from "@google/genai";
+import { geminiKey, isGeminiKeyConfigured } from "@/lib/gemini-key";
 
 // Lightweight Gemini wrapper used for community-post moderation.
-// The API key lives in .env.local as GEMINI_API_KEY (server-only).
+// The key is resolved by lib/gemini-key.ts (server-only, never EXPO_PUBLIC_*).
 
 // Matches the model the mobile app uses with this API key. gemini-2.0-flash is
 // not available on this key's free tier (returns quota limit 0).
@@ -16,7 +17,7 @@ export type AiModeration = {
 };
 
 export function isGeminiConfigured() {
-  return Boolean(process.env.GEMINI_API_KEY);
+  return isGeminiKeyConfigured();
 }
 
 function coerceFlag(value: unknown): AiFlag {
@@ -46,13 +47,10 @@ function parseModeration(raw: string): AiModeration {
 }
 
 export async function moderatePostText(body: string): Promise<AiModeration> {
-  const key = process.env.GEMINI_API_KEY;
-  if (!key) throw new Error("GEMINI_API_KEY is not configured on the server.");
-
   const content = (body ?? "").trim();
   if (!content) return { flag: "safe", reason: "Empty post — nothing to moderate.", categories: [] };
 
-  const ai = new GoogleGenAI({ apiKey: key });
+  const ai = new GoogleGenAI({ apiKey: geminiKey() });
   const prompt = `You are a content moderator for "Shathi Sheba", a Bangladeshi agriculture community app used by farmers. Posts may be in Bangla or English.
 Classify the POST and respond with STRICT JSON only, no prose:
 {"flag":"safe|review|remove","reason":"<=20 words","categories":["spam","harassment","hate","violence","sexual","scam","misinformation","off_topic"]}

@@ -3,6 +3,7 @@ import { apaConfig } from "@/lib/apa/config";
 import { contextBlock, loadProfile } from "@/lib/apa";
 import { resolveEntitlement } from "@/lib/apa/entitlement";
 import { readAnswerCache, writeAnswerCache } from "@/lib/apa/cache";
+import { budgetState } from "@/lib/apa/budget";
 
 /**
  * Answer a question nobody asked, so that tomorrow morning nobody has to.
@@ -42,6 +43,14 @@ export async function prewarmAnswer(input: {
 
   const cfg = await apaConfig();
   if (!cfg.answerCacheHours) return { stored: false, reason: "the answer cache is switched off" };
+
+  // First spending to stop when the month tightens. This buys answers nobody
+  // has asked for yet, so of everything that costs money it is the only part
+  // whose absence no farmer can notice on the day.
+  const budget = await budgetState(cfg);
+  if (!budget.allowPrewarm) {
+    return { stored: false, reason: `budget at ${budget.pct}% — pre-warming paused` };
+  }
 
   const profile = await loadProfile(input.userId);
   if (!profile) return { stored: false, reason: "that farmer no longer exists" };

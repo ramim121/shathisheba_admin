@@ -243,7 +243,37 @@ export function estimateAskCost(input: {
   );
 }
 
+/**
+ * What a minute of live conversation costs.
+ *
+ * MEASURED 2026-09-19 against the billed key, from usageMetadata on a real
+ * turn (Resources/apa-probes/live.cjs). A 3.7-second question and a 12.0-second
+ * answer — 15.7 seconds of conversation — billed:
+ *
+ *     prompt     721 tokens   (429 text, 292 audio)
+ *     thoughts   105 tokens
+ *     response   307 tokens   (audio)
+ *
+ * At gemini-3.8-live's $3.00/M in and $12.00/M out that is $0.00711, which is
+ * $0.0272 a minute. The previous figure here was an estimate of $0.023 built
+ * from a per-minute audio rate plus a guessed output rate, and it was 18% low —
+ * the guess missed the thinking tokens entirely.
+ *
+ * Kept as a rate per minute rather than per token because that is the unit the
+ * quota is denominated in: she is granted minutes, and the receipt is charged
+ * in seconds. Billing per token would mean a quota she cannot be told in
+ * advance.
+ *
+ * For scale: a typed answer is about $0.0017, so a minute of live costs roughly
+ * what sixteen typed questions cost. That ratio is why lib/apa/budget.ts closes
+ * live before it touches anything else.
+ */
+export const LIVE_USD_PER_MINUTE = 0.0272;
+
 export function estimateLiveCost(seconds: number, model = "gemini-3.8-live"): number {
+  // The model argument is kept because the chain may one day hold more than one
+  // live model, but the measured rate is what is used when it is the one we run.
+  if (model === "gemini-3.8-live") return (seconds / 60) * LIVE_USD_PER_MINUTE;
   const price = priceOf(model);
   // Both directions: she speaks and is spoken to for roughly the same duration.
   return (seconds / 60) * ((price.audioInPerMinute ?? 0.005) + 0.018);
@@ -375,4 +405,65 @@ export function retrySeconds(raw: string): number | null {
   const detail = raw.match(/retryDelay["'\s:]+(\d+(?:\.\d+)?)s/i);
   if (detail) return Number(detail[1]);
   return null;
+}
+
+/* ---------------------------------------------------------------------------
+   Spend bands
+   --------------------------------------------------------------------------- */
+
+export type BudgetBand = "normal" | "tight" | "critical" | "spent";
+
+export type BudgetBands = {
+  band: BudgetBand;
+  pct: number;
+  allowLive: boolean;
+  allowServerTts: boolean;
+  allowPrewarm: boolean;
+  allowFresh: boolean;
+};
+
+/** Thresholds, as a percentage of the month's budget. */
+export const BUDGET_TIGHT_PCT = 70;
+export const BUDGET_CRITICAL_PCT = 85;
+
+/**
+ * Which features the month's spend still allows.
+ *
+ * Here rather than in `budget.ts` because that file reads the database and this
+ * is arithmetic — and arithmetic about money is exactly what wants a test. The
+ * ordering is the design: each band switches off the most expensive remaining
+ * thing per unit of usefulness, so the assistant degrades instead of stopping.
+ *
+ *   normal    everything
+ *   tight     no pre-warm — speculative spend, so nobody notices it go
+ *   critical  no live audio (~$0.023/min against $0.0002 for a typed answer),
+ *             and read-aloud falls back to the phone's free voice
+ *   spent     no fresh model calls; cache hits still served, still spoken
+ *
+ * A budget of zero means "not configured" and allows everything. Reading it as
+ * "spend nothing" would take the assistant down on a fresh database, which is
+ * a worse failure than the one it would be protecting against.
+ */
+export function budgetBands(spentUsd: number, budgetUsd: number): BudgetBands {
+  if (!(budgetUsd > 0)) {
+    return {
+      band: "normal", pct: 0,
+      allowLive: true, allowServerTts: true, allowPrewarm: true, allowFresh: true
+    };
+  }
+  const spent = Math.max(0, spentUsd);
+  const pct = Math.round((spent / budgetUsd) * 100);
+  const band: BudgetBand =
+    pct >= 100 ? "spent"
+      : pct >= BUDGET_CRITICAL_PCT ? "critical"
+      : pct >= BUDGET_TIGHT_PCT ? "tight"
+      : "normal";
+  return {
+    band,
+    pct,
+    allowLive: band === "normal" || band === "tight",
+    allowServerTts: band === "normal" || band === "tight",
+    allowPrewarm: band === "normal",
+    allowFresh: band !== "spent"
+  };
 }

@@ -46,6 +46,8 @@ export type ApaConfig = {
   askPerMinute: number;
   askPerDay: number;
   budgetUsd: number;
+  /** Gemini is billed. See lib/apa/models.ts for what it switches. */
+  billingEnabled: boolean;
   /** Each entry is a fallback chain, most-wanted first. */
   models: {
     text: string[];
@@ -67,7 +69,7 @@ export async function apaConfig(): Promise<ApaConfig> {
     enabled, freeQuestions, liveMinutesMonthly, liveSessionMinutes, liveMicEnabled, liveClientReady,
     bandwidthFloorKbps, dataMbPerMinute, voiceName, autoplayVoice, speechRate,
     ttsMaxChars, ttsModeRaw, speechCacheEnabled, answerCacheHours, promptExamples,
-    retentionDays, imageMaxPx, fairSharePct, askPerMinute, askPerDay, budgetUsd,
+    retentionDays, imageMaxPx, fairSharePct, askPerMinute, askPerDay, budgetUsd, billingEnabled,
     text, classify, transcribe, tts, live, vision
   ] = await Promise.all([
     getBoolSetting("apa_enabled", true),
@@ -92,6 +94,7 @@ export async function apaConfig(): Promise<ApaConfig> {
     num("apa_ask_per_minute", 6),
     num("apa_ask_per_day", 120),
     num("apa_budget_usd", 200),
+    getBoolSetting("apa_billing_enabled", false),
     getSetting("apa_model_text", "gemini-3.1-flash-lite,gemini-2.5-flash"),
     getSetting("apa_model_classify", "gemini-2.5-flash,gemini-3.1-flash-lite"),
     getSetting("apa_model_transcribe", "gemini-3.5-transcribe"),
@@ -130,6 +133,7 @@ export async function apaConfig(): Promise<ApaConfig> {
     askPerMinute: Math.max(1, Math.round(askPerMinute)),
     askPerDay: Math.max(1, Math.round(askPerDay)),
     budgetUsd: Math.max(0, budgetUsd),
+    billingEnabled,
     models: {
       text: modelChain(text, "gemini-3.1-flash-lite"),
       classify: modelChain(classify, "gemini-2.5-flash"),

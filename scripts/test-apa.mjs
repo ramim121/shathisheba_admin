@@ -44,7 +44,8 @@ const pure = await import(`data:text/javascript;base64,${Buffer.from(js, "utf8")
 const {
   looksAgricultural, pcm16ToWav, speakable, audioSeconds, sampleRateFrom,
   estimateAskCost, estimateLiveCost, chargeableSeconds, assertConstrained,
-  normaliseQuestion, isCacheable, cacheableForHours, costOf, priceOf, PERSONAL_TOOLS
+  normaliseQuestion, isCacheable, cacheableForHours, costOf, priceOf, PERSONAL_TOOLS,
+  budgetBands, BUDGET_TIGHT_PCT, BUDGET_CRITICAL_PCT, LIVE_USD_PER_MINUTE
 } = pure;
 
 /** Compile a second dependency-free module the same way. */
@@ -463,6 +464,132 @@ check("more cached tokens than input tokens cannot make a call free", () => {
 
 /* ------------------------------------------------------- 8. Bengali calendar */
 
+console.log("\nthe spend ceiling");
+
+// Billing was enabled on 2026-09-19 and with it the only brake that had ever
+// stopped this project spending money disappeared. On the free tier an
+// exhausted quota returned 429; there is no 429 now, only an invoice. These
+// cover the arithmetic that replaced it, because its failure mode is silent
+// and arrives as a bill.
+
+check("an unconfigured budget allows everything rather than nothing", () => {
+  // The dangerous reading. A fresh database has no budget row, and treating
+  // that as "spend nothing" would take the assistant down on install — worse
+  // than the overspend it would be preventing.
+  for (const budget of [0, -1, Number.NaN, undefined]) {
+    const b = budgetBands(5, budget);
+    assert.equal(b.band, "normal", `budget ${String(budget)} should not ration`);
+    assert.ok(b.allowFresh && b.allowLive && b.allowServerTts && b.allowPrewarm);
+  }
+});
+
+check("each band switches off the next most expensive thing, in order", () => {
+  const at = (pct) => budgetBands((pct / 100) * 10, 10);
+
+  const normal = at(0);
+  assert.equal(normal.band, "normal");
+  assert.ok(normal.allowPrewarm && normal.allowLive && normal.allowServerTts && normal.allowFresh);
+
+  // Pre-warming is speculative spend — answers nobody has asked for — so it is
+  // the only thing here whose absence no farmer can notice on the day.
+  const tight = at(BUDGET_TIGHT_PCT);
+  assert.equal(tight.band, "tight");
+  assert.equal(tight.allowPrewarm, false);
+  assert.ok(tight.allowLive && tight.allowServerTts && tight.allowFresh);
+
+  // Live audio costs roughly a hundred typed answers a minute, so it goes
+  // next, and paid speech falls back to the phone's own voice.
+  const critical = at(BUDGET_CRITICAL_PCT);
+  assert.equal(critical.band, "critical");
+  assert.equal(critical.allowLive, false);
+  assert.equal(critical.allowServerTts, false);
+  assert.equal(critical.allowFresh, true, "she can still be answered at 85%");
+
+  // At the ceiling: no new model calls, but a cache hit costs nothing, so
+  // today's common questions are still answered and still spoken.
+  const spent = at(100);
+  assert.equal(spent.band, "spent");
+  assert.equal(spent.allowFresh, false);
+});
+
+check("a live minute is priced from the measured turn, not an estimate", () => {
+  // Pins the 2026-09-19 measurement so a later "tidy-up" cannot quietly put
+  // the old guess back. A real turn billed 721 prompt + 105 thought + 307
+  // response tokens for 15.7 seconds of conversation, which at $3/M in and
+  // $12/M out is $0.00711.
+  const perMinute = ((721 * 3.0) + ((307 + 105) * 12.0)) / 1e6 / (15.7 / 60);
+  assert.ok(
+    Math.abs(perMinute - LIVE_USD_PER_MINUTE) < 0.0015,
+    `table says $${LIVE_USD_PER_MINUTE}/min, the measurement works out at $${perMinute.toFixed(4)}`
+  );
+  // And the thinking tokens are the part the old estimate missed, so the rate
+  // must be above what audio alone would give.
+  assert.ok(LIVE_USD_PER_MINUTE > 0.023, "the superseded estimate was $0.023 and was 18% low");
+
+  // Sizing: twenty minutes a month each across fifty farmers is more than the
+  // whole $10 ceiling, which is why live is capped and closes first.
+  const worstCase = 50 * 20 * LIVE_USD_PER_MINUTE;
+  assert.ok(worstCase > 10, `50 farmers x 20 min is $${worstCase.toFixed(2)}`);
+  assert.equal(budgetBands(worstCase, 10).allowLive, false, "the ceiling must close live before that");
+});
+
+check("the bands only ever tighten as spend rises", () => {
+  // Guards against a threshold being reordered into an inversion where live
+  // reopens at 95% because a comparison got flipped.
+  const order = { normal: 0, tight: 1, critical: 2, spent: 3 };
+  let previous = budgetBands(0, 10);
+  for (let cents = 1; cents <= 1400; cents += 1) {
+    const now = budgetBands(cents / 100, 10);
+    assert.ok(
+      order[now.band] >= order[previous.band],
+      `band went backwards at $${(cents / 100).toFixed(2)}: ${previous.band} -> ${now.band}`
+    );
+    for (const flag of ["allowPrewarm", "allowLive", "allowServerTts", "allowFresh"]) {
+      if (!previous[flag]) {
+        assert.equal(now[flag], false, `${flag} came back on at $${(cents / 100).toFixed(2)}`);
+      }
+    }
+    previous = now;
+  }
+});
+
+check("overspend stays spent rather than wrapping round", () => {
+  // 140% of the budget is not 40% of it. An operator who has been away for a
+  // week must not find the ceiling reporting healthy.
+  const over = budgetBands(14, 10);
+  assert.equal(over.band, "spent");
+  assert.equal(over.pct, 140);
+  assert.equal(over.allowFresh, false);
+});
+
+check("what the $10 ceiling actually covers, and what it does not", () => {
+  // Sizing, not just comparisons. The per-answer figure is measured, not
+  // assumed: apa_usage held $0.0464 across 27 answers on 2026-09-19 — blended,
+  // so it already includes the cache hits that cost nothing and the server-side
+  // speech that costs the most.
+  const perAnswer = 0.0464 / 27;
+  assert.ok(perAnswer < 0.002, `$${perAnswer.toFixed(5)} an answer is higher than measured`);
+
+  // The build-and-test window: a few hundred answers, comfortably inside $10.
+  assert.equal(budgetBands(500 * perAnswer, 10).band, "normal");
+
+  // The pilot the product is being built for. This is the number that matters
+  // and it is the reason $10 is a testing ceiling rather than a pilot one: at
+  // fifty farmers asking three questions a day it lands near enough to $10 to
+  // pause the pre-warm — which would cost more than it saves, because the
+  // pre-warm is what makes the mornings cheap.
+  const pilotMonth = 50 * 3 * 30 * perAnswer;
+  assert.ok(pilotMonth > 7 && pilotMonth < 8, `expected ~$7.7, got $${pilotMonth.toFixed(2)}`);
+  assert.equal(budgetBands(pilotMonth, 10).band, "tight", "a $10 ceiling rations the pilot");
+
+  // $20 is what keeps it out of the bands entirely, which is why the board's
+  // $20-30 figure for the pilot is the right one and this $10 is not.
+  assert.equal(budgetBands(pilotMonth, 20).band, "normal", "$20 carries the pilot untouched");
+
+  // And the ceiling has to bite before the credit runs out, or it is decoration:
+  // $10 of budget must refuse before $10 of credit is gone.
+  assert.equal(budgetBands(10, 10).allowFresh, false);
+});
 console.log("\nBengali calendar");
 
 check("the year turns on 14 April, not 13 or 15", () => {

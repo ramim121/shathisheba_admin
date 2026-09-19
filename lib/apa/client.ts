@@ -1,8 +1,10 @@
 import { GoogleGenAI } from "@google/genai";
 import { retrySeconds } from "@/lib/apa/pure";
+import { geminiKey, isGeminiKeyConfigured } from "@/lib/gemini-key";
 
 /**
- * The one place the Gemini key is read.
+ * The Gemini key, resolved by `lib/gemini-key.ts` — see there for why two
+ * variable names exist during a rotation.
  *
  * It used to be read in the phone — `EXPO_PUBLIC_GEMINI_API_KEY`, compiled into
  * every installed APK, extractable with `unzip` and `strings`. A key taken out
@@ -13,13 +15,11 @@ import { retrySeconds } from "@/lib/apa/pure";
  */
 
 export function apaKey(): string {
-  const key = process.env.GEMINI_API_KEY ?? "";
-  if (!key) throw new Error("GEMINI_API_KEY is not configured on the server.");
-  return key;
+  return geminiKey();
 }
 
 export function isApaConfigured(): boolean {
-  return Boolean(process.env.GEMINI_API_KEY);
+  return isGeminiKeyConfigured();
 }
 
 let cached: GoogleGenAI | null = null;

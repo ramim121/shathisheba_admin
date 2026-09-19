@@ -1,3 +1,4 @@
+import { getBoolSetting } from "@/lib/settings";
 import { executeQuery, queryRows } from "@/lib/db";
 import { costOf } from "@/lib/apa/pure";
 import { friendlyModelError } from "@/lib/apa/client";
@@ -96,7 +97,27 @@ export type Allowance = {
 };
 
 /**
- * What each model's free tier allows — per minute **and** per day.
+ * What each model's **free** tier allows — per minute and per day.
+ *
+ * ## These numbers stopped applying on 2026-09-19
+ *
+ * Billing was enabled that day, and measurement immediately contradicted every
+ * row below. `gemini-2.5-flash` is listed here at 20 requests a *day*, observed;
+ * on the billed key it served 45 in 59 seconds. The same held for all four chain
+ * models — 45 calls each with no 429, where the free tier refuses at 15 a
+ * minute.
+ *
+ * The table is kept rather than deleted because it is still the truth about the
+ * free tier, and the free tier is what this project falls back to if billing
+ * lapses or the card is declined. What changed is that it is no longer read
+ * unconditionally: `allowanceFor()` returns these figures only when
+ * `apa_billing_enabled` is off, and `PAID_UNMETERED` when it is on.
+ *
+ * The distinction matters because reading a free cap on a billed key does real
+ * damage rather than none: `dayHeadroom` would find the chain "exhausted" after
+ * 20 answers, `fairShareCap` would ration every farmer to three questions a
+ * day, and the assistant would spend the rest of the day apologising for a
+ * limit that does not exist.
  *
  * ## Read this before trusting a 429
  *
@@ -164,6 +185,62 @@ export const FREE_LIMITS: Record<string, Allowance> = {
   "gemini-2.5-flash-lite": { rpm: 0, rpd: 0, source: "observed" }
 };
 
+/**
+ * The allowance on a billed key.
+ *
+ * `rpd: null` is "no daily cap worth modelling", which on the paid tier is the
+ * honest answer: Google's paid limits are in the thousands per minute and are
+ * not the binding constraint on a 50-farmer pilot. The binding constraint is
+ * money, and that has its own guard in `lib/apa/budget.ts`.
+ *
+ * `rpm` is left null too rather than filled with a published figure. Measuring
+ * it properly means firing past a thousand requests in a minute, which costs
+ * more than the number is worth — and the per-minute *cooling* logic does not
+ * need to know the limit in advance. It reacts to the 429 when one arrives,
+ * which is the behaviour that actually matters.
+ */
+const PAID_UNMETERED: Allowance = { rpm: null, rpd: null, source: "observed" };
+
+/**
+ * Whether this project is billed.
+ *
+ * An explicit setting rather than something inferred from a probe. Inferring it
+ * would mean deciding the tier from the absence of a 429, which is exactly the
+ * reasoning that produced "15 requests a day" — and the operator who enabled
+ * billing already knows the answer.
+ *
+ * Cached for the process because it changes roughly once in the product's life.
+ */
+let billingCache: { at: number; on: boolean } | null = null;
+
+export async function billingEnabled(): Promise<boolean> {
+  if (billingCache && Date.now() - billingCache.at < 60_000) return billingCache.on;
+  const on = await getBoolSetting("apa_billing_enabled", false);
+  billingCache = { at: Date.now(), on };
+  return on;
+}
+
+/** Test seam and console hook: drop the cached tier after the setting changes. */
+export function forgetBilling(): void {
+  billingCache = null;
+}
+
+/**
+ * The allowance actually in force for a model, given the tier.
+ *
+ * Note the deliberate asymmetry: on the paid tier every model is unmetered
+ * *except* one that the free tier recorded as flatly unusable. `gemini-2.5-flash-lite`
+ * returns 404 for new projects since 2026 — that is a retirement, not a quota,
+ * and paying does not un-retire it.
+ */
+export async function allowanceFor(model: string): Promise<Allowance | null> {
+  const free = FREE_LIMITS[model] ?? null;
+  if (!(await billingEnabled())) return free;
+  if (free && free.rpd === 0 && free.rpm === 0) return free;
+  return PAID_UNMETERED;
+}
+
+/** The free-tier figure regardless of tier, for the console's comparison column. */
 export function freeLimits(model: string): Allowance | null {
   return FREE_LIMITS[model] ?? null;
 }
@@ -191,8 +268,13 @@ export async function dayHeadroom(chain: string[]): Promise<{
   const used = rows.reduce((sum, row) => sum + Number(row.calls ?? 0), 0);
   let cap = 0;
   const unknown: string[] = [];
+  const paid = await billingEnabled();
   for (const model of chain) {
-    const rpd = FREE_LIMITS[model]?.rpd;
+    // On a billed key there is no daily cap to divide up, so every model is
+    // "unknown" and the cap stays zero — which is how fairShareCap is told to
+    // stand down. Request rationing is a free-tier idea; on paid, the thing
+    // worth rationing is money, and budget.ts does that.
+    const rpd = paid ? null : FREE_LIMITS[model]?.rpd;
     if (typeof rpd === "number") cap += rpd;
     else unknown.push(model);
   }

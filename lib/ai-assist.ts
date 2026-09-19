@@ -1,3 +1,4 @@
+import { geminiKey, isGeminiKeyConfigured } from "@/lib/gemini-key";
 import { GoogleGenAI } from "@google/genai";
 
 /**
@@ -16,13 +17,11 @@ import { GoogleGenAI } from "@google/genai";
 const MODEL = "gemini-3.6-flash";
 
 export function isAiConfigured() {
-  return Boolean(process.env.GEMINI_API_KEY);
+  return isGeminiKeyConfigured();
 }
 
 function client() {
-  const key = process.env.GEMINI_API_KEY;
-  if (!key) throw new Error("GEMINI_API_KEY is not configured on the server.");
-  return new GoogleGenAI({ apiKey: key });
+  return new GoogleGenAI({ apiKey: geminiKey() });
 }
 
 /** Models occasionally wrap JSON in prose or a fence despite the mime type. */

@@ -285,3 +285,67 @@ function nextMonthLabel(): string {
   ];
   return `১ ${months[next.getUTCMonth()]}`;
 }
+
+/**
+ * A failure the phone saw, recorded so somebody can read it.
+ *
+ * The photo upload took four attempts and voice input three, and every round
+ * failed the same way: the fault was on a handset, the detail was thrown away,
+ * and the next fix was a guess. This is the channel that was missing.
+ *
+ * Deliberately permissive about what it accepts and strict about what it keeps.
+ * The app is reporting a failure it has already decided to show the farmer, so
+ * rejecting a malformed report would just lose the one thing being asked for —
+ * every field is coerced and clamped instead. Nothing is stored that is not a
+ * failure, and `detail` is an error message, never her question or her audio.
+ *
+ * Never throws. A diagnostics channel that can break the screen it is
+ * diagnosing is worse than no channel.
+ */
+export async function reportApaClientError(payload: Record<string, unknown>) {
+  const str = (v: unknown, max: number) => {
+    const s = String(v ?? "").trim();
+    return s ? s.slice(0, max) : null;
+  };
+  const userId = String(payload.user_id ?? "").trim();
+  if (!userId) return { recorded: false, reason: "no user" };
+
+  try {
+    const status = Number(payload.http_status);
+    await executeQuery(
+      `INSERT INTO apa_client_errors
+         (user_id, area, stage, code, http_status, detail, app_version, platform, os_version)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        userId,
+        str(payload.area, 24) ?? "unknown",
+        str(payload.stage, 48),
+        str(payload.code, 48),
+        Number.isFinite(status) && status > 0 && status < 1000 ? Math.round(status) : null,
+        str(payload.detail, 4000),
+        str(payload.app_version, 24),
+        str(payload.platform, 16),
+        str(payload.os_version, 24)
+      ]
+    );
+    return { recorded: true };
+  } catch (error) {
+    // Logged, not thrown: see the note above.
+    console.error("apa client error report failed", error);
+    return { recorded: false };
+  }
+}
+
+/** The last failures the phones reported, newest first. For the console and for me. */
+export async function getApaClientErrors(limit = 60) {
+  const rows = await queryRows<Record<string, unknown>>(
+    `SELECT e.id, e.user_id, u.phone, e.area, e.stage, e.code, e.http_status,
+            e.detail, e.app_version, e.platform, e.os_version, e.created_at
+       FROM apa_client_errors e
+       LEFT JOIN app_users u ON u.id = e.user_id
+      ORDER BY e.id DESC
+      LIMIT ?`,
+    [Math.min(200, Math.max(1, Math.round(limit)))]
+  );
+  return { errors: rows };
+}

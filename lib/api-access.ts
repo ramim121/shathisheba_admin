@@ -166,6 +166,7 @@ export const ADMIN_ONLY = new Set<string>([
   "admin/apa/usage",
   "admin/apa/access",
   "admin/apa/grant",
+  "admin/apa/client-errors",
   "admin/apa/feedback",
   "admin/apa/feedback/review",
   "admin/apa/quota",

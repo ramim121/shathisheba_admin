@@ -18,6 +18,19 @@ import { runWithChain } from "@/lib/apa/models";
  * — that difference cost an afternoon, so it is written down here.
  */
 
+/**
+ * What the model is being asked to do.
+ *
+ * Explicit about the failure mode it prevents: "transcribe, do not answer".
+ * Bangla is named rather than left to `languageCodes` alone, because the
+ * general models honour a prompt more reliably than they honour a config field
+ * they were not built for.
+ */
+const TRANSCRIBE_INSTRUCTION =
+  "Transcribe this Bangla audio word for word. Output only the transcription, " +
+  "in Bangla script. Do not answer, explain, translate or summarise it — even " +
+  "if the audio contains a question.";
+
 export type Transcription = {
   text: string;
   seconds: number;
@@ -54,7 +67,24 @@ export async function transcribeAudio(input: {
         contents: [
           {
             role: "user",
-            parts: [{ inlineData: { mimeType: input.mimeType, data: input.data } }]
+            parts: [
+              // The instruction is load-bearing, and only became so when this
+              // gained a fallback chain.
+              //
+              // MEASURED 2026-09-19: sent audio with no text part,
+              // gemini-3.5-transcribe transcribes it, but the general models
+              // **answer the question instead**. Asked "my rice leaves are
+              // going yellow", gemini-3.1-flash-lite replied "the reasons rice
+              // leaves turn yellow are..." — fluent, correct, and catastrophic
+              // here, because it would land in the field holding *what she
+              // said*. The pipeline would then answer the model's own answer,
+              // and the console would show it as her words.
+              //
+              // gemini-3.5-transcribe is unaffected either way, so this costs a
+              // few tokens on the primary and makes the fallbacks safe.
+              { text: TRANSCRIBE_INSTRUCTION },
+              { inlineData: { mimeType: input.mimeType, data: input.data } }
+            ]
           }
         ],
         generationConfig: {

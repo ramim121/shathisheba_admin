@@ -189,10 +189,12 @@ import { ApaLockedError } from "@/lib/apa/entitlement";
 import { closeLiveSession, markLiveConnected, saveLiveTranscript, startLiveSession } from "@/lib/apa/live";
 import {
   clearApaHistory,
+  getApaClientErrors,
   getApaConversation,
   getApaConversations,
   getApaEntitlement,
   getApaSettings,
+  reportApaClientError,
   saveApaSettings,
   submitApaFeedback
 } from "@/lib/endpoints/apa";
@@ -623,6 +625,8 @@ export async function GET(request: NextRequest, { params }: Params) {
               : await getApaPromptVersions(searchParams.get("prompt_key")),
             { source: "mysql", surface: "admin", resource }
           );
+        case "admin/apa/client-errors":
+          return NextResponse.json({ ok: true, ...(await getApaClientErrors(Number(searchParams.get("limit") ?? 60))) });
         case "admin/apa/feedback":
           return envelope(
             await getApaFeedback({ vote: searchParams.get("vote"), state: searchParams.get("state"), limit: Number(searchParams.get("limit") ?? 60) }),
@@ -1188,6 +1192,15 @@ export async function POST(request: NextRequest, { params }: Params) {
             return NextResponse.json({ ok: true, action: "apa_feedback", result: await submitApaFeedback(p) });
           case "app/apa/settings":
             return NextResponse.json({ ok: true, action: "apa_settings_saved", result: await saveApaSettings(p) });
+          case "app/apa/client-error":
+            // Fire-and-forget from the phone. Always 200, because a diagnostics
+            // channel that can fail the screen it is diagnosing is worse than
+            // none at all.
+            return NextResponse.json({
+              ok: true,
+              action: "apa_client_error",
+              result: await reportApaClientError({ ...p, user_id: String(p.user_id ?? caller.user?.id ?? "") })
+            });
           case "app/apa/history/clear":
             return NextResponse.json({ ok: true, action: "apa_history_cleared", result: await clearApaHistory(String(p.user_id ?? "")) });
         }

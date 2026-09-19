@@ -59,6 +59,12 @@ async function load(relative) {
 
 const { bengaliDate } = await load("../lib/apa/calendar.ts");
 
+// The key resolver. No imports of its own, so it compiles the same way
+// pure.ts does - and it earns a test because during a rotation both
+// variables are live at once and picking the wrong one is silent.
+const gemKey = await load("../lib/gemini-key.ts");
+
+
 // models.ts imports the database, so only the pure classifier is lifted out of
 // it — by source, so that a change to the patterns is still covered here.
 const modelsSrc = readFileSync(new URL("../lib/apa/models.ts", import.meta.url), "utf8");
@@ -463,6 +469,49 @@ check("more cached tokens than input tokens cannot make a call free", () => {
 });
 
 /* ------------------------------------------------------- 8. Bengali calendar */
+
+console.log("\nthe key resolver");
+
+check("the new key wins while both are live, and the old one still works alone", () => {
+  // This is the whole point of there being two names. A rotation is not
+  // atomic: the new key has to be proven before the old one is destroyed, and
+  // in between both are set - as they are on the production server right now.
+  // Resolving the wrong one there would stay invisible until the day the old
+  // key was deleted, which is the worst possible moment to find out.
+  const saved = { old: process.env.GEMINI_API_KEY, next: process.env.GEMINI_API_KEY_NEW };
+  try {
+    process.env.GEMINI_API_KEY = "OLD-aaaa";
+    process.env.GEMINI_API_KEY_NEW = "NEW-bbbb";
+    assert.equal(gemKey.geminiKeySource(), "GEMINI_API_KEY_NEW");
+    assert.equal(gemKey.geminiKey(), "NEW-bbbb", "the new key must win while both are set");
+
+    // What happens the moment the old key is deleted: nothing.
+    delete process.env.GEMINI_API_KEY;
+    assert.equal(gemKey.geminiKey(), "NEW-bbbb");
+
+    // A server not yet updated keeps working on the old name alone.
+    process.env.GEMINI_API_KEY = "OLD-aaaa";
+    delete process.env.GEMINI_API_KEY_NEW;
+    assert.equal(gemKey.geminiKey(), "OLD-aaaa");
+
+    // An empty value is not a key. Treating "" as set would send an empty
+    // credential to Gemini and read the 400 back as a model fault.
+    process.env.GEMINI_API_KEY_NEW = "   ";
+    assert.equal(gemKey.geminiKey(), "OLD-aaaa", "whitespace is not a key");
+
+    // Neither: throw here, rather than fail at the API with something that
+    // reads like an outage.
+    delete process.env.GEMINI_API_KEY;
+    delete process.env.GEMINI_API_KEY_NEW;
+    assert.equal(gemKey.isGeminiKeyConfigured(), false);
+    assert.throws(() => gemKey.geminiKey(), /No Gemini API key/);
+  } finally {
+    if (saved.old === undefined) delete process.env.GEMINI_API_KEY;
+    else process.env.GEMINI_API_KEY = saved.old;
+    if (saved.next === undefined) delete process.env.GEMINI_API_KEY_NEW;
+    else process.env.GEMINI_API_KEY_NEW = saved.next;
+  }
+});
 
 console.log("\nthe spend ceiling");
 

@@ -112,10 +112,11 @@ export async function apaConfig(): Promise<ApaConfig> {
     liveMinutesMonthly: Math.max(0, Math.round(liveMinutesMonthly)),
     liveSessionMinutes: Math.max(1, Math.round(liveSessionMinutes)),
     liveMicEnabled,
-    // Both halves have to be true. The platform being willing to pay for live
-    // is not the same as a shipped app being able to capture PCM16, and
-    // conflating them produced a screen that claimed to be listening with no
-    // socket behind it.
+    // Both halves have to be true, and as of 2026-09-19 both are actually
+    // checked — see the live gate in entitlement.ts. The platform being willing
+    // to pay for live is not the same as a shipped app being able to capture
+    // PCM16, and conflating them produced a screen that claimed to be listening
+    // with no socket behind it.
     liveClientReady,
     bandwidthFloorKbps: Math.max(0, Math.round(bandwidthFloorKbps)),
     dataMbPerMinute: Math.max(0, dataMbPerMinute),

@@ -335,9 +335,28 @@ export async function resolveEntitlement(
     ask_voice: full || tier === "trial",
     ask_photo: full || tier === "trial",
     read_aloud: full || tier === "trial",
-    // Live is a verified-only feature *and* needs a device that can capture
-    // PCM. Both are decided here so no screen has to reason about either.
-    live: full && cfg.liveMicEnabled && minutes * 60 - liveSecondsUsed > 0
+    // Live is a verified-only feature, and it needs two separate permissions
+    // that are easy to confuse:
+    //
+    //   apa_live_mic_enabled    the platform is willing to pay for live
+    //   apa_live_client_ready   builds in the field contain the PCM recorder
+    //
+    // Until 2026-09-19 only the first was actually consulted, while the config
+    // comment claimed both were — so `apa_live_client_ready` sat in the console
+    // as an editable switch that did nothing, and an operator reading
+    // "client ready: off" would reasonably have concluded live was off.
+    //
+    // The second one exists because live needs react-native-audio-api, which is
+    // native: an OTA update cannot add it, so there is a window in which the
+    // server is willing and the installed app cannot. The app has its own
+    // LIVE_CLIENT_READY constant for the build it is actually running; this is
+    // the fleet-wide counterpart, and the one a staff member can turn off in a
+    // hurry when a bad build is out.
+    live:
+      full &&
+      cfg.liveMicEnabled &&
+      cfg.liveClientReady &&
+      minutes * 60 - liveSecondsUsed > 0
   };
 
   // Only the farmers who might need it, so the common path stays one query

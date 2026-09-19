@@ -498,6 +498,31 @@ check("more cached tokens than input tokens cannot make a call free", () => {
 
 /* ------------------------------------------------------- 8. Bengali calendar */
 
+/**
+ * The app's own choice of which uploaded URL to send back.
+ *
+ * Lifted by source for the same reason buildMultipart is: it lives in the
+ * other repository, and it is the piece that actually broke the photo upload.
+ */
+let uploadedUrl = null;
+try {
+  const src = readFileSync(new URL(MOBILE_CLIENT, import.meta.url), "utf8")
+    .split(String.fromCharCode(13, 10))
+    .join(String.fromCharCode(10));
+  const from = src.indexOf("function uploadedUrl(");
+  if (from !== -1) {
+    const to = src.indexOf(String.fromCharCode(10) + "}" + String.fromCharCode(10), from) + 3;
+    const out = ts.transpileModule("export " + src.slice(from, to), {
+      compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 }
+    }).outputText;
+    ({ uploadedUrl } = await import(
+      `data:text/javascript;base64,${Buffer.from(out, "utf8").toString("base64")}`
+    ));
+  }
+} catch {
+  // The mobile project is not always checked out beside this one.
+}
+
 console.log("\nthe upload body");
 
 check("the multipart body is exactly what the server accepted", () => {
@@ -544,6 +569,53 @@ check("no field or file content can break out of the body", () => {
   assert.equal(text.split("--BOUND\r\n").length - 1, 2);
   assert.equal(text.split("--BOUND--").length - 1, 1);
 });
+
+check("the uploaded URL sent for analysis is one the server will accept", () => {
+  if (!uploadedUrl) {
+    console.log("       (skipped: the mobile project is not checked out beside this one)");
+    return;
+  }
+  const base = "https://shathisheba.digigramventures.com";
+
+  // This is the case that was broken, and the reason it survived an
+  // end-to-end test: /api/upload returns a bucket KEY as `path` and the public
+  // URL as `url`, and the app was prefixing its own host to the key. That
+  // produced https://shathisheba.digigramventures.com/apa/x.jpg, which is not
+  // the bucket, so resolveImage refused it with "Only images stored by this
+  // console can be analysed." The e2e test passed because it used `url`
+  // directly rather than the app's own choice between the two.
+  const s3 = uploadedUrl(
+    {
+      ok: true,
+      path: "/apa/1789814972348-6fbf3fb7f501.jpg",
+      url: "https://shathi-sheba.s3.ap-southeast-1.amazonaws.com/apa/1789814972348-6fbf3fb7f501.jpg",
+      storage: "s3"
+    },
+    base
+  );
+  assert.equal(
+    s3,
+    "https://shathi-sheba.s3.ap-southeast-1.amazonaws.com/apa/1789814972348-6fbf3fb7f501.jpg",
+    "on S3 the bucket URL must be sent, never the app host plus the key"
+  );
+  assert.ok(!s3.startsWith(base), "the app's own host must not be prefixed to a bucket key");
+
+  // Local disk: `path` is under /uploads/, which the server accepts as a path,
+  // and the app's base keeps it reachable from a handset on the LAN - the
+  // server builds its own `url` from the request Host header, which can be an
+  // address the phone cannot reach.
+  const local = uploadedUrl(
+    { ok: true, path: "/uploads/apa/x.jpg", url: "http://0.0.0.0:3000/uploads/apa/x.jpg", storage: "local" },
+    base
+  );
+  assert.equal(local, `${base}/uploads/apa/x.jpg`);
+
+  // Neither shape recognised: return something rather than an empty string,
+  // which would fail later and less clearly as "no image".
+  assert.equal(uploadedUrl({ ok: true, url: "https://example.test/a.jpg" }, base), "https://example.test/a.jpg");
+  assert.equal(uploadedUrl({ ok: true }, base), "");
+});
+
 
 console.log("\nthe key resolver");
 

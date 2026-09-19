@@ -84,6 +84,36 @@ type Quota = {
 };
 
 const money = (v: unknown) => `$${n(v).toFixed(4)}`;
+
+/**
+ * A short day label for the trend, e.g. "17 Sep".
+ *
+ * `for_day` is a DATE and mysql2 hands it back as a JS Date, so
+ * `String(row.for_day).slice(5)` put "09-17T18:00:00.000Z" under every bar. It
+ * looked like a bug because it was one.
+ */
+function dayLabel(value: unknown): string {
+  const at = value instanceof Date ? value : new Date(s(value));
+  if (Number.isNaN(at.getTime())) return s(value).slice(0, 10);
+  return at.toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
+}
+
+/**
+ * The useful part of an upstream error.
+ *
+ * Gemini returns its whole JSON body, and the errors column was showing three
+ * lines of it — an opening brace, a code, a documentation URL. The first
+ * sentence of `message` is what a staff member acts on. The untruncated text
+ * stays on hover, because occasionally the tail is the interesting part.
+ */
+function cleanError(raw: unknown): string {
+  const text = s(raw);
+  const inner = text.match(/"message"\s*:\s*"([^"]{6,240})/);
+  const body = (inner ? inner[1] : text).replace(/\\n/g, " ").replace(/\s+/g, " ").trim();
+  const first = body.split(". ")[0];
+  return (first.length > 20 ? first : body).slice(0, 160);
+}
+
 const JOB_LABEL: Record<string, string> = {
   text: "Answering",
   answer: "Answering",
@@ -172,6 +202,13 @@ export function ApaQuota() {
             model rather than in total. When the first model in a chain is spent the next one has
             its own separate allowance, which is what keeps the assistant answering.
           </p>
+          {/* The reset time lives here rather than in the metric band: it is a
+              time, not a count, and six metrics never fitted a five-column row
+              so the sixth always sat alone. */}
+          <p className="apa-quota-reset">
+            Counters reset in <strong>{d?.resets_at.hours_away ?? "—"}h</strong>
+            {d ? ` — ${d.resets_at.dhaka} Dhaka time` : ""}. Per-minute limits clear within the minute.
+          </p>
         </div>
         <div className="toolbar">
           <button className="btn ghost" type="button" onClick={exportCsv} disabled={!d}>
@@ -210,13 +247,7 @@ export function ApaQuota() {
                 note: "rather than guessing at a vague question",
                 tone: "tone-plum"
               },
-              { label: "Estimated spend today", value: money(d.totals.cost), note: "list prices, not an invoice", tone: "tone-gold" },
-              {
-                label: "Counters reset in",
-                value: `${d.resets_at.hours_away}h`,
-                note: `${d.resets_at.dhaka} Dhaka time`,
-                tone: "tone-sky"
-              }
+              { label: "Estimated spend today", value: money(d.totals.cost), note: "list prices, not an invoice", tone: "tone-gold" }
             ]}
           />
 
@@ -315,7 +346,11 @@ export function ApaQuota() {
                           {m.quota_errors && m.other_errors ? " · " : ""}
                           {m.other_errors ? `${num(m.other_errors)} other` : ""}
                           {!m.quota_errors && !m.other_errors ? "—" : null}
-                          {m.last_error ? <small className="apa-quota-err">{s(m.last_error).slice(0, 90)}</small> : null}
+                          {m.last_error ? (
+                            <small className="apa-quota-err" title={s(m.last_error)}>
+                              {cleanError(m.last_error)}
+                            </small>
+                          ) : null}
                         </td>
                       </tr>
                     );
@@ -394,6 +429,8 @@ export function ApaQuota() {
                   <p>
                     Fifty farmers in one upazila asking the same thing on the same morning is one
                     model call. Never across districts, never across days, never anything personal.
+                    The big figure counts <strong>today</strong>; the table counts every reuse since
+                    each row was written, which is why they differ.
                   </p>
                 </div>
               </div>
@@ -411,7 +448,7 @@ export function ApaQuota() {
                 <div className="table-wrap">
                   <table>
                     <thead>
-                      <tr><th>Question</th><th>Reused</th><th>Answered by</th></tr>
+                      <tr><th>Question</th><th>Reused, all time</th><th>Answered by</th></tr>
                     </thead>
                     <tbody>
                       {d.cache.top.map((row, i) => (
@@ -451,7 +488,7 @@ export function ApaQuota() {
                   <div className="apa-trend-col" key={s(t.for_day)}>
                     <b>{num(t.calls)}</b>
                     <i style={{ height: `${Math.max(2, (n(t.calls) / peak) * 100)}%` }} />
-                    <span>{s(t.for_day).slice(5)}</span>
+                    <span>{dayLabel(t.for_day)}</span>
                   </div>
                 ))}
               </div>

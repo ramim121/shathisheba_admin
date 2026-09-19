@@ -523,6 +523,104 @@ try {
   // The mobile project is not always checked out beside this one.
 }
 
+/**
+ * The answer-markup handling from reason.ts.
+ *
+ * reason.ts imports the database, so `inlineNavigation` is lifted by source
+ * with the screen list stubbed. It is worth testing because the leak it fixes
+ * reached a farmer's screen: four lines of JSON in the middle of advice about
+ * her cow.
+ */
+const reasonSrc = readFileSync(new URL("../lib/apa/reason.ts", import.meta.url), "utf8")
+  .split(String.fromCharCode(13, 10))
+  .join(String.fromCharCode(10));
+let inlineNavigation = null;
+let stripTags = null;
+try {
+  const from = reasonSrc.indexOf("function inlineNavigation(");
+  const to = reasonSrc.indexOf(String.fromCharCode(10) + "}" + String.fromCharCode(10), from) + 3;
+  const stub = `
+    type ApaSource = { kind: string; label_bn: string; action: string | null };
+    const NAVIGABLE_SCREENS = ["myListings", "marketUpdates", "buy", "officers"] as const;
+  `;
+  const out = ts.transpileModule(stub + "export " + reasonSrc.slice(from, to), {
+    compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 }
+  }).outputText;
+  ({ inlineNavigation } = await import(
+    `data:text/javascript;base64,${Buffer.from(out, "utf8").toString("base64")}`
+  ));
+  // The catch-all stripper, read out of the source so the test tracks the code.
+  const m = reasonSrc.match(/\.replace\((\/\\\[\\\[[^/]*\/[gi]+)/);
+  stripTags = m ? new RegExp(m[1].slice(1, m[1].lastIndexOf("/")), "gi") : null;
+} catch {
+  // Leave them null; the checks below skip.
+}
+
+console.log("\nanswer markup");
+
+check("an inline navigate_to becomes a button instead of reaching the screen", () => {
+  if (!inlineNavigation) {
+    console.log("       (skipped: could not lift inlineNavigation)");
+    return;
+  }
+  // Verbatim from the handset: the model wrote the block as text, and the
+  // catch-all stripper did not match it because `[a-z]+` has no underscore.
+  const raw =
+    "আপনার দুটি গরু ইতিমধ্যেই বিক্রির তালিকায় জমা দেওয়া আছে।\n" +
+    "[[navigate_to]]\n" +
+    '{ "label_bn": "বিক্রির তালিকা দেখুন", "screen": "myListings" }\n' +
+    "[[/navigate_to]]";
+
+  const out = inlineNavigation(raw);
+  assert.ok(!/navigate_to/.test(out.rest), "the tag must not survive into the answer");
+  assert.ok(!/label_bn|screen/.test(out.rest), "nor may the JSON keys");
+  assert.equal(out.sources.length, 1, "the offer must be recovered, not discarded");
+  assert.deepEqual(out.sources[0], {
+    kind: "action",
+    label_bn: "বিক্রির তালিকা দেখুন",
+    action: "screen:myListings"
+  });
+});
+
+check("a malformed or unknown navigate_to leaves no button", () => {
+  if (!inlineNavigation) return;
+  // A button that goes nowhere is worse than no button.
+  for (const body of ['{ "screen": "notAScreen", "label_bn": "x" }', "not json at all", "{}"]) {
+    const out = inlineNavigation(`a [[navigate_to]]${body}[[/navigate_to]] b`);
+    assert.equal(out.sources.length, 0, `expected no source for ${body}`);
+    assert.ok(!/navigate_to/.test(out.rest), "and still no markup on screen");
+  }
+});
+
+check("the catch-all stripper in reason.ts covers underscores and digits", () => {
+  // Asserted against the source text rather than by lifting the regex out of
+  // it: the first attempt at this used a regex to find a regex, failed, and
+  // reported "ok" while skipping - which is the kind of test that is worse
+  // than none because it looks like coverage.
+  // Anchored on "?[a-z", which is present whether the class is [a-z]+ or
+  // [a-z0-9_]+. The first attempt looked for a literal "[[" and never matched,
+  // because in the source those brackets are escaped as \[\[.
+  const line = reasonSrc
+    .split(String.fromCharCode(10))
+    .find((l) => l.includes(".replace(/") && l.includes("?[a-z"));
+  assert.ok(line, "could not find the tag stripper in reason.ts");
+
+  // The hole this closes: [a-z]+ matches [[advice]] and misses [[navigate_to]],
+  // so one class of tag leaked to the screen and the rest did not.
+  assert.ok(
+    !/\[a-z\]\+/.test(line),
+    `the stripper is back to [a-z]+ and will leak [[navigate_to]] again: ${line.trim()}`
+  );
+  assert.ok(
+    /a-z0-9_|\w/.test(line),
+    `the stripper must allow underscores and digits: ${line.trim()}`
+  );
+
+  // And the behaviour, built from the same character class the code uses.
+  const cleaned = "x [[navigate_to]] y [[/navigate_to]] z [[advice]] w [[tool_2]] v"
+    .replace(/\[\[\/?[a-z0-9_]+\]\]/gi, " ");
+  assert.ok(!/\[\[/.test(cleaned), `tags survived: ${cleaned}`);
+});
 console.log("\nthe upload body");
 
 check("the multipart body is exactly what the server accepted", () => {

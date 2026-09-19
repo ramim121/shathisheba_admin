@@ -55,6 +55,21 @@ export async function classifyScope(input: {
   models: string[];
   /** A photo of an animal or a field is agricultural by construction. */
   hasImage?: boolean;
+  /**
+   * What was being talked about a moment ago, newest last.
+   *
+   * Without this the gate judged every message alone, and a follow-up has no
+   * farming words in it. Measured on a real conversation: a photo of a cow was
+   * answered, and the next question — "এটা কি ছ্যাবলা?", *is it contagious?* —
+   * was **refused as off-topic**, because in isolation it is four words about
+   * nothing. She had done nothing wrong and the app told her it only discusses
+   * farming, immediately after discussing her animal.
+   *
+   * Only the previous turns are used, never the current message, so the
+   * conversation can widen the gate but cannot be used to smuggle a new topic
+   * past it: the message still has to be plausible *in that context*.
+   */
+  context?: string[];
 }): Promise<ScopeResult> {
   const text = (input.text ?? "").trim();
   const started = Date.now();
@@ -66,8 +81,30 @@ export async function classifyScope(input: {
   if (input.hasImage) return shortcut("photo");
   if (looksAgricultural(text)) return shortcut("keyword");
 
+  // A short reply inside a conversation that was already agricultural is a
+  // follow-up, not a new subject. "How much?", "is it contagious?", "and the
+  // other field?" are all in scope when the previous turn was, and none of
+  // them survive being read on their own.
+  //
+  // Length-bounded on purpose: this widens the gate for the pronouns and
+  // fragments that depend on context, not for a paragraph that has changed the
+  // subject and would simply inherit permission from what came before.
+  const recent = (input.context ?? []).filter(Boolean);
+  if (recent.length && text.length <= 60 && recent.some((line) => looksAgricultural(line))) {
+    return shortcut("follow_up");
+  }
+
   const instruction = await apaPrompt("classify");
-  const prompt = `${instruction}\n\nMESSAGE:\n"""${text.slice(0, 1500)}"""`;
+  // The conversation goes to the model too, labelled as background rather than
+  // as the thing being judged - so a borderline fragment is read the way a
+  // person would read it, and the verdict is still about the message.
+  const history = recent.length
+    ? `\n\nWHAT WAS BEING DISCUSSED JUST BEFORE (background only, do not classify this):\n${recent
+        .slice(-3)
+        .map((line) => `- ${line.slice(0, 200)}`)
+        .join("\n")}`
+    : "";
+  const prompt = `${instruction}${history}\n\nMESSAGE:\n"""${text.slice(0, 1500)}"""`;
 
   let verdict: Verdict = "ambiguous";
   let topic = "other";

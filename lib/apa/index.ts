@@ -270,11 +270,21 @@ async function runAsk(input: AskInput): Promise<AskResult> {
 
   /* --- is it ours to answer --------------------------------------------- */
 
+  // The gate needs to know what was being talked about. Judged alone, a
+  // follow-up has no farming words in it: a photo of a cow was answered, and
+  // the next question — "is it contagious?" — was refused as off-topic,
+  // immediately after the app had discussed her animal.
+  //
+  // Fetched before the gate rather than after, which is the only change of
+  // order here: `answer()` reads the same rows a moment later.
+  const history = await recentTurns(conversationId, userMessageId);
+
   const scope = await classifyScope({
     text: question,
     userId: input.userId,
     models: cfg.models.classify,
-    hasImage: Boolean(image)
+    hasImage: Boolean(image),
+    context: history.map((t) => t.text)
   });
   await attachScopeMessage(scope.scopeLogId, userMessageId);
 
@@ -325,7 +335,8 @@ async function runAsk(input: AskInput): Promise<AskResult> {
     models: image ? cfg.models.vision : cfg.models.text,
     ctx: { userId: input.userId, districtName, upazilaName },
     contextBlock: await contextBlock({ userId: input.userId, profile, districtName, upazilaName, entitlement }),
-    history: await recentTurns(conversationId, userMessageId),
+    // The same rows the scope gate was given: one query, not two.
+    history,
     image
   });
 

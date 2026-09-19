@@ -311,12 +311,23 @@ async function execute(
           district_id: geo.district_id,
           quote
         },
+        // The route to the market page is offered whether or not a rate was
+        // found. Measured on a real account: no active price rule for the
+        // district, so `ok` was false, so there was no chip - and the farmer
+        // was told "I cannot fetch today's rate" with nowhere to go. The
+        // platform *has* a market updates screen; not offering it because this
+        // one lookup came back empty is the app withholding the answer it does
+        // have.
+        //
+        // The "শাথী সেবার তথ্য" provenance chip is still conditional, because
+        // that one claims a figure came from our data and must not appear when
+        // no figure did.
         sources: ok
           ? [
               { kind: "market", label_bn: `বাজারদর · ${ctx.districtName ?? area(ctx)}`, action: "screen:marketUpdates" },
               { kind: "platform", label_bn: "শাথী সেবার তথ্য", action: null }
             ]
-          : []
+          : [{ kind: "market", label_bn: "বাজারদর দেখুন", action: "screen:marketUpdates" }]
       };
     }
 
@@ -419,21 +430,52 @@ async function execute(
     case "find_products": {
       const query = String(args.query ?? "").trim().toLowerCase();
       const products = (await getAppProducts(null, null, ctx.userId)) as Row[];
+      // Matched against the columns the query actually returns.
+      //
+      // This used to look at `description_bn`, `description_en` and `category`,
+      // and none of the three exist on a product row — the real names are
+      // `short_description_bn/en` and `category_name_bn`/`category_slug`. Three
+      // of the five fields were `undefined`, so the search only ever matched a
+      // product's own name. Asked for "গরুর ফিড" it found nothing, because the
+      // product is called "Cattle Feed Premium" and only its *category* is
+      // named in Bangla.
+      //
+      // The category and the manufacturer are included deliberately: a farmer
+      // asks for a kind of thing ("feed", "seed", "vaccine") far more often
+      // than for a product by name.
       const matched = query
         ? products.filter((p) =>
-            [p.name_bn, p.name_en, p.description_bn, p.description_en, p.category]
+            [
+              p.name_bn, p.name_en,
+              p.short_description_bn, p.short_description_en,
+              p.category_name_bn, p.category_name, p.category_slug,
+              p.manufacturer_name_bn, p.manufacturer_name,
+              p.sku
+            ]
               .map((v) => String(v ?? "").toLowerCase())
-              .some((v) => v.includes(query))
+              .some((v) => v && v.includes(query))
           )
         : products;
       return {
         tool: name,
         ok: true,
         empty: matched.length === 0,
-        data: pick(matched, ["id", "name_bn", "name_en", "price", "unit", "category", "stock_status"], 5),
+        // Same correction on the way out: `category` and `stock_status` were
+        // never columns, so the model was handed two undefined fields and could
+        // not tell an in-stock item from one that is out.
+        data: pick(
+          matched,
+          ["id", "name_bn", "name_en", "price", "unit", "package_size_bn", "category_name_bn", "status"],
+          5
+        ),
+        // Same reasoning as get_market_price: the shop exists even when this
+        // search found nothing. "No cattle feed is listed in your area right
+        // now" is a useful answer; it is more useful with a way to go and look,
+        // because stock changes and her area is not the only thing on the
+        // shelf.
         sources: matched.length
           ? [{ kind: "shop", label_bn: "শাথী থেকে কিনুন", action: "screen:buyCategories" }]
-          : []
+          : [{ kind: "shop", label_bn: "দোকান দেখুন", action: "screen:buyCategories" }]
       };
     }
 

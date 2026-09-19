@@ -2,7 +2,7 @@ import { genai } from "@/lib/apa/client";
 import { askInstruction, type ApaConfig } from "@/lib/apa/config";
 import { runWithChain, thinkingFor, usageOf, type ModelUsage } from "@/lib/apa/models";
 import {
-  TOOL_DECLARATIONS, runTool, type ApaSource, type ToolContext, type ToolOutcome
+  NAVIGABLE_SCREENS, TOOL_DECLARATIONS, runTool, type ApaSource, type ToolContext, type ToolOutcome
 } from "@/lib/apa/tools";
 
 /**
@@ -224,6 +224,59 @@ export async function answer(input: {
    Parsing, and the disclaimers that are not the model's to forget
    --------------------------------------------------------------------------- */
 
+/**
+ * A `navigate_to` the model wrote as text instead of calling as a tool.
+ *
+ * It is supposed to call the function, and usually does — the button under an
+ * answer comes from `tools.ts`. But it sometimes emits the block inline as
+ * well, or instead:
+ *
+ *     [[navigate_to]]
+ *     { "label_bn": "বিক্রির তালিকা দেখুন", "screen": "myListings" }
+ *     [[/navigate_to]]
+ *
+ * That reached a farmer's screen verbatim — tag, brace, JSON keys and all —
+ * because the catch-all stripper below matched `[[a-z]+]]` and `navigate_to`
+ * has an underscore in it. Four lines of JSON in the middle of advice about her
+ * cow.
+ *
+ * Stripping it would be enough to stop the leak and would throw away what the
+ * model was trying to offer. So it is parsed: a valid screen becomes the same
+ * action chip the tool would have produced, and a malformed one is dropped
+ * silently, because a button that goes nowhere is worse than no button.
+ */
+/** One chip per destination. The model often offers the same screen twice. */
+function dedupeSources(all: ApaSource[]): ApaSource[] {
+  const seen = new Set<string>();
+  const out: ApaSource[] = [];
+  for (const source of all) {
+    const key = `${source.kind}:${source.action ?? ""}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(source);
+  }
+  return out;
+}
+
+function inlineNavigation(raw: string): { sources: ApaSource[]; rest: string } {
+  const re = /\[\[navigate_to\]\]([\s\S]*?)\[\[\/navigate_to\]\]/gi;
+  const sources: ApaSource[] = [];
+  const rest = raw.replace(re, (_all, body: string) => {
+    try {
+      const parsed = JSON.parse(String(body).trim()) as { screen?: unknown; label_bn?: unknown };
+      const screen = String(parsed.screen ?? "").trim();
+      const label = String(parsed.label_bn ?? "").trim().slice(0, 40);
+      if (screen && label && (NAVIGABLE_SCREENS as readonly string[]).includes(screen)) {
+        sources.push({ kind: "action", label_bn: label, action: `screen:${screen}` });
+      }
+    } catch {
+      // Not JSON. Nothing to offer, and nothing to show her either.
+    }
+    return " ";
+  });
+  return { sources, rest };
+}
+
 function block(raw: string, tag: string): { body: string; rest: string } {
   const re = new RegExp(`\\[\\[${tag}\\]\\]([\\s\\S]*?)\\[\\[\\/${tag}\\]\\]`, "i");
   const match = raw.match(re);
@@ -253,10 +306,16 @@ function finish(input: {
   rest = caution.rest;
   const suggest = block(rest, "suggest");
   rest = suggest.rest;
+  // Recovered rather than discarded — see inlineNavigation.
+  const inlineNav = inlineNavigation(rest);
+  rest = inlineNav.rest;
 
   const text = rest
     // An unclosed tag from a truncated generation must not reach the screen.
-    .replace(/\[\[\/?[a-z]+\]\]/gi, " ")
+    // The character class needs `_` and digits: it was `[a-z]+`, which does not
+    // match `navigate_to`, and that is how four lines of JSON ended up in the
+    // middle of an answer about a farmer's cow.
+    .replace(/\[\[\/?[a-z0-9_]+\]\]/gi, " ")
     .replace(/\s*\n\s*\n\s*\n+/g, "\n\n")
     .replace(/[ \t]{2,}/g, " ")
     .trim();
@@ -300,7 +359,12 @@ function finish(input: {
     suggestions,
     // A chip may only claim a source that actually answered. A failed tool
     // leaves no chip behind, because there is nothing to tap through to.
-    sources: input.sources,
+    //
+    // An inline `[[navigate_to]]` block is merged in here rather than dropped,
+    // de-duplicated against what the tool path already produced: the model
+    // often writes the block *and* calls the function, and two identical
+    // buttons under one answer looks like a bug to the person reading it.
+    sources: dedupeSources([...input.sources, ...inlineNav.sources]),
     needs_officer: health,
     tools_used: Array.from(new Set(input.toolsUsed)),
     tool_call_ids: input.toolCallIds,

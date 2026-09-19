@@ -287,20 +287,36 @@ async function execute(
       const geo = await getUserGeo(ctx.userId);
       // Resolve the spoken animal name to an id rather than passing text into
       // the pricing query, which matches on ids.
+      //
+      // The table is `sale_items`. This queried `sale_animals`, which has never
+      // existed in this schema, so every market-price question threw
+      // "Table 'shathi_sheba.sale_animals' doesn't exist", was reported to the
+      // model as a failed lookup, and came back as "I cannot fetch today's
+      // rate" — a sentence that reads like an upstream outage and was a typo in
+      // a table name. Sixteen active pricing rules were sitting there the whole
+      // time.
       const animals = await queryRows<Row>(
-        `SELECT CAST(id AS CHAR) AS id, name_en, name_bn FROM sale_animals WHERE is_active = 1 ORDER BY sort_order, id`
+        `SELECT CAST(id AS CHAR) AS id, name_en, name_bn
+           FROM sale_items
+          WHERE status = 'active'
+          ORDER BY sale_category_id, id`
       );
       const match =
         animals.find((a) => wanted && (String(a.name_bn ?? "").includes(wanted) || wanted.includes(String(a.name_bn ?? "")))) ??
         animals.find((a) => wanted && String(a.name_en ?? "").toLowerCase().includes(wanted.toLowerCase())) ??
         animals[0];
 
+      // `sale_item_id`, because that is the column the pricing rules key on.
+      // `animal_id` is a different, mostly unused dimension on the same table,
+      // and passing an item id as an animal id matched nothing.
       const quote = await getSalePriceQuote({
-        animal_id: match ? String(match.id) : null,
+        sale_item_id: match ? String(match.id) : null,
         user_id: ctx.userId,
         weight: weight > 0 ? String(weight) : null
       });
-      const ok = Boolean(quote && (quote as Row).rate_per_kg);
+      // The quote is `{ rule, breakdown }`; there was no `rate_per_kg` on it,
+      // so this was false even when a rule had been found.
+      const ok = Boolean((quote as Row | null)?.rule);
       return {
         tool: name,
         ok: true,

@@ -57,7 +57,27 @@ export async function transcribeAudio(input: {
   userId?: string | number | null;
 }): Promise<Transcription> {
   const terms = await biasTerms(input.userId);
-  const seconds = audioSeconds(Buffer.from(input.data, "base64").length, input.mimeType);
+  const bytes = Buffer.from(input.data, "base64").length;
+  const seconds = audioSeconds(bytes, input.mimeType);
+
+  // Too little audio to be speech: answered here rather than by the model.
+  //
+  // Measured 2026-09-19: an empty or near-empty clip makes
+  // gemini-3.5-transcribe return `400 Request contains an invalid argument`,
+  // and a 400 is classified as fatal, so it stops the fallback chain dead — the
+  // other two models never get asked. The production log filled with those
+  // 400s from taps too short to be a recording.
+  //
+  // A fallback would not have helped, because there is genuinely nothing to
+  // transcribe. What the farmer needs is the "I did not catch that, your
+  // recording is kept" path, which is exactly what `ok: false` gives her, and
+  // it costs no model call at all.
+  //
+  // 2 KB is well under a second of any codec the phone records and is
+  // comfortably above an empty container's header.
+  if (bytes < 2048) {
+    return { text: "", seconds: Number(seconds.toFixed(2)), model: "none", ok: false };
+  }
 
   const attempt = await runWithChain({
     job: "transcribe",

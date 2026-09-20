@@ -56,6 +56,16 @@ export type ApaAnswer = {
   hedged: boolean;
   /** True when she was asked one question back instead of being given a guess. */
   asked_clarification: boolean;
+  /**
+   * Set when the model judged a photograph's subject non-agricultural.
+   *
+   * The caller turns this into a refusal rather than showing the answer: the
+   * description of a bowl of curry is accurate and is not something this
+   * assistant should be producing. See PHOTO_RULES.
+   */
+  off_topic_photo: boolean | null;
+  /** What it appeared to show, for the refusal copy and the scope log. */
+  off_topic_subject: string | null;
   /** No tool failed and nothing personal was read — safe to cache. */
   cacheable: boolean;
   model: string;
@@ -76,6 +86,41 @@ function touchesHealth(text: string): boolean {
 }
 
 const MAX_TOOL_ROUNDS = 3;
+
+/**
+ * What a photograph may be about.
+ *
+ * The scope gate lets every photo through — `classifyScope` short-circuits on
+ * `hasImage`, on the reasoning that a picture of an animal or a field is
+ * agricultural by construction. That is true of the pictures farmers were
+ * expected to send and not of the pictures they actually send. A bowl of cooked
+ * dal was answered in detail: "the picture shows a food bowl, rice and curry".
+ * Fluent, accurate, and nothing to do with farming — and it spends a vision
+ * call and teaches her the assistant will look at anything.
+ *
+ * So the model is asked to judge the subject first and say so in a tag we can
+ * act on, rather than being asked to refuse in prose — which it does
+ * inconsistently, and which cannot be detected reliably afterwards.
+ *
+ * The boundary is drawn at "something a farmer would show a field officer".
+ * Raw produce is in, because a farmer photographs her harvest to ask about
+ * grading or rot. A cooked meal is out: nothing about a plate of curry can be
+ * answered agriculturally, and treating it as food-adjacent is how the
+ * assistant ends up as a general-purpose image describer.
+ */
+const PHOTO_RULES = [
+  "[PHOTO RULES]",
+  "Before answering, decide what the photograph actually shows.",
+  "",
+  "You may answer about: crops, plants, leaves, stems, roots, fruit or vegetables (growing or harvested); soil, a field, a pond or its water; cattle, goats, poultry, fish or any farmed animal, including a part of one; an animal's wound, skin, dung or feed; farm inputs such as seed, fertiliser, pesticide, vaccine or feed sacks and their labels; farm tools, irrigation or machinery.",
+  "",
+  "You must NOT answer about anything else. That includes cooked or prepared food and meals, people or faces, pets, documents, screenshots, screens, vehicles, buildings, and objects with no farming use.",
+  "",
+  "If the photograph is not in the allowed list, reply with ONLY this and nothing else:",
+  "[[off_topic]]what the photo appears to show, in three or four Bangla words[[/off_topic]]",
+  "",
+  "Do not guess in order to be helpful. A picture that is merely unclear is not off topic — say it is unclear and ask for a better one. Off topic means the subject is genuinely not agricultural."
+].join("\n");
 
 export async function answer(input: {
   question: string;
@@ -103,9 +148,12 @@ export async function answer(input: {
   const askText = [
     input.contextBlock.trim(),
     "",
+    input.image ? PHOTO_RULES : "",
     "[QUESTION]",
     input.question || "এই ছবিটা দেখে বলুন কী হয়েছে।"
-  ].join("\n");
+  ]
+    .filter((part) => part !== "")
+    .join("\n");
 
   const askParts: unknown[] = [{ text: askText }];
   if (input.image) {
@@ -224,27 +272,6 @@ export async function answer(input: {
    Parsing, and the disclaimers that are not the model's to forget
    --------------------------------------------------------------------------- */
 
-/**
- * A `navigate_to` the model wrote as text instead of calling as a tool.
- *
- * It is supposed to call the function, and usually does — the button under an
- * answer comes from `tools.ts`. But it sometimes emits the block inline as
- * well, or instead:
- *
- *     [[navigate_to]]
- *     { "label_bn": "বিক্রির তালিকা দেখুন", "screen": "myListings" }
- *     [[/navigate_to]]
- *
- * That reached a farmer's screen verbatim — tag, brace, JSON keys and all —
- * because the catch-all stripper below matched `[[a-z]+]]` and `navigate_to`
- * has an underscore in it. Four lines of JSON in the middle of advice about her
- * cow.
- *
- * Stripping it would be enough to stop the leak and would throw away what the
- * model was trying to offer. So it is parsed: a valid screen becomes the same
- * action chip the tool would have produced, and a malformed one is dropped
- * silently, because a button that goes nowhere is worse than no button.
- */
 /** One chip per destination. The model often offers the same screen twice. */
 function dedupeSources(all: ApaSource[]): ApaSource[] {
   const seen = new Set<string>();
@@ -258,22 +285,85 @@ function dedupeSources(all: ApaSource[]): ApaSource[] {
   return out;
 }
 
-function inlineNavigation(raw: string): { sources: ApaSource[]; rest: string } {
-  const re = /\[\[navigate_to\]\]([\s\S]*?)\[\[\/navigate_to\]\]/gi;
+/**
+ * Everything the model writes that was meant to be a function call.
+ *
+ * It is supposed to call the tool, and usually does. But it leaks the call into
+ * the answer text in at least three shapes, and each one has reached a farmer's
+ * screen:
+ *
+ *   1. tagged, with JSON:
+ *        [[navigate_to]]
+ *        { "label_bn": "বিক্রির তালিকা দেখুন", "screen": "myListings" }
+ *        [[/navigate_to]]
+ *
+ *   2. untagged, as bare fields — this is the one the tag stripper could never
+ *      have caught, because there is no tag:
+ *        label_bn: ফিন্যান্স হাব খুলুন
+ *        screen: financeHub
+ *
+ *   3. fenced, as a code block containing either of the above.
+ *
+ * All three are parsed rather than merely deleted: a valid screen becomes the
+ * button the model was trying to offer, so the farmer gets the navigation
+ * instead of the syntax. A malformed one is dropped silently, because a button
+ * that goes nowhere is worse than no button.
+ *
+ * The field names are ours (`label_bn`, `screen`, `tool_code`), which is what
+ * makes stripping them safe: they are not words that appear in Bangla advice
+ * about a cow. Nothing is removed on the basis of looking like JSON in general,
+ * because an answer may legitimately contain a brace or a colon.
+ */
+export function scrubToolSyntax(raw: string): { sources: ApaSource[]; rest: string } {
   const sources: ApaSource[] = [];
-  const rest = raw.replace(re, (_all, body: string) => {
+  let rest = raw;
+
+  const offer = (screen: unknown, label: unknown) => {
+    const s = String(screen ?? "").trim();
+    const l = String(label ?? "").trim().slice(0, 40);
+    if (s && l && (NAVIGABLE_SCREENS as readonly string[]).includes(s)) {
+      sources.push({ kind: "action", label_bn: l, action: `screen:${s}` });
+    }
+  };
+
+  // 1. The tagged form, with a JSON body.
+  rest = rest.replace(/\[\[navigate_to\]\]([\s\S]*?)\[\[\/navigate_to\]\]/gi, (_all, body: string) => {
     try {
-      const parsed = JSON.parse(String(body).trim()) as { screen?: unknown; label_bn?: unknown };
-      const screen = String(parsed.screen ?? "").trim();
-      const label = String(parsed.label_bn ?? "").trim().slice(0, 40);
-      if (screen && label && (NAVIGABLE_SCREENS as readonly string[]).includes(screen)) {
-        sources.push({ kind: "action", label_bn: label, action: `screen:${screen}` });
-      }
+      const parsed = JSON.parse(String(body).trim()) as Record<string, unknown>;
+      offer(parsed.screen, parsed.label_bn ?? parsed.label_en);
     } catch {
-      // Not JSON. Nothing to offer, and nothing to show her either.
+      // Not JSON — fall through to the field scan below, which handles the
+      // half-written case where the tags arrived and the braces did not.
+      const screen = /(?:^|\n)\s*"?screen"?\s*[:=]\s*"?([A-Za-z][A-Za-z0-9_]*)"?/.exec(body);
+      const label = /(?:^|\n)\s*"?label_bn"?\s*[:=]\s*"?([^"\n,}]+)"?/.exec(body);
+      offer(screen?.[1], label?.[1]);
     }
     return " ";
   });
+
+  // 2. Bare fields on their own lines, the shape with no tag at all. Taken as a
+  //    pair so a stray "screen:" in prose cannot produce a button.
+  const bareScreen = /(?:^|\n)[ \t]*"?screen"?[ \t]*[:=][ \t]*"?([A-Za-z][A-Za-z0-9_]*)"?[ \t]*,?[ \t]*(?=\n|$)/g;
+  const bareLabel = /(?:^|\n)[ \t]*"?label_(?:bn|en)"?[ \t]*[:=][ \t]*"?([^"\n]+?)"?[ \t]*,?[ \t]*(?=\n|$)/g;
+  const screenHit = bareScreen.exec(rest);
+  const labelHit = bareLabel.exec(rest);
+  if (screenHit) offer(screenHit[1], labelHit?.[1]);
+
+  // Removed whether or not they formed a usable pair: a lone "screen:
+  // financeHub" is machine syntax either way and must not be read aloud to her.
+  rest = rest
+    .replace(bareScreen, "\n")
+    .replace(bareLabel, "\n")
+    // The other field names that have shown up in answer text.
+    .replace(/(?:^|\n)[ \t]*"?(?:tool_code|tool_name|function_call|parameters|args|arguments)"?[ \t]*[:=][^\n]*/gi, "\n");
+
+  // 3. A fence left behind once its contents were taken out, and the lone
+  //    braces that a partly-stripped JSON object leaves on their own lines.
+  rest = rest
+    .replace(/```[a-z]*\s*```/gi, " ")
+    .replace(/```[a-z]*\n?/gi, " ")
+    .replace(/(?:^|\n)[ \t]*[{}][ \t]*(?=\n|$)/g, "\n");
+
   return { sources, rest };
 }
 
@@ -298,6 +388,12 @@ function finish(input: {
   latencyMs: number;
 }): ApaAnswer {
   let rest = input.raw;
+
+  // The model's own verdict on the photograph's subject. Read before anything
+  // else, because an off-topic photo has no answer to parse.
+  const offTopic = block(rest, "off_topic");
+  rest = offTopic.rest;
+
   const advice = block(rest, "advice");
   rest = advice.rest;
   const likely = block(rest, "likely");
@@ -306,8 +402,8 @@ function finish(input: {
   rest = caution.rest;
   const suggest = block(rest, "suggest");
   rest = suggest.rest;
-  // Recovered rather than discarded — see inlineNavigation.
-  const inlineNav = inlineNavigation(rest);
+  // Recovered rather than discarded — see scrubToolSyntax.
+  const inlineNav = scrubToolSyntax(rest);
   rest = inlineNav.rest;
 
   const text = rest
@@ -360,16 +456,20 @@ function finish(input: {
     // A chip may only claim a source that actually answered. A failed tool
     // leaves no chip behind, because there is nothing to tap through to.
     //
-    // An inline `[[navigate_to]]` block is merged in here rather than dropped,
-    // de-duplicated against what the tool path already produced: the model
-    // often writes the block *and* calls the function, and two identical
-    // buttons under one answer looks like a bug to the person reading it.
+    // A leaked tool call is merged in here rather than dropped, de-duplicated
+    // against what the tool path already produced: the model often writes the
+    // call *and* makes it, and two identical buttons under one answer looks
+    // like a bug to the person reading it.
     sources: dedupeSources([...input.sources, ...inlineNav.sources]),
     needs_officer: health,
     tools_used: Array.from(new Set(input.toolsUsed)),
     tool_call_ids: input.toolCallIds,
     hedged: Boolean(cautionText) || input.toolFailed,
     asked_clarification: askedClarification,
+    // Set only for a photograph the model judged non-agricultural. The caller
+    // turns it into a polite refusal rather than showing the description.
+    off_topic_photo: Boolean(offTopic.body) || null,
+    off_topic_subject: offTopic.body || null,
     // Never cache a failed lookup, anything personal, or a clarifying question
     // — the last because the next farmer's vague question is not this one.
     cacheable: !input.toolFailed && !input.personal && !askedClarification && text.length > 0,

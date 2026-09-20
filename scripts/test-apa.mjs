@@ -534,19 +534,24 @@ try {
 const reasonSrc = readFileSync(new URL("../lib/apa/reason.ts", import.meta.url), "utf8")
   .split(String.fromCharCode(13, 10))
   .join(String.fromCharCode(10));
-let inlineNavigation = null;
+let scrubToolSyntax = null;
 let stripTags = null;
 try {
-  const from = reasonSrc.indexOf("function inlineNavigation(");
+  const from = reasonSrc.indexOf("export function scrubToolSyntax(");
   const to = reasonSrc.indexOf(String.fromCharCode(10) + "}" + String.fromCharCode(10), from) + 3;
   const stub = `
     type ApaSource = { kind: string; label_bn: string; action: string | null };
-    const NAVIGABLE_SCREENS = ["myListings", "marketUpdates", "buy", "officers"] as const;
+    // The real list from tools.ts. A short stub made a passing scrub look like
+    // a failure, because the screen under test was simply not in it.
+    const NAVIGABLE_SCREENS = [
+      "weather", "marketUpdates", "myListings", "saleCategories", "buyCategories",
+      "buyProducts", "training", "financeHub", "menuKyc", "officers", "notifications", "menuFarm"
+    ] as const;
   `;
-  const out = ts.transpileModule(stub + "export " + reasonSrc.slice(from, to), {
+  const out = ts.transpileModule(stub + reasonSrc.slice(from, to), {
     compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 }
   }).outputText;
-  ({ inlineNavigation } = await import(
+  ({ scrubToolSyntax } = await import(
     `data:text/javascript;base64,${Buffer.from(out, "utf8").toString("base64")}`
   ));
   // The catch-all stripper, read out of the source so the test tracks the code.
@@ -559,8 +564,8 @@ try {
 console.log("\nanswer markup");
 
 check("an inline navigate_to becomes a button instead of reaching the screen", () => {
-  if (!inlineNavigation) {
-    console.log("       (skipped: could not lift inlineNavigation)");
+  if (!scrubToolSyntax) {
+    console.log("       (skipped: could not lift scrubToolSyntax)");
     return;
   }
   // Verbatim from the handset: the model wrote the block as text, and the
@@ -571,7 +576,7 @@ check("an inline navigate_to becomes a button instead of reaching the screen", (
     '{ "label_bn": "বিক্রির তালিকা দেখুন", "screen": "myListings" }\n' +
     "[[/navigate_to]]";
 
-  const out = inlineNavigation(raw);
+  const out = scrubToolSyntax(raw);
   assert.ok(!/navigate_to/.test(out.rest), "the tag must not survive into the answer");
   assert.ok(!/label_bn|screen/.test(out.rest), "nor may the JSON keys");
   assert.equal(out.sources.length, 1, "the offer must be recovered, not discarded");
@@ -583,13 +588,56 @@ check("an inline navigate_to becomes a button instead of reaching the screen", (
 });
 
 check("a malformed or unknown navigate_to leaves no button", () => {
-  if (!inlineNavigation) return;
+  if (!scrubToolSyntax) return;
   // A button that goes nowhere is worse than no button.
   for (const body of ['{ "screen": "notAScreen", "label_bn": "x" }', "not json at all", "{}"]) {
-    const out = inlineNavigation(`a [[navigate_to]]${body}[[/navigate_to]] b`);
+    const out = scrubToolSyntax(`a [[navigate_to]]${body}[[/navigate_to]] b`);
     assert.equal(out.sources.length, 0, `expected no source for ${body}`);
     assert.ok(!/navigate_to/.test(out.rest), "and still no markup on screen");
   }
+});
+
+check("the untagged leak from the handset is caught too", () => {
+  if (!scrubToolSyntax) return;
+  // Verbatim from the loan answer: no tags at all, just the field names on
+  // their own lines. The tag stripper could never have caught this, because
+  // there is no tag - which is why the first fix was not enough.
+  const raw =
+    "শাথী সেবার মাধ্যমে ঋণ পেতে প্রথমে প্রস্তুতি যাচাই সম্পন্ন করতে হবে।\n" +
+    "label_bn: ফিন্যান্স হাব খুলুন\n" +
+    "screen: financeHub\n";
+  const out = scrubToolSyntax(raw);
+  assert.ok(!/label_bn|screen:/.test(out.rest), `machine syntax survived: ${out.rest}`);
+  assert.equal(out.sources.length, 1, "the offer should be recovered as a button");
+  assert.equal(out.sources[0].action, "screen:financeHub");
+  assert.ok(out.rest.includes("ঋণ পেতে"), "the actual advice must survive");
+});
+
+check("a lone screen field is removed even when it cannot become a button", () => {
+  if (!scrubToolSyntax) return;
+  // "screen: somethingUnknown" with no label is machine syntax either way, and
+  // must not be read aloud to her.
+  const out = scrubToolSyntax("কিছু পরামর্শ\nscreen: notARealScreen\n");
+  assert.ok(!/screen:/.test(out.rest));
+  assert.equal(out.sources.length, 0);
+});
+
+check("fences and orphaned braces are cleared", () => {
+  if (!scrubToolSyntax) return;
+  const out = scrubToolSyntax('উত্তর\n```json\n{\n"screen": "myListings",\n"label_bn": "তালিকা"\n}\n```\n');
+  assert.ok(!/```/.test(out.rest), `fence survived: ${out.rest}`);
+  assert.ok(!/[{}]/.test(out.rest.replace(/\s/g, "")), `braces survived: ${out.rest}`);
+  assert.equal(out.sources[0]?.action, "screen:myListings");
+});
+
+check("ordinary advice with a colon is left alone", () => {
+  if (!scrubToolSyntax) return;
+  // Nothing may be removed for merely looking structured. Only our own field
+  // names are treated as syntax.
+  const raw = "তিন কিস্তিতে সার দিন: প্রথমে ইউরিয়া, পরে পটাশ।\nদাম: ৩২০ টাকা";
+  const out = scrubToolSyntax(raw);
+  assert.equal(out.rest.trim(), raw.trim(), "advice must pass through unchanged");
+  assert.equal(out.sources.length, 0);
 });
 
 check("the catch-all stripper in reason.ts covers underscores and digits", () => {

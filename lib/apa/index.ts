@@ -340,6 +340,54 @@ async function runAsk(input: AskInput): Promise<AskResult> {
     image
   });
 
+  /* --- a photograph of something else ------------------------------------ */
+
+  // The model judged the subject non-agricultural (see PHOTO_RULES). Its
+  // description is accurate and is not something this assistant should hand
+  // back: answering a bowl of cooked dal in detail teaches her it will look at
+  // anything, and the next photo is a document or a person.
+  //
+  // Returned as a refusal rather than an error. She has done nothing wrong -
+  // she tried a feature in a reasonable way - so the wording says what the
+  // camera is for and offers what she can photograph instead, and no trial
+  // question is spent.
+  if (result.off_topic_photo) {
+    const crops = await farmerCrops(input.userId);
+    const suggestions = photoSuggestions(crops);
+    const messageId = await logMessage({
+      conversationId,
+      userId: input.userId,
+      role: "assistant",
+      inputMode: input.mode,
+      body: PHOTO_OFF_TOPIC_MESSAGE,
+      suggestions,
+      refused: true,
+      refusalReason: `off_topic_photo:${(result.off_topic_subject ?? "unknown").slice(0, 60)}`,
+      model: result.model,
+      latencyMs: Date.now() - started,
+      ip: input.ip
+    });
+    await addUsage(input.userId, {
+      ask_count: 1,
+      photo_count: 1,
+      refused_count: 1,
+      transcribe_seconds: Math.round(transcribeSeconds)
+    });
+    return {
+      conversation_id: conversationId,
+      message_id: messageId,
+      transcript,
+      refused: true,
+      answer: { text: PHOTO_OFF_TOPIC_MESSAGE, advice: null, caution: null, suggestions, sources: [] },
+      officer: null,
+      speech: await speechFor({ cfg, input, text: PHOTO_OFF_TOPIC_MESSAGE, entitlement, budget }),
+      asked_clarification: false,
+      from_cache: false,
+      entitlement: await resolveEntitlement(input.userId, cfg),
+      latency_ms: Date.now() - started
+    };
+  }
+
   const officer = result.needs_officer ? await firstOfficer(input.userId) : null;
 
   /* --- read it aloud ----------------------------------------------------- */
@@ -480,6 +528,31 @@ function spokenText(answer: {
  * The turn is logged like any other so the console shows what was refused and
  * why, and it never spends a trial question — she asked and got nothing.
  */
+/**
+ * What to say about a photograph of something that is not farming.
+ *
+ * Deliberately not an error and not a telling-off. She pointed a camera at
+ * something and asked — that is exactly the behaviour the feature is for, and
+ * she has no way to know where the line is until she is told. So it names what
+ * the camera is for, in the same register as the rest of the assistant.
+ */
+const PHOTO_OFF_TOPIC_MESSAGE =
+  "এই ছবিটা নিয়ে আমি সাহায্য করতে পারছি না। ফসল, গাছের পাতা, জমি, গরু-ছাগল-হাঁস-মুরগি, মাছ, অথবা সার-বীজ-ওষুধের ছবি পাঠালে আমি দেখে বলতে পারব।";
+
+/**
+ * Things worth photographing, from what she actually farms.
+ *
+ * The generic refusal suggestions are about asking questions; after a rejected
+ * photo the useful prompt is about taking a different one.
+ */
+function photoSuggestions(crops: { crops: string[]; livestock: boolean }): string[] {
+  const out: string[] = [];
+  if (crops.livestock) out.push("গরুর গায়ের ঘা বা দাগের ছবি");
+  for (const crop of crops.crops.slice(0, 2)) out.push(`${crop} গাছের আক্রান্ত পাতার ছবি`);
+  if (out.length < 3) out.push("ক্ষেতের ছবি", "সার বা বীজের প্যাকেটের ছবি");
+  return out.slice(0, 3);
+}
+
 async function budgetRefusal(args: {
   input: AskInput;
   cfg: ApaConfig;

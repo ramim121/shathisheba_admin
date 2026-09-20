@@ -956,6 +956,109 @@ check("every month is named and carries a season note", () => {
   assert.equal(seen.size, 12, `expected 12 months across a year, saw ${seen.size}`);
 });
 
+/* ===========================================================================
+   The hold-to-talk gesture
+   =========================================================================== */
+
+/**
+ * `src/apa/voice.ts` in the mobile app — three pure decisions with no imports,
+ * so they compile the same way `pure.ts` does.
+ *
+ * Worth testing from here because one of them shipped wrong and a farmer's
+ * recording reached the server twice. The sequence that did it is reproduced
+ * below exactly: grant sends, and the release of that same tap sends again.
+ */
+const MOBILE_VOICE = "../../Shathi Sheba/src/apa/voice.ts";
+let voice = null;
+try {
+  const src = readFileSync(new URL(MOBILE_VOICE, import.meta.url), "utf8")
+    .split(String.fromCharCode(13, 10))
+    .join(String.fromCharCode(10));
+  const out = ts.transpileModule(src, {
+    compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 }
+  }).outputText;
+  voice = await import(
+    `data:text/javascript;base64,${Buffer.from(out, "utf8").toString("base64")}`
+  );
+} catch {
+  voice = null;
+}
+
+console.log(`
+the hold-to-talk gesture`);
+
+check("the release of a send-tap does not send a second time", () => {
+  if (!voice) {
+    console.log("       (skipped: could not lift voice.ts)");
+    return;
+  }
+  const { releaseIsEcho, releaseLatches, maySend } = voice;
+
+  // The exact sequence from the bug report. She taps once to start (latch),
+  // speaks, then taps again to send.
+  const startedAt = 1_000_000;
+  let sentAt = 0;
+  let handledInGrant = false;
+
+  // --- tap two, grant: latched, so this is the send.
+  handledInGrant = true;
+  const first = maySend({ cancelled: false, seconds: 6, uri: "file://a.m4a", startedAt, sentAt });
+  assert.equal(first, true, "the send tap must send");
+  sentAt = startedAt;
+
+  // --- the release of that very same tap. `latched` has been cleared by the
+  // send and `heldForMs` is measured from the original start, so it is far
+  // past the tap window: the old code fell straight through to a second send.
+  assert.equal(releaseIsEcho(handledInGrant), true, "the release must be recognised as an echo");
+
+  // And even if the echo guard were missed, the recording itself must refuse.
+  const second = maySend({
+    cancelled: false, seconds: 6, uri: "file://a.m4a", startedAt, sentAt
+  });
+  assert.equal(second, false, "the same recording must not go twice");
+});
+
+check("a genuinely new recording still sends, even from the same file name", () => {
+  if (!voice) return;
+  const { maySend } = voice;
+  // The recorder reusing a temporary path must not look like a duplicate. This
+  // is why the guard is keyed on when the recording began and not on its uri.
+  assert.equal(
+    maySend({ cancelled: false, seconds: 4, uri: "file://a.m4a", startedAt: 2_000, sentAt: 1_000 }),
+    true
+  );
+});
+
+check("a tap latches, a hold sends, a swipe-up cancels", () => {
+  if (!voice) return;
+  const { releaseLatches } = voice;
+  // A quick tap: latch the microphone on and wait for the next tap.
+  assert.equal(releaseLatches({ latched: false, cancelArmed: false, heldForMs: 120 }), true);
+  // A real hold: send on release.
+  assert.equal(releaseLatches({ latched: false, cancelArmed: false, heldForMs: 1_800 }), false);
+  // Already latched: the release of the send-tap latches nothing.
+  assert.equal(releaseLatches({ latched: true, cancelArmed: false, heldForMs: 120 }), false);
+  // Swiped up and let go quickly — a cancel, not a latch. Latching here would
+  // leave the microphone recording after she had just told it to stop.
+  assert.equal(releaseLatches({ latched: false, cancelArmed: true, heldForMs: 120 }), false);
+});
+
+check("nothing worth transcribing is sent", () => {
+  if (!voice) return;
+  const { maySend } = voice;
+  const base = { cancelled: false, seconds: 5, uri: "file://a.m4a", startedAt: 9, sentAt: 0 };
+  // Under a second is a mis-tap. Transcribing it costs money and returns
+  // nothing.
+  assert.equal(maySend({ ...base, seconds: 0.4 }), false);
+  // No file: the recorder failed and there is nothing to send.
+  assert.equal(maySend({ ...base, uri: null }), false);
+  // Discarded.
+  assert.equal(maySend({ ...base, cancelled: true }), false);
+  // A recording that never started must not match a sentAt that is also zero.
+  assert.equal(maySend({ ...base, startedAt: 0, sentAt: 0 }), false);
+  assert.equal(maySend(base), true);
+});
+
 console.log(
   process.exitCode
     ? "\nthere are failures above.\n"

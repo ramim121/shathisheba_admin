@@ -422,7 +422,11 @@ function finish(input: {
     .split(/\||\n/)
     .map((s) => s.replace(/^[-*•\d.\s]+/, "").trim())
     .filter(Boolean)
-    .slice(0, 3);
+    // Five rather than three. Measured behaviour from the field: she taps the
+    // suggestions far more than she types, so each one that fits is a question
+    // she asks instead of a screen she abandons. Three filled barely one row on
+    // a 6-inch phone; five fill two and still leave the answer visible.
+    .slice(0, 5);
 
   const health = touchesHealth(`${input.question} ${text} ${advice.body} ${likely.body}`);
 

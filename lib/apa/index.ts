@@ -351,6 +351,44 @@ async function runAsk(input: AskInput): Promise<AskResult> {
   // she tried a feature in a reasonable way - so the wording says what the
   // camera is for and offers what she can photograph instead, and no trial
   // question is spent.
+  // A photograph the model could not make out is not off topic, whatever it
+  // tagged. Measured: a photo too dark to read came back
+  // `off_topic: একটি সবুজ রঙের ছবি` — "a green coloured picture" — which is not
+  // an object, it is a description of failing to see one. Refusing that teaches
+  // a farmer the camera does not work, which is a worse outcome than the bug
+  // this gate exists to fix.
+  //
+  // The prompt says so too. This is the deterministic half, because a prompt is
+  // a request and this decides whether she is turned away.
+  if (result.off_topic_photo && looksUnclear(result.off_topic_subject)) {
+    const messageId = await logMessage({
+      conversationId,
+      userId: input.userId,
+      role: "assistant",
+      inputMode: input.mode,
+      body: PHOTO_UNCLEAR_MESSAGE,
+      refused: false,
+      model: result.model,
+      latencyMs: Date.now() - started,
+      ip: input.ip
+    });
+    await addUsage(input.userId, { ask_count: 1, photo_count: 1 });
+    if (entitlement.tier === "trial") await spendTrialQuestion(input.userId);
+    return {
+      conversation_id: conversationId,
+      message_id: messageId,
+      transcript,
+      refused: false,
+      answer: { text: PHOTO_UNCLEAR_MESSAGE, advice: null, caution: null, suggestions: [], sources: [] },
+      officer: null,
+      speech: await speechFor({ cfg, input, text: PHOTO_UNCLEAR_MESSAGE, entitlement, budget }),
+      asked_clarification: true,
+      from_cache: false,
+      entitlement: await resolveEntitlement(input.userId, cfg),
+      latency_ms: Date.now() - started
+    };
+  }
+
   if (result.off_topic_photo) {
     const crops = await farmerCrops(input.userId);
     const suggestions = photoSuggestions(crops);
@@ -528,6 +566,36 @@ function spokenText(answer: {
  * The turn is logged like any other so the console shows what was refused and
  * why, and it never spends a trial question — she asked and got nothing.
  */
+/**
+ * Words that describe not being able to see, rather than a thing that was seen.
+ *
+ * The model is asked to name an object and sometimes names the *absence* of
+ * one: "a green coloured picture", "a green striped pattern", "a yellow
+ * circle". Those are what failing to recognise something sounds like, and they
+ * arrived tagged as off topic on photographs that were merely dark.
+ *
+ * Kept deliberately narrow. Anything that names a real non-farm object — a
+ * bowl, a plate, a phone, a person — must still be refused, so this matches
+ * only the vocabulary of unclearness and of bare colour or shape.
+ */
+function looksUnclear(subject: string | null): boolean {
+  const text = (subject ?? "").trim();
+  if (!text) return true;
+  return /অন্ধকার|অস্পষ্ট|ঝাপসা|পরিষ্কার নয়|বোঝা যাচ্ছে না|দেখা যাচ্ছে না|খালি|ফাঁকা|নকশা|প্যাটার্ন|শুধু রং|রঙের ছবি|বৃত্ত|ডোরা|dark|blur|unclear|pattern|blank|solid colour|solid color/i.test(
+    text
+  );
+}
+
+/**
+ * What to say about a photograph that cannot be made out.
+ *
+ * Names what would help rather than only what is wrong: light, distance, and
+ * putting the affected part in the middle are the three things that actually
+ * fix a farmer's photo.
+ */
+const PHOTO_UNCLEAR_MESSAGE =
+  "ছবিটা পরিষ্কার বোঝা যাচ্ছে না। দিনের আলোয়, একটু দূর থেকে, আক্রান্ত জায়গাটা ছবির মাঝখানে রেখে আরেকবার তুলে পাঠান — তাহলে আমি দেখে বলতে পারব।";
+
 /**
  * What to say about a photograph of something that is not farming.
  *

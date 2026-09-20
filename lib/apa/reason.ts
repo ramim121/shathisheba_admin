@@ -116,10 +116,12 @@ const PHOTO_RULES = [
   "",
   "You must NOT answer about anything else. That includes cooked or prepared food and meals, people or faces, pets, documents, screenshots, screens, vehicles, buildings, and objects with no farming use.",
   "",
-  "If the photograph is not in the allowed list, reply with ONLY this and nothing else:",
-  "[[off_topic]]what the photo appears to show, in three or four Bangla words[[/off_topic]]",
+  "Use [[off_topic]] ONLY when you can identify a specific thing in the photograph and that thing is not in the allowed list. Name it:",
+  "[[off_topic]]the object you can see, in three or four Bangla words[[/off_topic]]",
   "",
-  "Do not guess in order to be helpful. A picture that is merely unclear is not off topic — say it is unclear and ask for a better one. Off topic means the subject is genuinely not agricultural."
+  "NEVER use [[off_topic]] for a photograph you cannot make out. Too dark, too blurred, too close, overexposed, or just a flat colour or a pattern with no recognisable object — none of those are off topic, because you do not know what they are. They may well be her crop. For those, answer normally that the picture is not clear enough and say what would help: better light, a little further back, the affected part in the middle.",
+  "",
+  "The test is: could you name the object to a person? If not, it is unclear, not off topic. Do not guess in order to be helpful, and do not refuse in order to be safe."
 ].join("\n");
 
 export async function answer(input: {

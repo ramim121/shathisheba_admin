@@ -195,6 +195,7 @@ import {
   getApaEntitlement,
   getApaSettings,
   reportApaClientError,
+  recordApaListen,
   saveApaSettings,
   submitApaFeedback
 } from "@/lib/endpoints/apa";
@@ -1190,6 +1191,8 @@ export async function POST(request: NextRequest, { params }: Params) {
             });
           case "app/apa/feedback":
             return NextResponse.json({ ok: true, action: "apa_feedback", result: await submitApaFeedback(p) });
+          case "app/apa/listened":
+            return NextResponse.json({ ok: true, action: "apa_listened", result: await recordApaListen(p) });
           case "app/apa/settings":
             return NextResponse.json({ ok: true, action: "apa_settings_saved", result: await saveApaSettings(p) });
           case "app/apa/client-error":

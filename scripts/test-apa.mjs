@@ -1153,32 +1153,27 @@ the voice playbar, against SPEC.md`);
 check("§4 the six states come out of three fields", () => {
   if (!playbar) { console.log("       (skipped: could not lift playbar.ts)"); return; }
   const v = playbar.playbarView;
-  // A · cold: nothing fetched.
   assert.equal(v({ speech: "idle", loaded: false, bookmarked: false }), "cold");
-  // B · loading.
   assert.equal(v({ speech: "loading", loaded: false, bookmarked: false }), "loading");
-  // D · playing.
   assert.equal(v({ speech: "playing", loaded: true, bookmarked: false }), "playing");
-  // E · paused.
   assert.equal(v({ speech: "paused", loaded: true, bookmarked: false }), "paused");
-  // F · finished / rearmed: loaded, idle, no bookmark.
   assert.equal(v({ speech: "idle", loaded: true, bookmarked: false }), "ended");
 });
 
-check("§8 'Load never repeats' — a loaded clip never shows grey again", () => {
+check("loading shows on every real load, including a clip played before", () => {
   if (!playbar) return;
-  // "Seeing the grey button twice for the same clip reads as a failure."
-  assert.equal(
-    playbar.playbarView({ speech: "loading", loaded: true, bookmarked: false }),
-    "playing",
-    "a second play must go straight to D"
-  );
+  const v = playbar.playbarView;
+  // Field test: "in cold state or previously played state the loading effect
+  // does not work". A first load always shows it.
+  assert.equal(v({ speech: "loading", loaded: false, bookmarked: false }), "loading");
+  // A reload shows it once it is genuinely taking time...
+  assert.equal(v({ speech: "loading", loaded: true, bookmarked: false, slowLoad: true }), "loading");
+  // ...and not as a two-frame flash when the clip opens from the phone's disk.
+  assert.equal(v({ speech: "loading", loaded: true, bookmarked: false, slowLoad: false }), "playing");
 });
 
 check("§8 'One player at a time' — an interrupted clip is paused, not finished", () => {
   if (!playbar) return;
-  // "Starting one clip sends every other to paused, not finished — their
-  // positions survive."
   assert.equal(playbar.playbarView({ speech: "idle", loaded: true, bookmarked: true }), "paused");
   assert.equal(
     playbar.tapPlay({ view: "paused", speech: "idle", bookmarked: true }),
@@ -1187,29 +1182,58 @@ check("§8 'One player at a time' — an interrupted clip is paused, not finishe
   );
 });
 
-check("§7 readout: 0:00 until loaded, then counts down, rounding up", () => {
+check("the readout counts up while playing, and holds when paused", () => {
   if (!playbar) return;
-  const r = (o) => playbar.playbarReadout({ failed: false, drag: null, ...o });
-  // "Not loaded → 0:00." Deliberately not a guess.
-  assert.equal(r({ view: "cold", loaded: false, duration: 24, progress: 0 }), "0:00");
-  assert.equal(r({ view: "loading", loaded: false, duration: 24, progress: 0 }), "0:00");
-  // "Loaded and p == 0 and not playing → full duration."
-  assert.equal(r({ view: "ended", loaded: true, duration: 24, progress: 0 }), "0:24");
-  // "Otherwise ceil(duration × (1 − p))" — 24 × (1 − 1/3) = 16.
-  assert.equal(r({ view: "playing", loaded: true, duration: 24, progress: 1 / 3 }), "0:16");
-  // "0.4s remaining shows 0:01, never a premature 0:00."
-  assert.equal(r({ view: "playing", loaded: true, duration: 24, progress: (24 - 0.4) / 24 }), "0:01");
-  // E: "the countdown holds its last value rather than snapping back".
-  assert.equal(r({ view: "paused", loaded: true, duration: 24, progress: 1 / 3 }), "0:16");
-  // F: "the readout returns to the full duration" — even mid-fade.
-  assert.equal(r({ view: "ended", loaded: true, duration: 24, progress: 0.7 }), "0:24");
-  assert.equal(r({ view: "playing", loaded: true, duration: 84, progress: 0 }), "1:24");
+  const r = (o) => playbar.playbarReadout({ failed: false, drag: null, heardSeconds: null, duration: 23, ...o });
+  // Field test: "show how many seconds it is playing".
+  assert.equal(r({ view: "playing", elapsed: 0 }), "0:00");
+  assert.equal(r({ view: "playing", elapsed: 0.9 }), "0:00", "it ticks after a whole second, not half");
+  assert.equal(r({ view: "playing", elapsed: 1.0 }), "0:01");
+  assert.equal(r({ view: "playing", elapsed: 7.6 }), "0:07");
+  assert.equal(r({ view: "playing", elapsed: 84.2 }), "1:24");
+  // Paused: the count holds where it stopped.
+  assert.equal(r({ view: "paused", elapsed: 7.6 }), "0:07");
+});
+
+check("the length shows only once it has been heard in full", () => {
+  if (!playbar) return;
+  const r = (o) => playbar.playbarReadout({ failed: false, drag: null, elapsed: 0, duration: 0, ...o });
+  // Field test: "only store duration once the full length is played".
+  assert.equal(r({ view: "cold", heardSeconds: null }), "0:00");
+  assert.equal(r({ view: "ended", heardSeconds: null }), "0:00", "loaded but never heard to the end");
+  assert.equal(r({ view: "ended", heardSeconds: 23.05 }), "0:23");
+  assert.equal(r({ view: "cold", heardSeconds: 23.6 }), "0:24", "a length rounds; a count floors");
+  assert.equal(r({ view: "loading", heardSeconds: 23 }), "0:00");
+  // Only a clip that reached its end by itself counts as heard in full.
+  assert.equal(playbar.heardInFull("finished"), true);
+  assert.equal(playbar.heardInFull("stopped"), false, "a pause or an interruption must not record a length");
+  assert.equal(playbar.heardInFull(null), false);
+});
+
+check("the readout is drawn live only when it says something real", () => {
+  if (!playbar) return;
+  const live = playbar.readoutIsLive;
+  assert.equal(live({ view: "playing", failed: false, heardSeconds: null }), true);
+  assert.equal(live({ view: "paused", failed: false, heardSeconds: null }), true);
+  assert.equal(live({ view: "cold", failed: false, heardSeconds: null }), false);
+  assert.equal(live({ view: "loading", failed: false, heardSeconds: 20 }), false);
+  assert.equal(live({ view: "ended", failed: false, heardSeconds: null }), false);
+  assert.equal(live({ view: "ended", failed: false, heardSeconds: 20 }), true);
+  assert.equal(live({ view: "playing", failed: true, heardSeconds: 20 }), false);
+});
+
+check("a drag shows the position under the finger", () => {
+  if (!playbar) return;
+  assert.equal(
+    playbar.playbarReadout({ view: "playing", failed: false, elapsed: 3, heardSeconds: null, duration: 20, drag: 0.5 }),
+    "0:10"
+  );
 });
 
 check("§8 failure shows --:-- whatever else is true", () => {
   if (!playbar) return;
   assert.equal(
-    playbar.playbarReadout({ view: "cold", loaded: false, failed: true, duration: 0, progress: 0 }),
+    playbar.playbarReadout({ view: "cold", failed: true, elapsed: 0, heardSeconds: 30, duration: 0 }),
     "--:--"
   );
 });
@@ -1219,6 +1243,9 @@ check("§7 tapPlay: inert while loading, pause keeps progress, ended replays", (
   const t = playbar.tapPlay;
   // "if phase == loading: return — the button is inert"
   assert.equal(t({ view: "loading", speech: "loading", bookmarked: false }), "ignore");
+  // A fast reload is drawn as playing but is still loading: a press must not
+  // queue a second load behind it.
+  assert.equal(t({ view: "playing", speech: "loading", bookmarked: false }), "ignore");
   // "if !loaded: phase = loading; startFetch()"
   assert.equal(t({ view: "cold", speech: "idle", bookmarked: false }), "load");
   // "else if phase == playing: stopClock(); phase = paused — keep progress"

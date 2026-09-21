@@ -112,7 +112,7 @@ export async function getApaConversation(userId: string | null | undefined, id: 
   const messages = await queryRows<Row>(
     `SELECT CAST(m.id AS CHAR) AS id, m.role, m.input_mode, m.body, m.transcript, m.advice,
             m.image_url, m.audio_seconds, m.sources_json, m.suggestions_json,
-            m.refused, m.created_at,
+            m.refused, m.created_at, m.speech_seconds,
             f.vote AS my_vote
        FROM apa_messages m
        LEFT JOIN apa_feedback f ON f.message_id = m.id AND f.user_id = m.user_id
@@ -163,6 +163,40 @@ export async function clearApaHistory(userId?: string | null) {
    --------------------------------------------------------------------------- */
 
 const FEEDBACK_REASONS = new Set(["wrong", "confusing", "not_my_area", "too_long", "unsafe", "other"]);
+
+/**
+ * She heard a spoken answer all the way through: keep its length.
+ *
+ * The phone calls this only when playback reaches the end by itself — not on
+ * a pause, not when another answer interrupts. The length it sends is the
+ * player's own measurement of the clip it just played, which is what the
+ * readout will show for this answer from then on, on any phone.
+ */
+export async function recordApaListen(payload: Row) {
+  const userId = payload.user_id;
+  const messageId = String(payload.message_id ?? "").trim();
+  const seconds = Number(payload.seconds);
+  if (!userId) throw new Error("user_id is required.");
+  if (!messageId) throw new Error("message_id is required.");
+  // An answer is capped well under ten minutes of speech; anything outside
+  // this range is a broken measurement, not a long answer.
+  if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 600) {
+    throw new Error("seconds must be between 0 and 600.");
+  }
+
+  // Hers, and an answer. Without the owner check one farmer could write
+  // another's listening record.
+  const res = await executeQuery(
+    `UPDATE apa_messages
+        SET speech_seconds = ?,
+            listened_full_at = COALESCE(listened_full_at, NOW())
+      WHERE id = ? AND user_id = ? AND role = 'assistant'`,
+    [Math.round(seconds * 100) / 100, messageId, userId]
+  );
+  const changed = Number((res as { affectedRows?: number }).affectedRows ?? 0);
+  if (!changed) throw new Error("That answer was not found.");
+  return { ok: true, seconds: Math.round(seconds * 100) / 100 };
+}
 
 export async function submitApaFeedback(payload: Row) {
   const userId = payload.user_id;

@@ -67,7 +67,15 @@ export type AskInput = {
 
 export type ApaSpeech =
   | { mode: "device"; text: string; language: string; rate: string }
-  | { mode: "server"; url: string; mime_type: string; sample_rate: number; seconds: number | null };
+  | {
+      mode: "server";
+      url: string;
+      mime_type: string;
+      sample_rate: number;
+      seconds: number | null;
+      /** 36 bar heights, 0..1 — the clip's real envelope. Null for old cached clips. */
+      peaks: number[] | null;
+    };
 
 export type AskResult = {
   conversation_id: number | null;
@@ -743,7 +751,8 @@ async function speechFor(args: {
       url: spoken.url,
       mime_type: spoken.mimeType,
       sample_rate: spoken.sampleRate,
-      seconds: spoken.seconds
+      seconds: spoken.seconds,
+      peaks: spoken.peaks
     };
   } catch (error) {
     // The text answer is still on screen and still correct. Losing the audio is

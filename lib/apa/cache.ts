@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { executeQuery, queryRows } from "@/lib/db";
-import { cacheableForHours, normaliseQuestion } from "@/lib/apa/pure";
+import { cacheableForHours, normaliseQuestion, parsePeaks } from "@/lib/apa/pure";
 
 /**
  * The answer cache, and the speech cache behind it.
@@ -182,12 +182,13 @@ export type CachedSpeech = {
   sample_rate: number;
   bytes: number;
   seconds: number | null;
+  peaks: number[] | null;
 };
 
 export async function readSpeechCache(key: string): Promise<CachedSpeech | null> {
   try {
     const [row] = await queryRows<Row>(
-      "SELECT audio_url, mime_type, sample_rate, bytes, seconds FROM apa_speech_cache WHERE cache_key = ? LIMIT 1",
+      "SELECT audio_url, mime_type, sample_rate, bytes, seconds, peaks_json FROM apa_speech_cache WHERE cache_key = ? LIMIT 1",
       [key]
     );
     if (!row) return null;
@@ -200,7 +201,10 @@ export async function readSpeechCache(key: string): Promise<CachedSpeech | null>
       mime_type: String(row.mime_type),
       sample_rate: Number(row.sample_rate),
       bytes: Number(row.bytes),
-      seconds: row.seconds === null ? null : Number(row.seconds)
+      seconds: row.seconds === null ? null : Number(row.seconds),
+      // Rows written before the envelope existed have none. The player falls
+      // back to a stable generated shape for those rather than failing.
+      peaks: parsePeaks(row.peaks_json)
     };
   } catch {
     return null;
@@ -218,17 +222,20 @@ export async function writeSpeechCache(input: {
   sampleRate: number;
   bytes: number;
   seconds: number | null;
+  peaks?: number[] | null;
 }): Promise<void> {
   try {
     await executeQuery(
       `INSERT INTO apa_speech_cache
-         (cache_key, text_len, voice, speech_rate, model, audio_url, mime_type, sample_rate, bytes, seconds)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE audio_url = VALUES(audio_url), bytes = VALUES(bytes)`,
+         (cache_key, text_len, voice, speech_rate, model, audio_url, mime_type, sample_rate, bytes, seconds, peaks_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE audio_url = VALUES(audio_url), bytes = VALUES(bytes),
+                               peaks_json = COALESCE(VALUES(peaks_json), peaks_json)`,
       [
         input.key, input.textLen, input.voice.slice(0, 60), input.rate.slice(0, 20),
         input.model.slice(0, 80), input.audioUrl.slice(0, 500), input.mimeType.slice(0, 60),
-        input.sampleRate, input.bytes, input.seconds
+        input.sampleRate, input.bytes, input.seconds,
+        input.peaks ? JSON.stringify(input.peaks) : null
       ]
     );
   } catch (error) {

@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { genai } from "@/lib/apa/client";
-import { pcm16ToWav, sampleRateFrom, speakable } from "@/lib/apa/pure";
+import { pcm16ToWav, sampleRateFrom, speakable, waveformPeaks } from "@/lib/apa/pure";
 import { runWithChain, usageOf } from "@/lib/apa/models";
 import { readSpeechCache, speechKey, writeSpeechCache } from "@/lib/apa/cache";
 import { s3Enabled, uploadToS3 } from "@/lib/s3";
@@ -32,6 +32,8 @@ export type Speech = {
   sampleRate: number;
   bytes: number;
   seconds: number | null;
+  /** The real 36-bar envelope, or null for a clip cached before it existed. */
+  peaks: number[] | null;
   chars: number;
   model: string;
   fromCache: boolean;
@@ -64,6 +66,7 @@ export async function speak(input: {
         sampleRate: hit.sample_rate,
         bytes: hit.bytes,
         seconds: hit.seconds,
+        peaks: hit.peaks,
         chars: text.length,
         model: primary,
         fromCache: true
@@ -90,8 +93,12 @@ export async function speak(input: {
   });
 
   const sampleRate = sampleRateFrom(attempt.result.mimeType ?? undefined);
-  const wav = pcm16ToWav(Buffer.from(attempt.result.data ?? "", "base64"), sampleRate);
+  const pcm = Buffer.from(attempt.result.data ?? "", "base64");
+  const wav = pcm16ToWav(pcm, sampleRate);
   const seconds = Number(((wav.length - 44) / (sampleRate * 2)).toFixed(2));
+  // Measured here because this is the only moment anyone holds the PCM before
+  // she presses play. See waveformPeaks.
+  const peaks = waveformPeaks(pcm);
 
   const url = await store(wav, key, input.origin);
 
@@ -106,7 +113,8 @@ export async function speak(input: {
       mimeType: "audio/wav",
       sampleRate,
       bytes: wav.length,
-      seconds
+      seconds,
+      peaks
     });
   }
 
@@ -116,6 +124,7 @@ export async function speak(input: {
     sampleRate,
     bytes: wav.length,
     seconds,
+    peaks,
     chars: text.length,
     model: attempt.model,
     fromCache: false

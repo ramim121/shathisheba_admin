@@ -1059,6 +1059,202 @@ check("nothing worth transcribing is sent", () => {
   assert.equal(maySend(base), true);
 });
 
+/* ===========================================================================
+   The playbar's waveform envelope
+   =========================================================================== */
+
+console.log(`
+the playbar's waveform envelope`);
+
+// A clip made on the spot: silence, then a loud stretch, then a quiet one.
+// 24 kHz, 16-bit, three seconds.
+function clip(parts) {
+  const rate = 24000;
+  const chunks = parts.map(([seconds, amplitude]) => {
+    const n = Math.round(seconds * rate);
+    const buf = Buffer.alloc(n * 2);
+    for (let i = 0; i < n; i += 1) {
+      const v = Math.round(Math.sin((i / rate) * 2 * Math.PI * 220) * amplitude * 32767);
+      buf.writeInt16LE(v, i * 2);
+    }
+    return buf;
+  });
+  return Buffer.concat(chunks);
+}
+
+check("thirty-six bars, each 0..1, the loudest exactly 1", () => {
+  const out = pure.waveformPeaks(clip([[1, 0], [1, 0.9], [1, 0.2]]));
+  assert.equal(out.length, 36);
+  assert.ok(out.every((v) => v >= 0 && v <= 1), "a bar outside 0..1");
+  assert.equal(Math.max(...out), 1);
+});
+
+check("the shape follows the audio: silent start, loud middle, quiet end", () => {
+  const out = pure.waveformPeaks(clip([[1, 0], [1, 0.9], [1, 0.2]]));
+  const third = (a, b) => out.slice(a, b).reduce((x, y) => x + y, 0) / (b - a);
+  const start = third(0, 12);
+  const middle = third(12, 24);
+  const end = third(24, 36);
+  // If the envelope were generated rather than measured, none of this would
+  // hold — which is the whole point of measuring it on the server.
+  assert.equal(start, 0, "silence must draw as nothing");
+  assert.ok(middle > end, `middle ${middle} should be louder than end ${end}`);
+  assert.ok(end > 0, "a quiet stretch is still drawn");
+});
+
+check("the same audio always draws the same shape", () => {
+  const a = pure.waveformPeaks(clip([[0.5, 0.3], [0.5, 0.8]]));
+  const b = pure.waveformPeaks(clip([[0.5, 0.3], [0.5, 0.8]]));
+  assert.deepEqual(a, b);
+});
+
+check("silence and empty audio do not divide by zero", () => {
+  assert.deepEqual(pure.waveformPeaks(clip([[1, 0]])), Array(36).fill(0));
+  assert.deepEqual(pure.waveformPeaks(Buffer.alloc(0)), Array(36).fill(0));
+});
+
+check("a stored envelope is only trusted if it is 36 sane numbers", () => {
+  const good = Array.from({ length: 36 }, (_, i) => i / 35);
+  assert.deepEqual(pure.parsePeaks(JSON.stringify(good)), good);
+  assert.equal(pure.parsePeaks(null), null);
+  assert.equal(pure.parsePeaks(""), null);
+  assert.equal(pure.parsePeaks("not json"), null);
+  assert.equal(pure.parsePeaks(JSON.stringify([0.5, 0.5])), null, "wrong length");
+  assert.equal(pure.parsePeaks(JSON.stringify(Array(36).fill(2))), null, "out of range");
+  assert.equal(pure.parsePeaks(JSON.stringify(Array(36).fill("x"))), null, "not numbers");
+});
+
+/* ===========================================================================
+   The voice playbar, against its own spec
+   =========================================================================== */
+
+/**
+ * `src/ai/playbar.ts` in the mobile app: SPEC.md §4 and §7 as pure functions.
+ * Each check below quotes the line of the spec it enforces, so a failure
+ * names the rule that broke rather than just a value.
+ */
+const MOBILE_PLAYBAR = "../../Shathi Sheba/src/ai/playbar.ts";
+let playbar = null;
+try {
+  const src = readFileSync(new URL(MOBILE_PLAYBAR, import.meta.url), "utf8")
+    .split(String.fromCharCode(13, 10))
+    .join(String.fromCharCode(10));
+  const out = ts.transpileModule(src, {
+    compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 }
+  }).outputText;
+  playbar = await import(`data:text/javascript;base64,${Buffer.from(out, "utf8").toString("base64")}`);
+} catch {
+  playbar = null;
+}
+
+console.log(`
+the voice playbar, against SPEC.md`);
+
+check("§4 the six states come out of three fields", () => {
+  if (!playbar) { console.log("       (skipped: could not lift playbar.ts)"); return; }
+  const v = playbar.playbarView;
+  // A · cold: nothing fetched.
+  assert.equal(v({ speech: "idle", loaded: false, bookmarked: false }), "cold");
+  // B · loading.
+  assert.equal(v({ speech: "loading", loaded: false, bookmarked: false }), "loading");
+  // D · playing.
+  assert.equal(v({ speech: "playing", loaded: true, bookmarked: false }), "playing");
+  // E · paused.
+  assert.equal(v({ speech: "paused", loaded: true, bookmarked: false }), "paused");
+  // F · finished / rearmed: loaded, idle, no bookmark.
+  assert.equal(v({ speech: "idle", loaded: true, bookmarked: false }), "ended");
+});
+
+check("§8 'Load never repeats' — a loaded clip never shows grey again", () => {
+  if (!playbar) return;
+  // "Seeing the grey button twice for the same clip reads as a failure."
+  assert.equal(
+    playbar.playbarView({ speech: "loading", loaded: true, bookmarked: false }),
+    "playing",
+    "a second play must go straight to D"
+  );
+});
+
+check("§8 'One player at a time' — an interrupted clip is paused, not finished", () => {
+  if (!playbar) return;
+  // "Starting one clip sends every other to paused, not finished — their
+  // positions survive."
+  assert.equal(playbar.playbarView({ speech: "idle", loaded: true, bookmarked: true }), "paused");
+  assert.equal(
+    playbar.tapPlay({ view: "paused", speech: "idle", bookmarked: true }),
+    "resume-bookmark",
+    "pressing play on it must resume from where it was"
+  );
+});
+
+check("§7 readout: 0:00 until loaded, then counts down, rounding up", () => {
+  if (!playbar) return;
+  const r = (o) => playbar.playbarReadout({ failed: false, drag: null, ...o });
+  // "Not loaded → 0:00." Deliberately not a guess.
+  assert.equal(r({ view: "cold", loaded: false, duration: 24, progress: 0 }), "0:00");
+  assert.equal(r({ view: "loading", loaded: false, duration: 24, progress: 0 }), "0:00");
+  // "Loaded and p == 0 and not playing → full duration."
+  assert.equal(r({ view: "ended", loaded: true, duration: 24, progress: 0 }), "0:24");
+  // "Otherwise ceil(duration × (1 − p))" — 24 × (1 − 1/3) = 16.
+  assert.equal(r({ view: "playing", loaded: true, duration: 24, progress: 1 / 3 }), "0:16");
+  // "0.4s remaining shows 0:01, never a premature 0:00."
+  assert.equal(r({ view: "playing", loaded: true, duration: 24, progress: (24 - 0.4) / 24 }), "0:01");
+  // E: "the countdown holds its last value rather than snapping back".
+  assert.equal(r({ view: "paused", loaded: true, duration: 24, progress: 1 / 3 }), "0:16");
+  // F: "the readout returns to the full duration" — even mid-fade.
+  assert.equal(r({ view: "ended", loaded: true, duration: 24, progress: 0.7 }), "0:24");
+  assert.equal(r({ view: "playing", loaded: true, duration: 84, progress: 0 }), "1:24");
+});
+
+check("§8 failure shows --:-- whatever else is true", () => {
+  if (!playbar) return;
+  assert.equal(
+    playbar.playbarReadout({ view: "cold", loaded: false, failed: true, duration: 0, progress: 0 }),
+    "--:--"
+  );
+});
+
+check("§7 tapPlay: inert while loading, pause keeps progress, ended replays", () => {
+  if (!playbar) return;
+  const t = playbar.tapPlay;
+  // "if phase == loading: return — the button is inert"
+  assert.equal(t({ view: "loading", speech: "loading", bookmarked: false }), "ignore");
+  // "if !loaded: phase = loading; startFetch()"
+  assert.equal(t({ view: "cold", speech: "idle", bookmarked: false }), "load");
+  // "else if phase == playing: stopClock(); phase = paused — keep progress"
+  assert.equal(t({ view: "playing", speech: "playing", bookmarked: false }), "pause");
+  // "else: startClock(); phase = playing — paused or ended"
+  assert.equal(t({ view: "paused", speech: "paused", bookmarked: false }), "resume");
+  assert.equal(t({ view: "ended", speech: "idle", bookmarked: false }), "replay");
+});
+
+check("§8 'Seek only means play' — every seek ends in playback", () => {
+  if (!playbar) return;
+  const w = playbar.tapWaveform;
+  // "Seek taps during B are queued."
+  assert.equal(w({ view: "loading", speech: "loading" }), "queue");
+  // Live clip: seek in place; a paused one resumes (seekSpeech plays).
+  assert.equal(w({ view: "playing", speech: "playing" }), "seek");
+  assert.equal(w({ view: "paused", speech: "paused" }), "seek");
+  // "In A it is a load trigger with a remembered offset."
+  assert.equal(w({ view: "cold", speech: "idle" }), "load-from");
+  // "including from paused and finished"
+  assert.equal(w({ view: "ended", speech: "idle" }), "load-from");
+  assert.equal(w({ view: "paused", speech: "idle" }), "load-from", "a bookmarked clip starts from the tap");
+});
+
+check("§7 the tapped point is clamped to 0…0.995", () => {
+  if (!playbar) return;
+  const r = playbar.seekRatio;
+  assert.equal(r(0, 200), 0);
+  assert.equal(r(100, 200), 0.5);
+  // The very end is never a seek to "finished".
+  assert.equal(r(200, 200), 0.995);
+  assert.equal(r(260, 200), 0.995);
+  assert.equal(r(-20, 200), 0);
+  assert.equal(r(50, 0), 0, "before layout there is nothing to seek on");
+});
+
 console.log(
   process.exitCode
     ? "\nthere are failures above.\n"

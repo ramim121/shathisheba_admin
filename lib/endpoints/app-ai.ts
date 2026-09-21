@@ -152,7 +152,7 @@ const langLine = (lang: string) =>
 
 export type SpeakResult =
   | { mode: "device"; text: string; language: string; rate: string }
-  | { mode: "server"; url: string; mime_type: string; sample_rate: number; seconds: number | null; from_cache: boolean }
+  | { mode: "server"; url: string; mime_type: string; sample_rate: number; seconds: number | null; peaks: number[] | null; from_cache: boolean }
   | { mode: "none"; reason: string };
 
 /**
@@ -233,6 +233,9 @@ export async function appSpeak(payload: Row): Promise<SpeakResult> {
       mime_type: spoken.mimeType,
       sample_rate: spoken.sampleRate,
       seconds: spoken.seconds,
+      // The clip's real envelope, so the playbar can swap its placeholder
+      // shape for the true one on the same frame the audio arrives.
+      peaks: spoken.peaks,
       from_cache: spoken.fromCache
     };
   } catch (error) {

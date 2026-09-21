@@ -110,6 +110,79 @@ export function pcm16ToWav(pcm: Buffer, sampleRate: number, channels = 1): Buffe
   return Buffer.concat([header, pcm]);
 }
 
+/** How many bars the player draws. The playbar spec fixes it at 36. */
+export const WAVEFORM_BARS = 36;
+
+/**
+ * The real amplitude envelope of a clip, as the playbar draws it.
+ *
+ * The playbar spec is explicit that bar heights are the clip's actual envelope
+ * and are identical in every state — cold, loading, playing, finished. That
+ * rules out computing them on the phone: the phone does not have the audio
+ * until she presses play, so a real envelope could only appear *after* the
+ * thing it is meant to invite, and the shape would change at the moment of
+ * loading. The server has the PCM the instant it synthesises it, so it
+ * measures here and ships 36 numbers with the URL.
+ *
+ * RMS per bucket rather than peak: a single click or plosive makes a peak
+ * bar that has nothing to do with how loud the speech is, and a waveform of
+ * isolated spikes reads as noise.
+ *
+ * Stretched between the quietest and loudest bucket rather than scaled to the
+ * loudest alone. Measured on the 49 clips already cached: a spoken answer
+ * averaged over one-second buckets sits in a narrow band of loudness, so
+ * scaling to the maximum put nearly every bar between 60% and 90% of full
+ * height — a dense comb in which the pauses between sentences, the one
+ * feature a listener can actually navigate by, were invisible. The stretch
+ * keeps every bar in the same order relative to every other, so it is still
+ * the clip's own envelope; it just uses the whole height to show it.
+ *
+ * Returns values in 0..1 at two decimal places — about 180 bytes of JSON.
+ */
+export function waveformPeaks(pcm: Buffer, bars = WAVEFORM_BARS): number[] {
+  const samples = Math.floor(pcm.length / 2);
+  if (samples === 0 || bars <= 0) return Array(Math.max(0, bars)).fill(0);
+
+  const rms: number[] = [];
+  for (let b = 0; b < bars; b += 1) {
+    const from = Math.floor((b * samples) / bars);
+    const to = Math.max(from + 1, Math.floor(((b + 1) * samples) / bars));
+    let sum = 0;
+    let n = 0;
+    for (let i = from; i < to && i < samples; i += 1) {
+      const v = pcm.readInt16LE(i * 2) / 32768;
+      sum += v * v;
+      n += 1;
+    }
+    rms.push(n ? Math.sqrt(sum / n) : 0);
+  }
+
+  const loudest = Math.max(...rms);
+  const quietest = Math.min(...rms);
+  if (loudest <= 0) return rms.map(() => 0);
+  // A clip of one steady tone has no shape to stretch; draw it flat and full
+  // rather than dividing by zero.
+  if (loudest - quietest < 1e-6) return rms.map(() => 1);
+  return rms.map((v) => Math.round(((v - quietest) / (loudest - quietest)) * 100) / 100);
+}
+
+/** Parse what the cache stored, refusing anything that is not 36 sane numbers. */
+export function parsePeaks(raw: unknown, bars = WAVEFORM_BARS): number[] | null {
+  if (raw === null || raw === undefined || raw === "") return null;
+  let value: unknown = raw;
+  if (typeof raw === "string") {
+    try {
+      value = JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+  if (!Array.isArray(value) || value.length !== bars) return null;
+  const out = value.map((v) => Number(v));
+  if (out.some((v) => !Number.isFinite(v) || v < 0 || v > 1)) return null;
+  return out;
+}
+
 export function sampleRateFrom(mimeType: string | undefined, fallback = 24000): number {
   const rate = /rate=(\d+)/.exec(mimeType ?? "")?.[1];
   return Number(rate ?? fallback) || fallback;

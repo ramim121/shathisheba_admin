@@ -138,6 +138,11 @@ const ERASE: Step[] = [
   },
   { table: "community_comments", sql: "DELETE FROM community_comments WHERE user_id = ?" },
   { table: "community_comments", sql: "DELETE FROM community_comments WHERE community_post_id IN (SELECT id FROM community_posts WHERE user_id = ? AND is_official = 0)" },
+  // Her reports on other people's posts, the reports on her own posts (which
+  // go with them), and her blocks in both directions.
+  { table: "community_post_reports", sql: "DELETE FROM community_post_reports WHERE reporter_user_id = ?" },
+  { table: "community_post_reports", sql: "DELETE FROM community_post_reports WHERE post_id IN (SELECT id FROM community_posts WHERE user_id = ? AND is_official = 0)" },
+  { table: "community_user_blocks", sql: "DELETE FROM community_user_blocks WHERE ? IN (blocker_user_id, blocked_user_id)" },
   { table: "community_posts", sql: "DELETE FROM community_posts WHERE user_id = ? AND is_official = 0" },
 
   // Behavioural assessment, coaching tasks, and the documents on her loan files.

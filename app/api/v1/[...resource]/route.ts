@@ -86,6 +86,10 @@ import {
   getUsersWithRoles,
   setUserRoles,
   likePost,
+  reportCommunityPost,
+  blockCommunityUser,
+  unblockCommunityUser,
+  getMyCommunityBlocks,
   placeOrder,
   getOrderQuote,
   getAppOrderDetail,
@@ -314,6 +318,7 @@ const appReadHandlers: Record<string, AppReadHandler> = {
   "app/kyc-documents": (q) => getUserKycDocuments(q.get("user_id")),
   "app/users-with-roles": () => getUsersWithRoles(),
   "app/community/moderation": (q) => getCommunityModeration(q.get("filter")),
+  "app/community/blocks": (q) => getMyCommunityBlocks(q.get("user_id")),
   "app/learning/overview": (q) => getAppLearningOverview(q.get("user_id")),
   "app/learning/modules": (q) => getAppLearningCategoryModules(q.get("category_id"), q.get("user_id")),
   "app/learning/contents": (q) => getAppLearningModuleContents(q.get("module_id"), q.get("user_id")),
@@ -1370,6 +1375,19 @@ export async function POST(request: NextRequest, { params }: Params) {
         userAgent: request.headers.get("user-agent")
       });
       return NextResponse.json({ ok: true, action: "notice_posted", result }, { status: 201 });
+    }
+    // Reporting and blocking are the farmer's own actions, never an admin's on
+    // her behalf: the signed-in app user is the reporter or the blocker.
+    if (exact === "app/community/report" || exact === "app/community/block" || exact === "app/community/unblock") {
+      if (caller.kind !== "app") return forbidden("Only a signed-in app user can report or block.");
+      const body = payload as Record<string, unknown>;
+      const result = exact === "app/community/report"
+        ? await reportCommunityPost(caller.user.id, body)
+        : exact === "app/community/block"
+          ? await blockCommunityUser(caller.user.id, body)
+          : await unblockCommunityUser(caller.user.id, body);
+      const action = exact === "app/community/report" ? "post_reported" : exact === "app/community/block" ? "user_blocked" : "user_unblocked";
+      return NextResponse.json({ ok: true, source: "mysql", action, result }, { status: 200 });
     }
     if (exact === "app/community/moderate") {
       return NextResponse.json({ ok: true, source: "mysql", action: "post_moderated", result: await moderateCommunityPost(payload) }, { status: 200 });

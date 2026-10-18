@@ -16,6 +16,110 @@ export async function likePost(id: string) {
   return { post_id: id, like_count: Number(rows[0]?.like_count ?? 0), affected: result.affectedRows };
 }
 
+// ── Reporting and blocking (the app) ────────────────────────────────────────
+//
+// Google Play's User Generated Content policy asks for an in-app way to report
+// objectionable posts and people. A report is one row per person per post; the
+// first report on an ordinary post takes it out of the feed ('moderation')
+// until staff restore or remove it in the console. A staff notice is counted
+// and queued but never hidden by a report. Blocking is private to the blocker:
+// the blocked person's posts drop out of her feed and nothing tells them.
+
+export const REPORT_REASONS = ["spam", "abusive", "sexual", "violence", "false_info", "scam", "other"] as const;
+
+function idOf(value: unknown, what: string): string {
+  const id = String(value ?? "").trim();
+  if (!/^\d+$/.test(id)) throw new Error(`${what} is required.`);
+  return id;
+}
+
+// POST /api/v1/app/community/report  { post_id, reason, note? }
+export async function reportCommunityPost(userId: number, payload: Row) {
+  const postId = idOf(payload.post_id, "Post id");
+  const reason = (REPORT_REASONS as readonly string[]).includes(String(payload.reason)) ? String(payload.reason) : "other";
+  const note = payload.note ? String(payload.note).trim().slice(0, 500) || null : null;
+  const [post] = await queryRows<Row>(
+    "SELECT CAST(id AS CHAR) AS id, CAST(user_id AS CHAR) AS user_id, status, is_official FROM community_posts WHERE id = ?",
+    [postId]
+  );
+  if (!post) throw new Error("Post not found.");
+  if (String(post.user_id) === String(userId)) throw new Error("You cannot report your own post.");
+
+  return withTransaction(async (tx) => {
+    const inserted = await tx.execute(
+      "INSERT IGNORE INTO community_post_reports (post_id, reporter_user_id, reason, note) VALUES (?, ?, ?, ?)",
+      [postId, userId, reason, note]
+    );
+    if (inserted.affectedRows === 1) {
+      await tx.execute(
+        `UPDATE community_posts
+            SET report_count = report_count + 1,
+                status = IF(status = 'visible' AND is_official = 0, 'moderation', status)
+          WHERE id = ?`,
+        [postId]
+      );
+    }
+    const [after] = await tx.query<Row>("SELECT status, report_count FROM community_posts WHERE id = ?", [postId]);
+    return {
+      post_id: postId,
+      reported: true,
+      already_reported: inserted.affectedRows === 0,
+      hidden: String(after?.status) !== "visible",
+      report_count: Number(after?.report_count ?? 0)
+    };
+  });
+}
+
+// POST /api/v1/app/community/block  { post_id } or { blocked_user_id }
+// Blocking from a post resolves its author on the server, so the feed never has
+// to hand out other people's account ids.
+export async function blockCommunityUser(userId: number, payload: Row) {
+  let target: string | null = null;
+  if (payload.post_id !== undefined && payload.post_id !== null && payload.post_id !== "") {
+    const [post] = await queryRows<Row>(
+      "SELECT CAST(user_id AS CHAR) AS user_id, is_official FROM community_posts WHERE id = ?",
+      [idOf(payload.post_id, "Post id")]
+    );
+    if (!post) throw new Error("Post not found.");
+    if (Number(post.is_official) === 1) throw new Error("Shathi Sheba notices cannot be blocked.");
+    target = String(post.user_id);
+  } else {
+    target = idOf(payload.blocked_user_id, "Person to block");
+  }
+  if (target === String(userId)) throw new Error("You cannot block yourself.");
+  await executeQuery(
+    "INSERT IGNORE INTO community_user_blocks (blocker_user_id, blocked_user_id) VALUES (?, ?)",
+    [userId, target]
+  );
+  return { blocked: true };
+}
+
+// POST /api/v1/app/community/unblock  { blocked_user_id }
+export async function unblockCommunityUser(userId: number, payload: Row) {
+  const target = idOf(payload.blocked_user_id, "Person to unblock");
+  const result = await executeQuery(
+    "DELETE FROM community_user_blocks WHERE blocker_user_id = ? AND blocked_user_id = ?",
+    [userId, target]
+  );
+  return { unblocked: result.affectedRows > 0 };
+}
+
+// GET /api/v1/app/community/blocks
+// The people she has blocked, for the unblock list. Names only: a deleted
+// account has no name left to show and is skipped.
+export async function getMyCommunityBlocks(userId?: string | null) {
+  if (!userId) return [];
+  return queryRows<Row>(
+    `SELECT CAST(b.blocked_user_id AS CHAR) AS blocked_user_id,
+            COALESCE(NULLIF(u.display_name, ''), u.full_name) AS name, b.created_at
+       FROM community_user_blocks b
+       JOIN app_users u ON u.id = b.blocked_user_id
+      WHERE b.blocker_user_id = ? AND u.status <> 'deleted'
+      ORDER BY b.created_at DESC`,
+    [userId]
+  );
+}
+
 // ── Community moderation (admin backend) ────────────────────────────────────
 
 // GET /api/v1/app/community/moderation?filter=all|flagged|official|hidden
@@ -30,6 +134,8 @@ export async function getCommunityModeration(filter?: string | null) {
       SELECT CAST(p.id AS CHAR) AS id, u.full_name AS author, CAST(p.user_id AS CHAR) AS user_id,
              p.post_type, p.scope, p.body, p.image_url, p.is_official,
              p.like_count, p.comment_count, p.report_count, p.status,
+             (SELECT GROUP_CONCAT(DISTINCT r.reason ORDER BY r.reason SEPARATOR ', ')
+                FROM community_post_reports r WHERE r.post_id = p.id) AS report_reasons,
              p.ai_flag, p.ai_reason, p.ai_checked_at, p.district, p.upazila, p.created_at,
              -- Who actually sees it: the ids are what the feed filters on, and a
              -- post whose scope says "district" but carries no district id
@@ -78,6 +184,15 @@ export async function moderateCommunityPost(payload: Row) {
   if (sets.length === 0) throw new Error("Nothing to update (status or is_official required).");
   sets.push("moderated_at = NOW()");
   await executeQuery(`UPDATE community_posts SET ${sets.join(", ")} WHERE id = ?`, [...values, id]);
+  // A decision on the post closes the reports waiting on it: restoring it
+  // dismisses them, hiding or removing it acts on them.
+  if (payload.status !== undefined) {
+    const outcome = String(payload.status) === "visible" || String(payload.status) === "answered" ? "dismissed" : "actioned";
+    await executeQuery(
+      "UPDATE community_post_reports SET status = ?, reviewed_at = NOW() WHERE post_id = ? AND status = 'open'",
+      [outcome, id]
+    );
+  }
   const rows = await queryRows<Row>(
     "SELECT CAST(id AS CHAR) AS id, status, is_official FROM community_posts WHERE id = ?",
     [id]

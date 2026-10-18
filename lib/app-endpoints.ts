@@ -947,10 +947,12 @@ export async function getAppCommunityPosts(scope?: string | null, _district?: st
         FROM sale_listings l
         JOIN app_users u ON u.id = l.user_id
         WHERE l.status NOT IN ('draft','cancelled','rejected') AND ${area.sql}
+          AND NOT EXISTS (SELECT 1 FROM community_user_blocks b
+                           WHERE b.blocker_user_id = ? AND b.blocked_user_id = l.user_id)
         ORDER BY l.created_at DESC
         LIMIT 50
       `,
-      area.params
+      [...area.params, userId ?? null]
     );
   }
 
@@ -966,16 +968,24 @@ export async function getAppCommunityPosts(scope?: string | null, _district?: st
              p.district, p.upazila, p.scope, p.status, p.created_at,
              (SELECT name_bn FROM geo_districts WHERE id = p.district_id) AS district_bn,
              (SELECT name_bn FROM geo_upazilas WHERE id = p.upazila_id) AS upazila_bn,
-             (p.post_type = 'notice' AND p.body LIKE '🏷️%') AS is_listing
+             (p.post_type = 'notice' AND p.body LIKE '🏷️%') AS is_listing,
+             (p.user_id <=> ?) AS is_mine
       FROM community_posts p
       JOIN app_users u ON u.id = p.user_id
       WHERE p.status = 'visible' AND (? IS NULL OR p.scope = ?)
         AND (? IS NULL OR p.user_id = ?)
         AND (${regional ? `(p.scope = 'bangladesh' OR ${area.sql})` : "1 = 1"})
+        -- Her blocks and her reports: a blocked person's posts, and a post she
+        -- has reported (a staff notice stays up for everyone else), are gone
+        -- from her feed.
+        AND NOT EXISTS (SELECT 1 FROM community_user_blocks b
+                         WHERE b.blocker_user_id = ? AND b.blocked_user_id = p.user_id)
+        AND NOT EXISTS (SELECT 1 FROM community_post_reports r
+                         WHERE r.reporter_user_id = ? AND r.post_id = p.id)
       ORDER BY p.is_official DESC, p.created_at DESC
       LIMIT 50
     `,
-    [s, s, mine, mine, ...(regional ? area.params : [])]
+    [userId ?? null, s, s, mine, mine, ...(regional ? area.params : []), userId ?? null, userId ?? null]
   );
 }
 

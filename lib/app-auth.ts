@@ -38,6 +38,8 @@ export function bearerToken(request: NextRequest): string | null {
 }
 
 // Resolve a live (unexpired) app session to its user, with roles attached.
+// A deleted account's sessions are erased with it; the status check is the
+// second lock on the same door.
 export async function getAppUserByToken(token: string | null | undefined): Promise<AppSessionUser | null> {
   if (!token) return null;
   const rows = await queryRows<Omit<AppSessionUser, "roles">>(
@@ -45,6 +47,7 @@ export async function getAppUserByToken(token: string | null | undefined): Promi
        FROM app_sessions s
        JOIN app_users u ON u.id = s.user_id
       WHERE s.token = ? AND (s.expires_at IS NULL OR s.expires_at > NOW())
+        AND u.status <> 'deleted'
       LIMIT 1`,
     [token]
   );

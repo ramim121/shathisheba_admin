@@ -1,5 +1,7 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { resolveCaller, unauthorized, forbidden, type Caller } from "@/lib/app-auth";
+import { deleteAccount, deleteAccountAsAdmin } from "@/lib/account-deletion";
+import { getPublicLoanDisclosure } from "@/lib/finance/disclosure";
 import { checkAccess } from "@/lib/api-access";
 import { RateLimitError, isDatabaseError } from "@/lib/errors";
 import { resolveGeoNames, searchUpazilas } from "@/lib/geo";
@@ -97,6 +99,8 @@ import {
   saveUserPreferences,
   verifyOtp,
   verifyOtpLogin,
+  requestAccountDeletionCode,
+  confirmAccountDeletionCode,
   getFinanceSummary,
   getReadinessQuestions,
   getReadinessLatest,
@@ -325,6 +329,8 @@ const appReadHandlers: Record<string, AppReadHandler> = {
   "app/finance/readiness/signals": (q) => getReadinessSignals(q.get("user_id")!),
   "app/finance/readiness/history": (q) => getReadinessHistory(q.get("user_id")!),
   "app/finance/loan-products": () => getLoanProducts(),
+  // Public: APR range, repayment periods, fees, representative example.
+  "public/loan-disclosure": () => getPublicLoanDisclosure(),
   "app/finance/applications": (q) => getLoanApplications(q.get("user_id")!),
   "app/finance/consents": (q) => getLoanConsents(q.get("user_id")!),
   "app/finance/purposes": () => getLoanPurposes(),
@@ -816,6 +822,39 @@ export async function POST(request: NextRequest, { params }: Params) {
 
   // App action routes (composite writes that the mobile screens call directly).
   try {
+    // ---- Account deletion (Google Play) -------------------------------------
+    // The in-app door: the signed-in farmer, who must type DELETE. Every
+    // session is revoked by the deletion itself.
+    if (exact === "app/me/delete") {
+      if (caller.kind !== "app") return forbidden("Only the account holder can delete an account from the app.");
+      if ((payload as Record<string, unknown>).confirm !== "DELETE") {
+        return dbError(new Error('Type DELETE to confirm that you want to delete your account.'));
+      }
+      const result = await deleteAccount(caller.user.id, "app");
+      return NextResponse.json({ ok: true, source: "mysql", action: "account_deleted", result }, { status: 200 });
+    }
+    // The public web page (/delete-account): a code to the phone, then the
+    // code. request-code answers the same whether or not the number has an
+    // account; the SMS itself goes out after the response.
+    if (exact === "public/account-deletion/request-code") {
+      await requestAccountDeletionCode(payload, clientIp(request), { defer: (task) => after(task) });
+      return NextResponse.json({ ok: true, sent: true }, { status: 200 });
+    }
+    if (exact === "public/account-deletion/confirm") {
+      const result = await confirmAccountDeletionCode(payload);
+      return NextResponse.json({ ok: true, source: "mysql", action: "account_deleted", result }, { status: 200 });
+    }
+    // The console's door, for a request that arrives by email: super_admin
+    // only, and the account's phone number typed back as confirmation.
+    if (exact === "admin/users/delete-account") {
+      if (caller.kind !== "admin" || caller.admin.role !== "super_admin") {
+        return forbidden("Deleting an account is restricted to super administrators.");
+      }
+      const body = payload as Record<string, unknown>;
+      const result = await deleteAccountAsAdmin(body.user_id, body.confirm, { adminId: caller.admin.id });
+      return NextResponse.json({ ok: true, source: "mysql", action: "account_deleted", result }, { status: 200 });
+    }
+
     // ---- Account maintenance ------------------------------------------------
     // Destructive and irreversible, so it carries three guards beyond the normal
     // admin check: super_admin only, the caller must echo back the exact phone

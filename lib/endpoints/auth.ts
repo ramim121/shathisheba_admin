@@ -1,8 +1,11 @@
+import { randomBytes, randomInt } from "node:crypto";
 import { executeQuery, queryRows, withTransaction } from "@/lib/db";
 import type { Row } from "./shared";
 import { generateToken } from "@/lib/auth";
 import { isSmsDevMode, sendSms } from "@/lib/sms";
 import { RateLimitError } from "@/lib/errors";
+import { deleteAccount } from "@/lib/account-deletion";
+import { canonicalPhone, reviewCodeFor } from "@/lib/review-account";
 import { getUserRoles, safeJson } from "./shared";
 
 // Mobile authentication: OTP issue and verify, the request throttle that keeps
@@ -136,9 +139,77 @@ async function assertOtpRateLimit(phone: string, requestIp: string | null) {
   }
 }
 
+// What a code is for. A sign-in code does not confirm a deletion and a
+// deletion code does not sign anyone in (migration 055); both draw on the same
+// request budget above, so the second flow does not double the SMS spend.
+type OtpPurpose = "login" | "account_deletion";
+
+const OTP_TTL_SECONDS = 300;
+const OTP_MAX_ATTEMPTS = 5;
+
+// Sign-in codes stay four digits: the app's code field is built around them.
+// A deletion code is typed into the web page, which takes any length, so it
+// gets six — a hundred times fewer guesses for the flow that destroys data.
+function newOtpCode(digits: 4 | 6 = 4): string {
+  return String(randomInt(10 ** (digits - 1), 10 ** digits));
+}
+
+async function storeOtp(phone: string, purpose: OtpPurpose, code: string, requestIp: string | null) {
+  // Invalidate any earlier unconsumed code for this phone and purpose, then store the new one.
+  await executeQuery("UPDATE app_otps SET consumed = 1 WHERE phone = ? AND purpose = ? AND consumed = 0", [phone, purpose]);
+  await executeQuery(
+    `INSERT INTO app_otps (phone, purpose, code, request_ip, expires_at)
+     VALUES (?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL ${OTP_TTL_SECONDS} SECOND))`,
+    [phone, purpose, code, requestIp]
+  );
+}
+
+// The review number's code never changes, so the per-code attempt limit alone
+// would let a patient guesser work through the whole code space a few
+// requests at a time. Its wrong guesses are therefore also capped per day,
+// across every code issued to it.
+const REVIEW_MAX_WRONG_PER_DAY = 10;
+
+async function assertReviewNotLocked(phone: string) {
+  const [row] = await queryRows<Row>(
+    "SELECT COALESCE(SUM(attempts), 0) AS n FROM app_otps WHERE phone = ? AND created_at > DATE_SUB(NOW(), INTERVAL 1 DAY)",
+    [phone]
+  );
+  if (Number(row?.n ?? 0) >= REVIEW_MAX_WRONG_PER_DAY) {
+    throw new RateLimitError("Too many incorrect codes for this number. Please try again tomorrow.", 3600);
+  }
+}
+
+/**
+ * Check a submitted code against the newest live code for this phone and
+ * purpose. Wrong guesses count against the code; the right one consumes it.
+ */
+async function consumeOtp(phone: string, purpose: OtpPurpose, code: string) {
+  const otps = await queryRows<Row>(
+    `SELECT id, code, attempts FROM app_otps
+      WHERE phone = ? AND purpose = ? AND consumed = 0 AND expires_at > NOW()
+      ORDER BY id DESC LIMIT 1`,
+    [phone, purpose]
+  );
+  const otp = otps[0];
+  if (!otp) {
+    throw new Error("Code expired or not found. Please request a new code.");
+  }
+  if (Number(otp.attempts) >= OTP_MAX_ATTEMPTS) {
+    throw new Error("Too many attempts. Please request a new code.");
+  }
+  if (String(otp.code) !== code) {
+    await executeQuery("UPDATE app_otps SET attempts = attempts + 1 WHERE id = ?", [otp.id]);
+    throw new Error("Incorrect code.");
+  }
+  await executeQuery("UPDATE app_otps SET consumed = 1 WHERE id = ?", [otp.id]);
+}
+
 // POST /api/v1/app/auth/request-otp  { phone }
 // Generates a one-time code, stores it (5 min expiry), and sends it via BulkSMSBD.
 // In dev mode (OTP_DEV_MODE=true) the SMS is skipped and the code is returned.
+// The Play review number (APP_REVIEW_PHONE) gets no SMS: its stored code is
+// APP_REVIEW_CODE, and the response has the ordinary shape.
 export async function requestOtp(payload: Row, requestIp: string | null = null) {
   const phone = (payload.phone ?? "").toString().trim();
   if (!/^[0-9+]{6,15}$/.test(phone)) {
@@ -146,21 +217,26 @@ export async function requestOtp(payload: Row, requestIp: string | null = null) 
   }
   await assertOtpRateLimit(phone, requestIp);
 
-  const code = String(Math.floor(1000 + Math.random() * 9000));
+  const reviewCode = reviewCodeFor(phone);
+  if (reviewCode) await assertReviewNotLocked(phone);
+  const code = reviewCode ?? newOtpCode();
+  await storeOtp(phone, "login", code, requestIp);
 
-  // Invalidate any earlier unconsumed codes for this phone, then store the new one.
-  await executeQuery("UPDATE app_otps SET consumed = 1 WHERE phone = ? AND consumed = 0", [phone]);
-  await executeQuery(
-    "INSERT INTO app_otps (phone, code, request_ip, expires_at) VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL 5 MINUTE))",
-    [phone, code, requestIp]
-  );
+  if (reviewCode) {
+    return {
+      sent: true,
+      expires_in_seconds: OTP_TTL_SECONDS,
+      dev_otp: isSmsDevMode() ? code : undefined,
+      gateway_code: null
+    };
+  }
 
   const brand = process.env.OTP_BRAND || "Shathi Sheba";
   const sms = await sendSms(phone, `${brand} OTP is ${code}`);
 
   return {
     sent: sms.ok,
-    expires_in_seconds: 300,
+    expires_in_seconds: OTP_TTL_SECONDS,
     // Only exposed in dev mode so testing works without spending SMS credits.
     dev_otp: isSmsDevMode() ? code : undefined,
     gateway_code: sms.code
@@ -188,23 +264,12 @@ export async function verifyOtpLogin(payload: Row) {
   }
   const isMaster = masterAllowed && Boolean(master) && code === master;
 
+  // Sign-in codes only: a code sent to confirm an account deletion is not a
+  // way in. The review number's static code arrives here as an ordinary
+  // stored code (requestOtp), so it is checked, limited and consumed like any
+  // other — and only ever for that one number.
   if (!isMaster) {
-    const otps = await queryRows<Row>(
-      "SELECT id, code, attempts FROM app_otps WHERE phone = ? AND consumed = 0 AND expires_at > NOW() ORDER BY id DESC LIMIT 1",
-      [phone]
-    );
-    const otp = otps[0];
-    if (!otp) {
-      throw new Error("Code expired or not found. Please request a new code.");
-    }
-    if (Number(otp.attempts) >= 5) {
-      throw new Error("Too many attempts. Please request a new code.");
-    }
-    if (String(otp.code) !== code) {
-      await executeQuery("UPDATE app_otps SET attempts = attempts + 1 WHERE id = ?", [otp.id]);
-      throw new Error("Incorrect code.");
-    }
-    await executeQuery("UPDATE app_otps SET consumed = 1 WHERE id = ?", [otp.id]);
+    await consumeOtp(phone, "login", code);
   }
 
   const existing = await queryRows<Row>(
@@ -242,6 +307,93 @@ export async function verifyOtpLogin(payload: Row) {
   );
 
   return { token, is_new: isNew, user: await buildAppUser(user) };
+}
+
+// ---------------------------------------------------------------------------
+// Account deletion from the public web page (/delete-account)
+//
+// Google Play requires a way to delete an account without the app. Owning the
+// phone is the proof, exactly as it is for signing in: a code goes to the
+// number by SMS, and the code confirms the deletion.
+// ---------------------------------------------------------------------------
+
+// The page takes a number however people write it (+880…, 880…, 01…); the app
+// stores the 11-digit form, so that is the form codes are kept under and the
+// one limits are counted on — writing the number differently cannot buy a
+// second budget. An account stored in some other form is still found.
+function deletionPhone(payload: Row): { phone: string; raw: string } {
+  const raw = (payload.phone ?? "").toString().trim();
+  const phone = canonicalPhone(raw);
+  if (!/^[0-9]{6,15}$/.test(phone)) throw new Error("A valid phone number is required.");
+  return { phone, raw };
+}
+
+async function liveAccountFor(phone: string, raw: string): Promise<Row | null> {
+  const [user] = await queryRows<Row>(
+    "SELECT id FROM app_users WHERE phone IN (?, ?) AND status <> 'deleted' ORDER BY (phone = ?) DESC LIMIT 1",
+    [phone, raw, phone]
+  );
+  return user ?? null;
+}
+
+// POST /api/v1/public/account-deletion/request-code  { phone }  ->  { ok, sent: true }
+//
+// Answers identically whether or not the number has an account, so the page
+// cannot be used to find out who is a Shathi Sheba user:
+//   * a code row is stored either way, so the resend interval and the hourly
+//     cap behave the same for both;
+//   * for a number with no account the stored code is not digits, can never
+//     be matched, and no SMS is sent;
+//   * the SMS for a real account goes out after the response (`defer`), so
+//     the gateway's latency does not separate the two cases either.
+export async function requestAccountDeletionCode(
+  payload: Row,
+  requestIp: string | null,
+  opts: { defer?: (task: () => Promise<void>) => void } = {}
+): Promise<{ sent: true }> {
+  const { phone, raw } = deletionPhone(payload);
+  await assertOtpRateLimit(phone, requestIp);
+
+  const account = await liveAccountFor(phone, raw);
+  const reviewCode = account ? reviewCodeFor(phone) : null;
+  if (reviewCode) await assertReviewNotLocked(phone);
+  const code = account ? reviewCode ?? newOtpCode(6) : `x${randomBytes(3).toString("hex")}`;
+  await storeOtp(phone, "account_deletion", code, requestIp);
+
+  // The review number receives no SMS here either; its code is the static one.
+  if (account && !reviewCode) {
+    const brand = process.env.OTP_BRAND || "Shathi Sheba";
+    const message = `${brand} account deletion code: ${code}. Do not share it. If you did not ask to delete your account, ignore this message.`;
+    const send = async () => {
+      try {
+        const sms = await sendSms(phone, message);
+        if (!sms.ok) console.error("account deletion SMS was not accepted by the gateway", sms.code);
+      } catch (error) {
+        console.error("account deletion SMS failed", error instanceof Error ? error.message : error);
+      }
+    };
+    if (opts.defer) opts.defer(send);
+    else await send();
+  }
+  return { sent: true };
+}
+
+// POST /api/v1/public/account-deletion/confirm  { phone, code }  ->  { ok, result: { deleted: true } }
+export async function confirmAccountDeletionCode(payload: Row): Promise<{ deleted: true }> {
+  const { phone, raw } = deletionPhone(payload);
+  const code = (payload.code ?? "").toString().trim();
+  if (!code) throw new Error("Enter the code we sent you.");
+  // Codes are digits. Anything else is wrong without a lookup — the same
+  // answer for every number — and it keeps the placeholder code stored for a
+  // number with no account unmatchable by construction.
+  if (!/^\d{4,8}$/.test(code)) throw new Error("Incorrect code.");
+  await consumeOtp(phone, "account_deletion", code);
+
+  // A code that matched was sent to a live account. It can only be missing
+  // now if it was deleted in the meantime, which is the outcome asked for.
+  const account = await liveAccountFor(phone, raw);
+  if (account) await deleteAccount(Number(account.id), "web");
+  return { deleted: true };
 }
 
 // POST /api/v1/app/profile  { user_id, full_name, gender, date_of_birth?, profile_image_url? }

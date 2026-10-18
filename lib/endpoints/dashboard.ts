@@ -19,15 +19,16 @@ export async function getDashboardOverview() {
     });
   }
   const since = `${months[0].key}-01`;
-  const monthly = async (table: string) => {
+  const monthly = async (table: string, extra = "") => {
     const rows = await queryRows<Row>(
-      `SELECT DATE_FORMAT(created_at, '%Y-%m') AS ym, COUNT(*) AS n FROM ${table} WHERE created_at >= ? GROUP BY ym`,
+      `SELECT DATE_FORMAT(created_at, '%Y-%m') AS ym, COUNT(*) AS n FROM ${table} WHERE created_at >= ? ${extra} GROUP BY ym`,
       [since]
     );
     return new Map(rows.map((r) => [String(r.ym), Number(r.n)]));
   };
+  // Farmers are live accounts: a deleted one is not counted, here or in the stats.
   const [orders, listings, enrollments, farmers] = await Promise.all([
-    monthly("orders"), monthly("sale_listings"), monthly("partner_applications"), monthly("app_users")
+    monthly("orders"), monthly("sale_listings"), monthly("partner_applications"), monthly("app_users", "AND status <> 'deleted'")
   ]);
   const trend = months.map((m) => ({
     month: m.label,
@@ -52,7 +53,7 @@ export async function getDashboardOverview() {
         LEFT JOIN partner_projects p ON p.id = a.partner_project_id ORDER BY a.created_at DESC LIMIT 6)
      UNION ALL
      (SELECT 'farmer', CAST(u.id AS CHAR), u.phone, u.full_name, COALESCE(u.district, ''), u.status, u.created_at
-        FROM app_users u ORDER BY u.created_at DESC LIMIT 6)
+        FROM app_users u WHERE u.status <> 'deleted' ORDER BY u.created_at DESC LIMIT 6)
      ORDER BY at DESC LIMIT 10`
   );
 

@@ -8,6 +8,10 @@ import {
   computeQuote, generateSchedule, clampAmount, installmentCount,
   type ProductTerms, type RepaymentMode,
 } from "@/lib/finance/pricing-engine";
+import {
+  MIN_FULL_REPAYMENT_DAYS, fullRepaymentDays, isOffered, productDisclosure, termsFromRow,
+} from "@/lib/finance/disclosure";
+import { isReviewPhone } from "@/lib/review-account";
 import { assertOperational, ZoneInactiveError } from "@/lib/operational";
 import { LocationRequiredError } from "@/lib/geo-scope";
 import { resolveGeoIds, toGeoId } from "@/lib/geo";
@@ -415,12 +419,19 @@ export async function getLoanProducts() {
     if (typeof v === "string" && v.trim()) { try { return JSON.parse(v); } catch { return []; } }
     return [];
   };
+  // Play's Financial Services disclosure (repayment period, maximum APR,
+  // representative cost), from the same engine that quotes. Read from the full
+  // rows so the fee and penalty columns it needs do not leak into the product
+  // shape the app already consumes.
+  const full = await queryRows<Row>("SELECT * FROM loan_products WHERE is_active = 1");
+  const disclosures = new Map(full.map((r) => [String(r.id), isOffered(r) ? productDisclosure(r) : null]));
   return rows.map((r) => ({
     ...r,
     allowed_tenures: parse(r.allowed_tenures_json),
     allowed_repayment_modes: parse(r.allowed_repayment_modes_json),
     is_active: Number(r.is_active) === 1,
     coming_soon: Number(r.coming_soon) === 1,
+    disclosure: disclosures.get(String(r.id)) ?? null,
   }));
 }
 
@@ -429,18 +440,7 @@ async function productTerms(productId: string | number): Promise<{ row: Row; ter
   const row = rows[0];
   if (!row) throw new Error("That finance product was not found.");
   if (Number(row.is_active) !== 1) throw new Error("That finance product is not available yet.");
-  return {
-    row,
-    terms: {
-      interest_rate_annual: Number(row.interest_rate_annual),
-      interest_method: row.interest_method as ProductTerms["interest_method"],
-      weeks_per_month: Number(row.weeks_per_month || 4),
-      first_payment_offset_days: Number(row.first_payment_offset_days || 30),
-      grace_period_months: Number(row.grace_period_months || 0),
-      processing_fee_pct: Number(row.processing_fee_pct || 0),
-      processing_fee_flat: Number(row.processing_fee_flat || 0),
-    },
-  };
+  return { row, terms: termsFromRow(row) };
 }
 
 // POST app/finance/quote — the EMI calculator. Every quote shown is persisted so
@@ -481,6 +481,13 @@ export async function createQuote(payload: Row, persist = true) {
   }
 
   const quote = computeQuote(amount, tenure, mode, terms);
+
+  // Google Play does not allow a loan that must be repaid in full within 60
+  // days. Nothing configured today comes close (the shortest is four months);
+  // this keeps a future product setting from quietly breaking that.
+  if (fullRepaymentDays(quote, terms) < MIN_FULL_REPAYMENT_DAYS) {
+    throw new Error("That repayment period is too short to offer.");
+  }
 
   // An approximate first due date until disbursement is known (MOB-LON-08C).
   const firstDue = new Date(Date.now() + terms.first_payment_offset_days * 86400_000)
@@ -579,6 +586,21 @@ async function loanCheckin(payload: Row, profile: Row | undefined): Promise<Loan
       review: "Filed by staff on the farmer's behalf — no GPS check-in was taken."
     };
   }
+  // The Google Play review account (APP_REVIEW_PHONE): the reviewer is not in
+  // Bangladesh, so a physical check-in can never place them in the profile's
+  // district. Only the fix is skipped — the zone rule ran before this, and the
+  // application is flagged for an officer like any other unchecked one.
+  // Decided from the stored phone of the signed-in account, never the body.
+  if (isReviewPhone(profile?.phone)) {
+    return {
+      status: "not_required",
+      lat: null,
+      lng: null,
+      district_id: toGeoId(profile?.district_id),
+      upazila_id: toGeoId(profile?.upazila_id),
+      review: "App-store review account — the GPS check-in was skipped."
+    };
+  }
   const lat = payload.checkin_lat == null || payload.checkin_lat === "" ? NaN : Number(payload.checkin_lat);
   const lng = payload.checkin_lng == null || payload.checkin_lng === "" ? NaN : Number(payload.checkin_lng);
   if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0)) {
@@ -618,7 +640,7 @@ export async function createLoanApplication(payload: Row) {
   // and check in by GPS. The covering officer is assigned to the application.
   const operational = await assertOperational(userId, "loan_applications");
   const [profile] = await queryRows<Row>(
-    "SELECT village, district_id, upazila_id FROM app_users WHERE id = ? LIMIT 1", [userId]
+    "SELECT village, district_id, upazila_id, phone FROM app_users WHERE id = ? LIMIT 1", [userId]
   );
   if (!String(profile?.village ?? "").trim()) {
     throw new LocationRequiredError("Add your village or address to your profile before applying for a loan.");

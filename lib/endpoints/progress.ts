@@ -24,6 +24,11 @@ export type ProgressState = "done" | "current" | "upcoming";
 // Notes are shown as-is in the app, so each has a Bangla twin with Bangla digits.
 const BN_DIGITS = "০১২৩৪৫৬৭৮৯";
 const bnDigits = (v: unknown) => String(v ?? "").replace(/[0-9]/g, (d) => BN_DIGITS[Number(d)]);
+const EN_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const BN_MONTHS = ["জানুয়ারি", "ফেব্রুয়ারি", "মার্চ", "এপ্রিল", "মে", "জুন", "জুলাই", "আগস্ট", "সেপ্টেম্বর", "অক্টোবর", "নভেম্বর", "ডিসেম্বর"];
+/** "2026-10-15" → "15 Oct 2026" / "১৫ অক্টোবর ২০২৬". A farmer reads a date, not an ISO string. */
+const dayEn = (iso: string) => { const [y, m, d] = iso.split("-").map(Number); return `${d} ${EN_MONTHS[m - 1]} ${y}`; };
+const dayBn = (iso: string) => { const [y, m, d] = iso.split("-").map(Number); return `${bnDigits(d)} ${BN_MONTHS[m - 1]} ${bnDigits(y)}`; };
 
 export type ProgressStep = {
   key: string;
@@ -167,8 +172,13 @@ export async function getListingProgress(listingId?: string | null, userId?: str
         title_bn: "মাঠ যাচাই",
         // Once a date is set the farmer is told the date instead of the
         // three-day promise — a specific date is the more useful answer.
-        desc_en: visitDate ? `Officer visiting on ${visitDate}` : "Officer within 3 working days",
-        desc_bn: visitDate ? `কর্মকর্তা আসবেন ${visitDate}` : "কর্মকর্তা ৩ কর্মদিনে",
+        // Once the visit has happened, say so — "will visit on" a past date reads as a mistake.
+        desc_en: visitDate
+          ? listing.verified_at ? `Officer visited on ${dayEn(visitDate)}` : `Officer visiting on ${dayEn(visitDate)}`
+          : "Officer within 3 working days",
+        desc_bn: visitDate
+          ? listing.verified_at ? `কর্মকর্তা পরিদর্শন করেছেন ${dayBn(visitDate)}` : `কর্মকর্তা আসবেন ${dayBn(visitDate)}`
+          : "কর্মকর্তা ৩ কর্মদিনে",
         date: isoDay(listing.verified_at) ?? visitDate,
         note: (listing.field_visit_note as string) ?? null
       },

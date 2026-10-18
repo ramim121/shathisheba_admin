@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 // All uploads (admin panel + mobile app, via /api/upload) land in one S3 bucket.
@@ -30,7 +30,7 @@ function bucket(): string {
   return process.env.S3_BUCKET_NAME as string;
 }
 
-function publicBase(): string {
+export function publicBase(): string {
   const base = process.env.S3_PUBLIC_URL || `https://${bucket()}.s3.${process.env.S3_BUCKET_REGION || "ap-southeast-1"}.amazonaws.com`;
   return base.replace(/\/$/, "");
 }
@@ -63,4 +63,16 @@ export async function uploadToS3(opts: {
 export async function presignKycGet(name: string, expiresInSeconds = 300): Promise<string> {
   const command = new GetObjectCommand({ Bucket: bucket(), Key: `kyc/${name}` });
   return getSignedUrl(getClient(), command, { expiresIn: expiresInSeconds });
+}
+
+/** The bucket's own virtual-hosted URL, whatever S3_PUBLIC_URL says. */
+export function bucketUrl(): string {
+  return `https://${bucket()}.s3.${process.env.S3_BUCKET_REGION || "ap-southeast-1"}.amazonaws.com`;
+}
+
+// Remove one object. Used by account deletion, which decides which keys are
+// safe to remove (lib/stored-files.ts) — this only does the call. S3 answers a
+// delete of a missing key with success, so "deleted" means "no longer there".
+export async function deleteS3Object(key: string): Promise<void> {
+  await getClient().send(new DeleteObjectCommand({ Bucket: bucket(), Key: key }));
 }

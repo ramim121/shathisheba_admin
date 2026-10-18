@@ -36,7 +36,8 @@ export async function searchFarmers(query?: string | null, limit = 20) {
               WHERE a.user_id = u.id
                 AND a.status NOT IN ('closed','withdrawn','cancelled','lender_declined','ineligible')) AS open_loans
        FROM app_users u
-      WHERE (? = '' OR u.full_name LIKE ? OR u.phone LIKE ? OR CAST(u.id AS CHAR) = ?)
+      WHERE u.status <> 'deleted'
+        AND (? = '' OR u.full_name LIKE ? OR u.phone LIKE ? OR CAST(u.id AS CHAR) = ?)
       ORDER BY (u.full_name LIKE ?) DESC, u.created_at DESC
       LIMIT ?`,
     [q, like, like, q, like, limit]

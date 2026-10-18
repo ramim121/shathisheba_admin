@@ -4,7 +4,13 @@ import { NextRequest, NextResponse } from "next/server";
 // the edge; the cookie is httpOnly and unforgeable token-wise (validated against
 // admin_sessions in /api/admin/me and server helpers). The mobile API (/api/v1/*)
 // and the admin auth endpoints (/api/admin/*) are intentionally left open here.
-const PUBLIC_PREFIXES = ["/login", "/api", "/_next", "/favicon", "/globals.css"];
+// The four public pages Google Play links to — privacy policy, terms, account
+// deletion and the loan cost disclosure — must load for anyone, without the
+// console's cookie.
+const PUBLIC_PREFIXES = [
+  "/login", "/api", "/_next", "/favicon", "/globals.css",
+  "/privacy", "/terms", "/delete-account", "/loan-disclosure"
+];
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;

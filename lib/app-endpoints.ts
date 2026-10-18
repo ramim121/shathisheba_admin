@@ -1007,7 +1007,7 @@ export async function getAppProfileUsers(userId?: string | null) {
       SELECT CAST(id AS CHAR) AS id, display_name, full_name, phone,
              email, district, upazila, status
       FROM app_users
-      WHERE (? IS NULL OR id = ?)
+      WHERE (? IS NULL OR id = ?) AND status <> 'deleted'
       ORDER BY (? IS NOT NULL AND id = ?) DESC, created_at DESC
       LIMIT 20
     `,
@@ -1058,6 +1058,7 @@ export async function getUsersWithRoles() {
              COALESCE(GROUP_CONCAT(r.role ORDER BY r.role SEPARATOR ','), '') AS roles
       FROM app_users u
       LEFT JOIN app_user_roles r ON r.user_id = u.id
+      WHERE u.status <> 'deleted'
       GROUP BY u.id
       ORDER BY u.created_at DESC
       LIMIT 500
@@ -1138,8 +1139,8 @@ export async function getMyOrders(userId?: string | null) {
 export async function getAdminStats() {
   const rows = await queryRows<Row>(
     `SELECT
-       (SELECT COUNT(*) FROM app_users) AS farmers,
-       (SELECT COUNT(*) FROM app_users WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)) AS farmers_30d,
+       (SELECT COUNT(*) FROM app_users WHERE status <> 'deleted') AS farmers,
+       (SELECT COUNT(*) FROM app_users WHERE status <> 'deleted' AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)) AS farmers_30d,
        (SELECT COUNT(*) FROM sale_listings WHERE status IN ('submitted','field_verification','verified','contracted','shipped')) AS listings_active,
        (SELECT COUNT(*) FROM sale_listings WHERE status NOT IN ('cancelled','rejected')) AS listings_total,
        (SELECT COUNT(*) FROM orders) AS orders_total,

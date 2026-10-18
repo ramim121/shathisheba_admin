@@ -45,10 +45,21 @@ export const PUBLIC_READS = new Set<string>([
   // The project showcase on digigramventures.com. Deliberately NOT
   // "app/projects/active", which is region- and interest-personalised and
   // takes a user_id; this one carries no personal dimension at all.
-  "app/projects/public"
+  "app/projects/public",
+  // Loan cost disclosure (Play's Financial Services policy): APR range,
+  // repayment periods, fees and a representative example. Product terms only.
+  "public/loan-disclosure"
 ]);
 
-export const PUBLIC_WRITES = new Set<string>(["app/auth/request-otp", "app/auth/verify-otp"]);
+// The auth bootstrap, and the public account-deletion page (Play requires one
+// reachable without the app). Deletion is proven by a code sent to the phone,
+// the same proof as signing in, so it needs no token.
+export const PUBLIC_WRITES = new Set<string>([
+  "app/auth/request-otp",
+  "app/auth/verify-otp",
+  "public/account-deletion/request-code",
+  "public/account-deletion/confirm"
+]);
 
 export const ADMIN_ONLY = new Set<string>([
   "admin/users",
@@ -139,6 +150,7 @@ export const ADMIN_ONLY = new Set<string>([
   "loan/assessments",
   "admin/users/clear-records",
   "admin/users/clear-records/preview",
+  "admin/users/delete-account",
   "orders/payments",
   "community/reports",
   "sale/confirmations",
@@ -288,6 +300,12 @@ export function checkAccess(
   rawResource: string,
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE"
 ): AccessDecision {
+  // A public write is public to every caller. The public pages share a domain
+  // with the console, so a staff member's admin cookie rides along on the
+  // delete-account form; without this it would be judged as an admin write and
+  // refused to every role but super_admin.
+  if (method === "POST" && PUBLIC_WRITES.has(policyKey(rawResource))) return ALLOW;
+
   if (caller.kind === "admin") {
     // Reads stay open to any admin; writes are constrained by role.
     if (method === "GET") return ALLOW;

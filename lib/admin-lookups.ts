@@ -38,6 +38,7 @@ const LOOKUPS: Record<string, string> = {
            CONCAT(full_name, ' · ', phone) AS label,
            COALESCE(district, 'Unassigned') AS \`group\`
     FROM app_users
+    WHERE status <> 'deleted'
     ORDER BY full_name
     LIMIT 500
   `,

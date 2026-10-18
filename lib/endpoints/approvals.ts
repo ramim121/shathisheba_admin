@@ -442,6 +442,11 @@ async function applyApprovalDecision(payload: Row) {
     return { type, id: String(id), status: approve ? "verified" : "rejected", user_kyc_verified: kycVerified };
   }
   if (type === "user") {
+    // A deleted account is closed for good: approving it would bring back a
+    // login for an anonymised row, so it is refused rather than reactivated.
+    const [target] = await queryRows<Row>("SELECT status FROM app_users WHERE id = ? LIMIT 1", [id]);
+    if (!target) throw new Error("User not found.");
+    if (target.status === "deleted") throw new Error("This account has been deleted and cannot be approved or suspended.");
     await executeQuery("UPDATE app_users SET status = ? WHERE id = ?", [approve ? "active" : "suspended", id]);
     if (approve) {
       // Approving a user automatically grants the seller role.

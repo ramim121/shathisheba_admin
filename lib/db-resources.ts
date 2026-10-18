@@ -1097,6 +1097,7 @@ const configs: Record<string, ResourceConfig> = {
         u.status
       FROM app_users u
       LEFT JOIN app_user_roles r ON r.user_id = u.id
+      WHERE u.status <> 'deleted'
       GROUP BY u.id
       ORDER BY u.created_at DESC
     `,

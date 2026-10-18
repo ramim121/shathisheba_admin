@@ -1,0 +1,393 @@
+/* ===========================================================================
+   Public pages — /privacy, /terms, /delete-account, /loan-disclosure.
+
+   These are read by farmers on a phone (opened from the app) and by Google
+   Play's reviewers, never inside the console shell. Reading comfort comes
+   first: 16px body text, a 760px measure, generous line height, and every
+   control at least --h-lg tall. Everything is scoped under .pub so nothing
+   here can reach a console screen.
+   =========================================================================== */
+
+.pub {
+  min-height: 100vh;
+  background: var(--pub-canvas);
+  color: var(--ink-900);
+  font-size: var(--fs-reading);
+  line-height: var(--lh-reading);
+}
+
+.pub a {
+  color: var(--pub-brand);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* Laid out like the app's transactional email: the wordmark on a white bar,
+   the title on a maroon band beneath it. */
+.pub-header {
+  border-bottom: 1px solid var(--pub-line);
+  background: var(--surface);
+}
+
+.pub-header-inner,
+.pub-hero-inner {
+  max-width: var(--pub-measure);
+  margin: 0 auto;
+  padding: var(--s3) var(--s4);
+}
+
+.pub-header-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+}
+
+.pub .pub-brand {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+
+.pub-logo {
+  display: block;
+  height: 40px;
+  width: auto;
+}
+
+.pub-lang {
+  display: inline-flex;
+  flex: none;
+  border: 1px solid var(--pub-line);
+  border-radius: var(--r-pill);
+  overflow: hidden;
+}
+
+.pub .pub-lang a {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--h-md);
+  padding: 0 var(--s3);
+  color: var(--pub-brand);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+  text-decoration: none;
+}
+
+.pub .pub-lang a[aria-current="true"] {
+  background: var(--pub-brand);
+  color: var(--surface);
+}
+
+.pub-hero {
+  background: var(--pub-brand);
+  color: var(--surface);
+}
+
+.pub-hero-inner {
+  padding-top: var(--s6);
+  padding-bottom: var(--s8);
+}
+
+.pub-hero h1 {
+  margin: 0 0 var(--s2);
+  font-size: var(--fs-2xl);
+  font-weight: var(--fw-bold);
+}
+
+.pub-hero p {
+  margin: 0;
+  color: var(--pub-brand-tint);
+}
+
+.pub-updated {
+  margin-top: var(--s2);
+  font-size: var(--fs-md);
+}
+
+.pub-main {
+  max-width: var(--pub-measure);
+  margin: calc(-1 * var(--s6)) auto 0;
+  padding: 0 var(--s4) var(--s9);
+}
+
+.pub-card {
+  margin-bottom: var(--s4);
+  padding: var(--s5);
+  border: 1px solid var(--pub-line);
+  border-radius: var(--r-xl);
+  background: var(--surface);
+  box-shadow: var(--e1);
+}
+
+.pub-card > :last-child {
+  margin-bottom: 0;
+}
+
+.pub-card h2 {
+  margin: 0 0 var(--s3);
+  color: var(--pub-brand);
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-bold);
+}
+
+.pub-card h3 {
+  margin: var(--s4) 0 var(--s2);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+}
+
+.pub-card p {
+  margin: 0 0 var(--s3);
+}
+
+.pub-card ul,
+.pub-card ol {
+  margin: 0 0 var(--s3);
+  padding-left: var(--s6);
+}
+
+.pub-card li {
+  margin-bottom: var(--s2);
+}
+
+.pub-card strong {
+  font-weight: var(--fw-semibold);
+}
+
+.pub-toc ol {
+  margin: 0;
+  columns: 2 220px;
+}
+
+/* ---- loan figures ------------------------------------------------------- */
+
+.pub-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
+  gap: var(--s3);
+  margin-bottom: var(--s3);
+}
+
+.pub-stat {
+  padding: var(--s4);
+  border: 1px solid var(--pub-line);
+  border-radius: var(--r-lg);
+  background: var(--pub-canvas);
+}
+
+.pub-stat-label {
+  display: block;
+  color: var(--pub-muted);
+  font-size: var(--fs-md);
+}
+
+.pub-stat-value {
+  display: block;
+  color: var(--pub-brand);
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-bold);
+  line-height: var(--lh-snug);
+}
+
+/* Written against .pub-card so it outranks the card's own list indent. */
+.pub-card .pub-rows {
+  margin: 0 0 var(--s3);
+  padding: 0;
+  list-style: none;
+}
+
+.pub-card .pub-rows li {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s4);
+  margin: 0;
+  padding: var(--s2) 0;
+  border-bottom: 1px solid var(--pub-line);
+}
+
+.pub-rows li > span:last-child {
+  font-weight: var(--fw-semibold);
+  text-align: right;
+}
+
+.pub-products {
+  display: grid;
+  gap: var(--s3);
+  margin: 0 0 var(--s3);
+}
+
+.pub-product {
+  padding: var(--s4);
+  border: 1px solid var(--pub-line);
+  border-radius: var(--r-lg);
+}
+
+.pub-product h3 {
+  margin: 0 0 var(--s2);
+}
+
+/* ---- notices and the deletion form ---------------------------------------- */
+
+.pub-note {
+  margin: 0 0 var(--s3);
+  padding: var(--s3) var(--s4);
+  border: 1px solid var(--info-line);
+  border-radius: var(--r-md);
+  background: var(--info-bg);
+  color: var(--info-fg);
+}
+
+.pub-note.is-ok {
+  border-color: var(--ok-line);
+  background: var(--ok-bg);
+  color: var(--ok-fg);
+}
+
+.pub-note.is-bad {
+  border-color: var(--bad-line);
+  background: var(--bad-bg);
+  color: var(--bad-fg);
+}
+
+.pub-note.is-warn {
+  border-color: var(--warn-line);
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+}
+
+.pub-form {
+  display: grid;
+  gap: var(--s4);
+}
+
+.pub-field {
+  display: grid;
+  gap: var(--s1);
+}
+
+.pub-field label {
+  font-weight: var(--fw-semibold);
+}
+
+.pub-field-hint {
+  color: var(--pub-muted);
+  font-size: var(--fs-md);
+}
+
+/* 16px inputs: a smaller size makes mobile browsers zoom the page on focus. */
+.pub .pub-field input {
+  height: var(--h-lg);
+  font-size: var(--fs-reading);
+  letter-spacing: 0.02em;
+}
+
+.pub-check {
+  display: flex;
+  gap: var(--s2);
+  align-items: flex-start;
+}
+
+.pub-check input {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin-top: 3px;
+  accent-color: var(--pub-brand);
+}
+
+.pub-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s3);
+  align-items: center;
+}
+
+.pub-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--h-lg);
+  padding: 0 var(--s5);
+  border: 0;
+  border-radius: var(--r-md);
+  background: var(--pub-brand);
+  color: var(--surface);
+  font-size: var(--fs-reading);
+  font-weight: var(--fw-semibold);
+}
+
+.pub-btn:hover:not(:disabled) {
+  background: var(--pub-brand-deep);
+}
+
+.pub-btn.is-danger {
+  background: var(--bad-solid);
+}
+
+.pub-btn.is-danger:hover:not(:disabled) {
+  background: var(--bad-fg);
+}
+
+.pub-btn:disabled {
+  opacity: 0.55;
+}
+
+.pub-link-btn {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--pub-brand);
+  font-size: var(--fs-md);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.pub-link-btn:disabled {
+  color: var(--pub-muted);
+  text-decoration: none;
+}
+
+/* ---- footer --------------------------------------------------------------- */
+
+.pub-footer {
+  border-top: 1px solid var(--pub-line);
+  background: var(--surface);
+  color: var(--pub-muted);
+  font-size: var(--fs-md);
+}
+
+.pub-footer-inner {
+  max-width: var(--pub-measure);
+  margin: 0 auto;
+  padding: var(--s6) var(--s4);
+}
+
+.pub-footer nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2) var(--s4);
+  margin-bottom: var(--s3);
+}
+
+.pub-footer p {
+  margin: 0 0 var(--s1);
+}
+
+@media (max-width: 420px) {
+  .pub-hero h1 {
+    font-size: var(--fs-xl);
+  }
+
+  .pub-card {
+    padding: var(--s4);
+  }
+
+  .pub-btn {
+    width: 100%;
+  }
+
+  .pub-logo {
+    height: 34px;
+  }
+}

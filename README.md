@@ -147,6 +147,19 @@ OTP_DEV_MODE=false
 # Master code that verifies any number. Refused outright when NODE_ENV=production.
 # Leave empty.
 OTP_DEV_MASTER=
+
+# Google Play review sign-in (optional; lib/review-account.ts). Play's reviewers
+# have no Bangladeshi SIM. For this ONE number: request-code sends no SMS and
+# stores APP_REVIEW_CODE as the code; verify accepts it the ordinary way (it
+# still expires, still allows 5 tries per code, and wrong guesses are capped at
+# 10 a day) — in production too. A loan application from this account may skip
+# the physical GPS check-in; zone rules still apply. No other number is affected.
+# APP_REVIEW_PHONE: 11-digit local form (01XXXXXXXXX), a number no real
+#                   subscriber has. APP_REVIEW_CODE: 4-6 digits.
+# Put the real values only in the server's environment, never in the repo;
+# leave both empty when no review is in progress.
+APP_REVIEW_PHONE=
+APP_REVIEW_CODE=
 ```
 
 **Admin authentication does not use NextAuth.** Sessions are rows in

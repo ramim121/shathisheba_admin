@@ -179,6 +179,21 @@
   --t-fast: 120ms cubic-bezier(0.2, 0, 0.2, 1);
   --t-base: 180ms cubic-bezier(0.2, 0, 0.2, 1);
 
+  /* ---- public pages ----------------------------------------------------
+     /privacy, /terms, /delete-account and /loan-disclosure are reached from
+     the app and from Google Play, not from the console, so they wear the
+     app's own maroon and the canvas of its transactional email rather than
+     the console's palette. Used only by app/styles/public.css. */
+  --pub-brand: #871449;
+  --pub-brand-deep: #6a0f39;
+  --pub-brand-tint: #f9d7e6;
+  --pub-canvas: #f6eef2;
+  --pub-line: #e8d7df;
+  --pub-muted: #8a4b69;
+  --fs-reading: 16px;
+  --lh-reading: 1.65;
+  --pub-measure: 760px;
+
   /* ---- legacy aliases (still referenced by pages and inline styles) ----- */
   --ink: var(--ink-900);
   --muted: var(--ink-500);

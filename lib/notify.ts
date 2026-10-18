@@ -102,10 +102,13 @@ type Message = {
   email?: { subject: string; html: string; text: string } | null;
 };
 
+// A deleted account is nobody to tell: a staff action on one of its kept
+// (anonymised) records must not start writing an inbox for it again.
 async function loadRecipients(ids: number[]): Promise<Recipient[]> {
   if (!ids.length) return [];
   const rows = await queryRows<Row>(
-    `SELECT id, COALESCE(display_name, full_name) AS name, email, app_lang FROM app_users WHERE id IN (${ids.map(() => "?").join(",")})`,
+    `SELECT id, COALESCE(display_name, full_name) AS name, email, app_lang FROM app_users
+      WHERE status <> 'deleted' AND id IN (${ids.map(() => "?").join(",")})`,
     ids
   );
   return rows.map((r) => ({
@@ -243,8 +246,8 @@ export async function testTemplate(eventKey: string, userId: unknown) {
 export async function notificationStatus() {
   const [counts] = await queryRows<Row>(
     `SELECT (SELECT COUNT(*) FROM push_devices WHERE is_active = 1) AS devices,
-            (SELECT COUNT(*) FROM app_users WHERE email IS NOT NULL AND email <> '') AS users_with_email,
-            (SELECT COUNT(*) FROM app_users) AS users`
+            (SELECT COUNT(*) FROM app_users WHERE status <> 'deleted' AND email IS NOT NULL AND email <> '') AS users_with_email,
+            (SELECT COUNT(*) FROM app_users WHERE status <> 'deleted') AS users`
   );
   const push = pushProviders();
   return {
@@ -259,12 +262,12 @@ export async function notificationStatus() {
 
 export const AUDIENCE_ROLES = ["shathisheba_seller", "shathisheba_buyer", "field_officer", "project_member"] as const;
 
-/** The app users a broadcast reaches. Suspended accounts never receive one. */
+/** The app users a broadcast reaches. Suspended and deleted accounts never receive one. */
 export async function audienceUserIds(target: string, roles: string[] = [], userIds: Array<string | number> = []): Promise<number[]> {
   if (target === "users") {
     const ids = userIds.map(Number).filter((n) => Number.isInteger(n) && n > 0);
     if (!ids.length) return [];
-    const rows = await queryRows<Row>(`SELECT id FROM app_users WHERE status <> 'suspended' AND id IN (${ids.map(() => "?").join(",")})`, ids);
+    const rows = await queryRows<Row>(`SELECT id FROM app_users WHERE status NOT IN ('suspended', 'deleted') AND id IN (${ids.map(() => "?").join(",")})`, ids);
     return rows.map((r) => Number(r.id));
   }
   if (target === "roles") {
@@ -279,12 +282,12 @@ export async function audienceUserIds(target: string, roles: string[] = [], user
     }
     if (wanted.includes("project_member")) parts.push("SELECT user_id FROM partner_applications WHERE status = 'approved'");
     const rows = await queryRows<Row>(
-      `SELECT DISTINCT u.id FROM app_users u JOIN (${parts.join(" UNION ")}) x ON x.user_id = u.id WHERE u.status <> 'suspended'`,
+      `SELECT DISTINCT u.id FROM app_users u JOIN (${parts.join(" UNION ")}) x ON x.user_id = u.id WHERE u.status NOT IN ('suspended', 'deleted')`,
       params
     );
     return rows.map((r) => Number(r.id));
   }
-  const rows = await queryRows<Row>("SELECT id FROM app_users WHERE status <> 'suspended'");
+  const rows = await queryRows<Row>("SELECT id FROM app_users WHERE status NOT IN ('suspended', 'deleted')");
   return rows.map((r) => Number(r.id));
 }
 

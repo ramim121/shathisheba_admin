@@ -49,6 +49,8 @@ export async function queueRepaymentReminders(ctx: Ctx) {
      JOIN app_users u ON u.id = acc.user_id
      JOIN loan_applications a ON a.id = acc.application_id
      WHERE acc.status = 'active'
+       -- A deleted account has no phone to remind; its loan stays on the books.
+       AND u.status <> 'deleted'
        AND acc.next_due_date IS NOT NULL
        AND acc.outstanding_total > 0
        AND (DATEDIFF(acc.next_due_date, CURDATE()) IN (3, 0)
@@ -139,6 +141,7 @@ export async function dispatchFinanceNotifications(ctx: Ctx, limit = 100) {
      FROM finance_notifications n
      JOIN app_users u ON u.id = n.user_id
      WHERE n.status = 'queued' AND n.scheduled_for <= NOW() AND n.attempts < 3
+       AND u.status <> 'deleted'
      ORDER BY n.scheduled_for LIMIT ?`,
     [limit]
   );

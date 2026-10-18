@@ -19,6 +19,7 @@ utility layers and then the handwritten layers in order:
 | `app/styles/feedback.css` | status pills, badges, notices, banners, drawers |
 | `app/styles/modules.css` | screen-specific modules (notifications, broadcasts, partner strip, geography, approvals queue, sale workflow) |
 | `app/styles/screens.css` | the loan workspace, loan queue, credit dashboard, collections, lender pipeline, API viewer, community moderation |
+| `app/styles/public.css` | the public pages Google Play links to (`/privacy`, `/terms`, `/delete-account`, `/loan-disclosure`) — scoped under `.pub`, on the app's maroon (`--pub-*` tokens), never inside the console shell |
 
 Five components keep their own file next to them, imported from the component:
 `components/admin-forms.css`, `components/listing-workflow.css`,
